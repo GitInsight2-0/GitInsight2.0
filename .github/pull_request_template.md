@@ -12,9 +12,9 @@ Closes #
 
 ## 확인 방법
 
-- [ ] `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build` 통과
-- [ ] Cloudflare Workers 미리보기 URL에서 변경된 화면과 주요 경로 확인
-- [ ] [CONTRIBUTING.md의 PR 전 자기 검토 체크리스트](https://github.com/AI-healthCare-Team5/Team5-FE/blob/main/CONTRIBUTING.md#pr-전-자기-검토-체크리스트)에서 변경 범위에 해당하는 항목 확인
+- [ ] AGENTS.md의 "명령"에 적힌 검사 통과
+- [ ] CONTRIBUTING.md의 "PR 전 자기 검토 체크리스트"에서 변경 범위에 해당하는 항목 확인
+- [ ] 모듈 간 계약을 바꿨다면 두 명의 승인 요청
 - 직접 확인한 시나리오:
 - 확인하지 못한 것:
 
