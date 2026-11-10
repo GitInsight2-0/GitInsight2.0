@@ -13,7 +13,12 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 
-from gitinsight_api.brain.factory import build_fixture_brain, build_judge_llm
+from gitinsight_api.brain.factory import (
+    build_fixture_brain,
+    build_judge_llm,
+    build_report_llm,
+    build_report_service,
+)
 from gitinsight_api.llm import InMemoryCostRecorder
 from gitinsight_api.settings import Settings
 from gitinsight_contracts.analysis import CONTRIBUTION_LABEL_TEXT
@@ -25,6 +30,8 @@ from gitinsight_contracts.interview import (
     TurnRequest,
     TurnSource,
 )
+from gitinsight_contracts.llm import COMPETENCY_TEXT
+from gitinsight_contracts.report import Report
 
 
 def render(reply: BrainReply) -> str:
@@ -33,6 +40,26 @@ def render(reply: BrainReply) -> str:
         h = reply.highlight
         lines.append(f"  코드: {h.path}:{h.start_line}-{h.end_line} ({h.name})")
     lines.append(f"  주제: {reply.topic_id}, 깊이 {reply.depth}, 남은 시간 {reply.remaining_sec}초")
+    return "\n".join(lines)
+
+
+def render_report(report: Report) -> str:
+    lines = [f"\n=== 리포트 ({report.kind.value}) ==="]
+    for score in report.competencies:
+        lines.append(f"- {COMPETENCY_TEXT[score.name]}: {score.level}/4")
+        lines.extend(f'    근거: "{e.quote}"' for e in score.evidence)
+    for topic in report.topics:
+        lines.append(
+            f"- 주제 {topic.topic_id}: 다룸 {len(topic.covered)}개, 빠짐 {len(topic.missing)}개"
+        )
+        lines.extend(f"    {link.url}" for link in topic.code_links)
+    for title, items in (
+        ("강점", report.strengths),
+        ("보완점", report.improvements),
+        ("다음 주제", report.next_topics),
+    ):
+        if items:
+            lines.append(f"- {title}: " + " / ".join(items))
     return "\n".join(lines)
 
 
@@ -76,6 +103,12 @@ async def run(args: argparse.Namespace) -> int:
     turns = await brain.repository.list_turns(session_id)
     fallbacks = [t.fallback_reason.value for t in turns if t.fallback_reason is not None]
     print(f"\n턴 {len(turns)}개, 대체 진행 {len(fallbacks)}회 {fallbacks}")
+
+    report_llm = build_report_llm(settings, recorder) if args.real_llm else None
+    report = await build_report_service(
+        settings, brain, analysis, llm=report_llm, force_prepared=args.force_prepared
+    ).end_session(session_id)
+    print(render_report(report))
     if args.real_llm:
         print(f"LLM 호출 {len(recorder.records)}회, 비용 약 ${recorder.total_usd():.4f}")
     return 0
