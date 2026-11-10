@@ -47,6 +47,7 @@ def build_report_service(
             report_model=settings.llm_report_model,
             judge_model=settings.llm_judge_model,
             force_prepared=force_prepared or settings.brain_force_prepared or llm is None,
+            quote_matcher=settings.quote_matcher(),
         ),
     )
 
@@ -71,4 +72,5 @@ def build_fixture_brain(
         judge_model=settings.llm_judge_model,
         plan_model=settings.llm_analysis_model,
         force_prepared=force_prepared or settings.brain_force_prepared or llm is None,
+        quote_matcher=settings.quote_matcher(),
     )

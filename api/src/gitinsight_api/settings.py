@@ -3,8 +3,10 @@
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from gitinsight_api.brain.quotes import QuoteMatcher, QuoteMatchMode
 
 LLMProvider = Literal["openai", "gemini"]
 
@@ -55,6 +57,13 @@ class Settings(BaseSettings):
     report_timeout_s: float = 30.0
     # 리포트 생성 시 빈 판단을 다시 판단할 때의 제한 시간(초)입니다.
     rejudge_timeout_s: float = 10.0
+    # 인용문 비교 방식입니다. fuzzy는 음성 인식 오차를 유사도로 허용합니다 (brain/quotes.py).
+    quote_match: QuoteMatchMode = "exact"
+    # fuzzy에서 통과로 보는 유사도 하한(0~100)입니다.
+    quote_fuzzy_threshold: float = Field(default=80.0, ge=50.0, le=100.0)
+
+    def quote_matcher(self) -> QuoteMatcher:
+        return QuoteMatcher(mode=self.quote_match, threshold=self.quote_fuzzy_threshold)
 
     @model_validator(mode="before")
     @classmethod

@@ -10,6 +10,7 @@ import re
 import time
 from dataclasses import dataclass
 
+from gitinsight_api.brain.quotes import EXACT, QuoteMatcher
 from gitinsight_api.llm import (
     LLMClient,
     LLMError,
@@ -33,7 +34,6 @@ MIN_RETRY_SEC = 0.3
 
 # 꼬리질문에 줄 번호가 들어가면 안 됩니다. 코드 위치는 분석 결과에서만 가져옵니다.
 _LINE_NUMBER = re.compile(r"\d+\s*(번째\s*)?(줄|행|라인)|\bline\s*\d+|\bL\d+\b", re.IGNORECASE)
-_NON_WORD = re.compile(r"[\W_]+", re.UNICODE)
 
 JUDGE_SYSTEM_PROMPT = f"""당신은 한국어 기술 면접에서 지원자 답변을 판단하는 평가 보조자입니다.
 다음 행동이나 점수는 서버가 정합니다. 당신은 아래 세 가지만 판단합니다.
@@ -107,17 +107,13 @@ def build_judge_messages(
     ]
 
 
-def normalize(text: str) -> str:
-    """공백, 문장부호, 대소문자를 무시하고 비교하기 위한 정규화입니다."""
-    return _NON_WORD.sub("", text).lower()
+def quote_in_transcript(quote: str, transcript: str, matcher: QuoteMatcher = EXACT) -> bool:
+    return matcher.matches(quote, transcript)
 
 
-def quote_in_transcript(quote: str, transcript: str) -> bool:
-    normalized = normalize(quote)
-    return bool(normalized) and normalized in normalize(transcript)
-
-
-def validate_judgment(judgment: Judgment, topic: Topic, transcript: str) -> Judgment:
+def validate_judgment(
+    judgment: Judgment, topic: Topic, transcript: str, matcher: QuoteMatcher = EXACT
+) -> Judgment:
     point_ids = {p.point_id for p in topic.expected_points}
     seen: set[str] = set()
     for coverage in judgment.coverage:
@@ -128,7 +124,7 @@ def validate_judgment(judgment: Judgment, topic: Topic, transcript: str) -> Judg
         seen.add(coverage.point_id)
         if coverage.status is CoverageStatus.COVERED and not coverage.evidence_quote:
             raise JudgmentInvalidError("covered 판단에 evidence_quote가 없습니다")
-        if coverage.evidence_quote and not quote_in_transcript(coverage.evidence_quote, transcript):
+        if coverage.evidence_quote and not matcher.matches(coverage.evidence_quote, transcript):
             raise JudgmentInvalidError("evidence_quote가 지원자 답변에 없습니다")
     followup = judgment.followup
     if followup is not None:
@@ -161,6 +157,7 @@ async def judge_answer(
     *,
     timeout_s: float,
     model: str | None = None,
+    quote_matcher: QuoteMatcher = EXACT,
 ) -> JudgeOutcome:
     """제한 시간 안에서 판단합니다. 검증 실패는 남은 시간이 있으면 1회 재시도합니다."""
     started = time.perf_counter()
@@ -193,7 +190,7 @@ async def judge_answer(
             reason = FallbackReason.ERROR
             break
         try:
-            judgment = validate_judgment(result.value, topic, transcript)
+            judgment = validate_judgment(result.value, topic, transcript, quote_matcher)
         except JudgmentInvalidError as error:
             reason = FallbackReason.INVALID
             logger.info("judgment_invalid attempt=%d reason=%s", attempts, error)
