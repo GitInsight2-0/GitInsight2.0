@@ -1,9 +1,27 @@
 """환경 변수 설정. 비밀 값은 코드에 두지 않고 환경 변수로만 받습니다."""
 
 from pathlib import Path
+from typing import Any, Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+LLMProvider = Literal["openai", "gemini"]
+
+# 제공사별 기본 모델입니다. 판단은 빠른 모델, 분석·리포트는 품질이 높은 모델을 씁니다.
+# Gemini 판단 모델은 지연 측정(scripts/llm_latency.py) 전이라 분석·리포트와 같은 Flash를 씁니다.
+PROVIDER_MODELS: dict[str, dict[str, str]] = {
+    "openai": {
+        "llm_judge_model": "openai/gpt-6.1-terra",
+        "llm_analysis_model": "openai/gpt-6.1-sol",
+        "llm_report_model": "openai/gpt-6.1-sol",
+    },
+    "gemini": {
+        "llm_judge_model": "gemini/gemini-3.8-flash",
+        "llm_analysis_model": "gemini/gemini-3.8-flash",
+        "llm_report_model": "gemini/gemini-3.8-flash",
+    },
+}
 
 
 class Settings(BaseSettings):
@@ -18,10 +36,15 @@ class Settings(BaseSettings):
     # 면접 재료로 쓸 샘플 분석 파일 이름입니다 (fixtures/analysis/<이름>.json).
     fixture_analysis: str = "gitinsight_agent"
 
-    # LiteLLM 모델 이름입니다. 제공사 API 키는 LiteLLM 규칙대로 OPENAI_API_KEY 등 환경 변수로 받습니다.
-    llm_judge_model: str = "openai/gpt-6.1-terra"
-    llm_analysis_model: str = "openai/gpt-6.1-sol"
-    llm_report_model: str = "openai/gpt-6.1-sol"
+    # 판단·분석·리포트 LLM 제공사입니다. 장애 시 이 값 하나로 기본 모델을 모두 바꿉니다.
+    # 제공사 API 키는 LiteLLM 규칙대로 OPENAI_API_KEY, GEMINI_API_KEY 환경 변수로 받습니다.
+    llm_provider: LLMProvider = "openai"
+    # LiteLLM 모델 이름입니다. 비워 두면 llm_provider의 기본값(PROVIDER_MODELS)을 씁니다.
+    llm_judge_model: str = PROVIDER_MODELS["openai"]["llm_judge_model"]
+    llm_analysis_model: str = PROVIDER_MODELS["openai"]["llm_analysis_model"]
+    llm_report_model: str = PROVIDER_MODELS["openai"]["llm_report_model"]
+    # true면 판단·계획·리포트에서 LLM을 부르지 않고 미리 만든 질문과 턴별 판단 표로 진행합니다.
+    brain_force_prepared: bool = False
     # 판단 모델의 reasoning_effort입니다. 비우면 모델 기본값을 씁니다. 지연 측정 결과로 정합니다.
     llm_judge_reasoning_effort: str | None = None
     # 답변 판단 LLM 호출 제한 시간(초)입니다. 넘으면 미리 만든 질문으로 진행합니다. PoC 결과로 조정합니다.
@@ -32,6 +55,24 @@ class Settings(BaseSettings):
     report_timeout_s: float = 30.0
     # 리포트 생성 시 빈 판단을 다시 판단할 때의 제한 시간(초)입니다.
     rejudge_timeout_s: float = 10.0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _provider_defaults(cls, data: object) -> object:
+        # 모델 이름을 따로 주지 않은 항목만 제공사 기본값으로 채웁니다.
+        if not isinstance(data, dict):
+            return data
+        values: dict[str, Any] = dict(data)
+        provider = str(values.get("llm_provider") or "openai").strip().lower()
+        profile = PROVIDER_MODELS.get(provider)
+        if profile is None:
+            return values
+        for field, model in profile.items():
+            current = values.get(field)
+            if current is None or (isinstance(current, str) and not current.strip()):
+                values[field] = model
+        values["llm_provider"] = provider
+        return values
 
     @field_validator("llm_judge_reasoning_effort", mode="before")
     @classmethod

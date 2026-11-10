@@ -3,7 +3,7 @@
 from gitinsight_api.brain.analysis_source import FixtureAnalysisSource
 from gitinsight_api.brain.repository import InMemorySessionRepository
 from gitinsight_api.brain.service import InterviewBrain
-from gitinsight_api.llm import CostRecorder, LiteLLMClient
+from gitinsight_api.llm import CostRecorder, LiteLLMClient, LLMClient
 from gitinsight_api.report.builder import ReportBuilder
 from gitinsight_api.report.service import InMemoryReportStore, ReportService
 from gitinsight_api.settings import Settings
@@ -30,7 +30,7 @@ def build_report_service(
     brain: InterviewBrain,
     analysis: AnalysisResult,
     *,
-    llm: LiteLLMClient | None,
+    llm: LLMClient | None,
     force_prepared: bool = False,
 ) -> ReportService:
     """llm이 없으면 LLM 없이 턴별 판단 표 리포트만 만듭니다."""
@@ -46,7 +46,7 @@ def build_report_service(
             rejudge_timeout_s=settings.rejudge_timeout_s,
             report_model=settings.llm_report_model,
             judge_model=settings.llm_judge_model,
-            force_prepared=force_prepared or llm is None,
+            force_prepared=force_prepared or settings.brain_force_prepared or llm is None,
         ),
     )
 
@@ -54,7 +54,7 @@ def build_report_service(
 def build_fixture_brain(
     settings: Settings,
     *,
-    llm: LiteLLMClient | None,
+    llm: LLMClient | None,
     fixture: str | None = None,
     force_prepared: bool = False,
 ) -> InterviewBrain:
@@ -70,5 +70,5 @@ def build_fixture_brain(
         plan_timeout_s=settings.plan_timeout_s,
         judge_model=settings.llm_judge_model,
         plan_model=settings.llm_analysis_model,
-        force_prepared=force_prepared or llm is None,
+        force_prepared=force_prepared or settings.brain_force_prepared or llm is None,
     )

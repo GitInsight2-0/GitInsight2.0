@@ -72,6 +72,7 @@ uv run python -m gitinsight_contracts.fixtures show                # 샘플 분�
 uv run python -m gitinsight_api.brain.cli [--real-llm]             # 터미널 텍스트 면접
 uv run python scripts/llm_latency.py --n 20                        # 판단 LLM 지연 측정 (수동, 비용 발생)
 uv run python scripts/eval_brain.py                                # 골든 대화 실제 LLM 평가 (수동, 비용 발생)
+uv run python scripts/demo_check.py [--block-llm | --real-llm]     # 데모 완주 점검 (docs/runbook-demo.md)
 ```
 
 음성 PoC용 가짜 백엔드는 `LAB_ENABLED=true`로 서버를 띄우면 켜집니다. 이때 `POST /api/sessions/{id}/turns?lab_delay_ms=800`처럼 인위적 지연을 줄 수 있습니다. 데모와 배포에서는 끕니다.
