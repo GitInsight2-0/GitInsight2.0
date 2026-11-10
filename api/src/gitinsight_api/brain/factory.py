@@ -4,7 +4,10 @@ from gitinsight_api.brain.analysis_source import FixtureAnalysisSource
 from gitinsight_api.brain.repository import InMemorySessionRepository
 from gitinsight_api.brain.service import InterviewBrain
 from gitinsight_api.llm import CostRecorder, LiteLLMClient
+from gitinsight_api.report.builder import ReportBuilder
+from gitinsight_api.report.service import InMemoryReportStore, ReportService
 from gitinsight_api.settings import Settings
+from gitinsight_contracts.analysis import AnalysisResult
 from gitinsight_contracts.fixtures import load_analysis
 
 
@@ -13,6 +16,38 @@ def build_judge_llm(settings: Settings, cost_recorder: CostRecorder | None = Non
         settings.llm_judge_model,
         cost_recorder=cost_recorder,
         reasoning_effort=settings.llm_judge_reasoning_effort,
+    )
+
+
+def build_report_llm(
+    settings: Settings, cost_recorder: CostRecorder | None = None
+) -> LiteLLMClient:
+    return LiteLLMClient(settings.llm_report_model, cost_recorder=cost_recorder)
+
+
+def build_report_service(
+    settings: Settings,
+    brain: InterviewBrain,
+    analysis: AnalysisResult,
+    *,
+    llm: LiteLLMClient | None,
+    force_prepared: bool = False,
+) -> ReportService:
+    """llm이 없으면 LLM 없이 턴별 판단 표 리포트만 만듭니다."""
+    from gitinsight_api.llm.fake import FakeLLM
+
+    return ReportService(
+        analyses=FixtureAnalysisSource(analysis),
+        sessions=brain.repository,
+        store=InMemoryReportStore(),
+        builder=ReportBuilder(
+            llm=llm if llm is not None else FakeLLM(),
+            report_timeout_s=settings.report_timeout_s,
+            rejudge_timeout_s=settings.rejudge_timeout_s,
+            report_model=settings.llm_report_model,
+            judge_model=settings.llm_judge_model,
+            force_prepared=force_prepared or llm is None,
+        ),
     )
 
 

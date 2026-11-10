@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     judge_timeout_s: float = 2.5
     # 면접 계획(JD 반영) LLM 호출 제한 시간(초)입니다.
     plan_timeout_s: float = 8.0
+    # 리포트 생성 LLM 호출 제한 시간(초)입니다. 넘으면 턴별 판단 표를 돌려줍니다.
+    report_timeout_s: float = 30.0
+    # 리포트 생성 시 빈 판단을 다시 판단할 때의 제한 시간(초)입니다.
+    rejudge_timeout_s: float = 10.0
 
     @field_validator("llm_judge_reasoning_effort", mode="before")
     @classmethod
