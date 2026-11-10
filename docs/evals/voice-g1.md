@@ -16,6 +16,9 @@ cp web/.env.example web/.env.local   # LAB_ENABLED=true, 제공사 키 입력
 pnpm --filter @gitinsight/web dev    # http://localhost:3000/lab/voice
 ```
 
+- macOS에서는 레포를 iCloud 동기화 폴더(데스크탑, 문서) 밖에 둡니다. 예: `~/dev/GitInsight2.0`.
+  iCloud가 `.venv`의 `.pth` 파일에 숨김 표시를 붙이면 Python이 그 파일을 건너뛰어 `ModuleNotFoundError: No module named 'gitinsight_api'`가 납니다.
+  `ls -lO .venv/lib/python3.12/site-packages/*.pth`에 `hidden`이 보이면 이 경우입니다.
 - 이어폰을 낍니다. 스피커로 들으면 AI 목소리가 마이크로 들어가 지연과 끼어들기가 잘못 잡힙니다.
 - "판단 지연 흉내"는 `?lab_delay_ms`로 서버에 전달됩니다. 판단 LLM 지연 측정(`docs/evals/latency.md`)의 중앙값을 넣어 실제 체감에 가깝게 맞춥니다.
 
