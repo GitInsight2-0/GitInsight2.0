@@ -6,6 +6,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "gitinsight-contracts",
     "gitinsight-api",
+    "gitinsight-worker",
 ]
 
 [dependency-groups]
@@ -21,11 +22,12 @@ dev = [
 package = false
 
 [tool.uv.workspace]
-members = ["contracts", "api"]
+members = ["contracts", "api", "worker"]
 
 [tool.uv.sources]
 gitinsight-contracts = { workspace = true }
 gitinsight-api = { workspace = true }
+gitinsight-worker = { workspace = true }
 
 [tool.ruff]
 line-length = 100
@@ -43,22 +45,22 @@ ignore = ["RUF001", "RUF002", "RUF003", "E501"]
 "**/tests/**" = ["ASYNC240"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["gitinsight_contracts", "gitinsight_api"]
-known-local-folder = ["api_test_support"]
+known-first-party = ["gitinsight_contracts", "gitinsight_api", "gitinsight_worker"]
+known-local-folder = ["api_test_support", "worker_test_support"]
 
 [tool.pyright]
-include = ["contracts", "api", "scripts"]
+include = ["contracts", "api", "worker", "scripts"]
 exclude = ["**/node_modules", "contracts/ts", "**/__pycache__", ".venv"]
 venvPath = "."
 venv = ".venv"
 pythonVersion = "3.12"
-extraPaths = ["api/tests"]
+extraPaths = ["api/tests", "worker/tests"]
 typeCheckingMode = "standard"
 
 [tool.pytest.ini_options]
-testpaths = ["contracts/tests", "api/tests"]
+testpaths = ["contracts/tests", "api/tests", "worker/tests"]
 addopts = "--import-mode=importlib -m \"not network and not live_llm\""
-pythonpath = ["api/tests"]
+pythonpath = ["api/tests", "worker/tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
