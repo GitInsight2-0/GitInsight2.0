@@ -26,7 +26,8 @@ jobs:
 
       # Python 버전은 .python-version(3.12)을 따릅니다.
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10
+        # setup-uv는 주 버전 태그(v10)를 내지 않아 전체 버전을 씁니다.
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
 
