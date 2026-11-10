@@ -43,6 +43,14 @@ def render(reply: BrainReply) -> str:
     return "\n".join(lines)
 
 
+def describe_mode(settings: Settings, *, real_llm: bool, force_prepared: bool) -> str:
+    if force_prepared or settings.brain_force_prepared:
+        return "미리 만든 질문만 (BRAIN_FORCE_PREPARED)"
+    if not real_llm:
+        return "미리 만든 질문만 (--real-llm 없음)"
+    return f"실제 LLM ({settings.llm_provider}: 판단 {settings.llm_judge_model}, 리포트 {settings.llm_report_model})"
+
+
 def render_report(report: Report) -> str:
     lines = [f"\n=== 리포트 ({report.kind.value}) ==="]
     for score in report.competencies:
@@ -74,8 +82,9 @@ async def run(args: argparse.Namespace) -> int:
     print(f"레포: {analysis.repo_full_name} @ {analysis.commit_sha[:12]}")
     for topic in analysis.topics:
         print(f"  - {topic.title} [{CONTRIBUTION_LABEL_TEXT[topic.contribution_label]}]")
-    mode = "실제 LLM" if args.real_llm and not args.force_prepared else "미리 만든 질문만"
-    print(f"판단: {mode}")
+    print(
+        f"판단: {describe_mode(settings, real_llm=args.real_llm, force_prepared=args.force_prepared)}"
+    )
 
     jd_text: str | None = args.jd_text
     session_id, reply = await brain.start(
