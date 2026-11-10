@@ -1,0 +1,63 @@
+# PR과 main push마다 AGENTS.md "명령"의 기본 검사를 실행합니다.
+# network, live_llm 테스트는 루트 pyproject.toml의 pytest 설정으로 빠지므로 API 키가 필요 없습니다.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# 같은 브랜치에 새 커밋이 오면 이전 실행을 취소합니다.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, typecheck, test, and contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      # Python 버전은 .python-version(3.12)을 따릅니다.
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --locked
+
+      - name: Ruff lint
+        run: uv run ruff check
+
+      - name: Ruff format
+        run: uv run ruff format --check
+
+      - name: Pyright
+        run: uv run pyright
+
+      - name: Pytest
+        run: uv run pytest
+
+      # pnpm 버전은 package.json의 packageManager(pnpm 10)를 따릅니다.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 계약 생성 파일(JSON Schema, TS 타입)이 커밋된 내용과 같은지 검사합니다.
+      - name: Contracts check
+        run: pnpm contracts:check
