@@ -29,6 +29,7 @@ pnpm --filter @gitinsight/web dev    # http://localhost:3000/lab/voice
 | 응답 지연 | 마이크 소리가 0.5초 멈춘 시각 → AI 출력 소리가 처음 커진 시각. 위임 왕복 포함 | `vad_end`, `first_audio`(value_ms) |
 | 위임 왕복 | 도구 호출을 받은 시각 → `/turns` 응답을 도구 결과로 돌려준 시각 | `delegation_start`, `delegation_end`(value_ms) |
 | 끼어들기 | AI가 말하는 중에 마이크 소리가 커짐. AI가 실제로 멈췄는지는 귀로 확인 | `barge_in` |
+| 받아쓰기 vs 도구 인자 | 같은 턴의 받아쓰기(ASR)와 음성 AI가 도구 인자로 준 transcript를 글자 단위로 비교 (0~1). 서버에는 받아쓰기를 보내고, 받아쓰기가 없을 때만 도구 인자를 보냄 | 화면과 결과 JSON에만 (원문은 서버로 보내지 않음) |
 
 제공사 이벤트가 아니라 실제 소리 크기로 재서 두 제공사를 같은 기준으로 비교합니다.
 
@@ -56,6 +57,7 @@ pnpm --filter @gitinsight/web dev    # http://localhost:3000/lab/voice
 | 응답 지연 중앙값 / p90 (ms) | | 3180 / 18509 (8회, 판단 지연 흉내 800ms 포함. p90은 이상값 1건) |
 | 위임 왕복 중앙값 (ms) | | 826 (p90 845. 흉내 800ms를 빼면 웹↔서버 약 30~40ms) |
 | 도구 호출 성공 (n/10) | | 8/9. "질문 다시 해 주시겠어요?" 1회를 도구 없이 직접 처리 |
+| 받아쓰기 vs 도구 인자 유사도 (평균 / 최저) | | 1회차 미측정 (리뷰 반영 전 빌드) |
 | 질문을 지어낸 횟수 | | 0 (위 1회는 기존 질문을 다시 말함) |
 | 용어 오인식 | | ChromaDB→Chrome 데이터베이스, index_documents→index document, commit SHA→commit sh, FastAPI 라우터→fast api로아우터, useReducer→로직 리듀서 |
 | 끼어들기 후 멈춤 | | 멈춤 (귀로 확인). 단, 답변을 읽다 멈춘 사이에 AI가 말을 시작해 끊기는 경우가 있었음 |

@@ -11,9 +11,17 @@ import type { Connect } from "./types";
 const WS_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained";
 
+/** setupComplete를 기다리는 시간 */
+const SETUP_TIMEOUT_MS = 10_000;
+
 export const connectGemini: Connect = async (token, hooks) => {
-  // ── 출력 재생 ──
+  let mic: MediaStream | null = null;
+  let ws: WebSocket | null = null;
+  let worklet: AudioWorkletNode | null = null;
+  let inCtx: AudioContext | null = null;
   const outCtx = new AudioContext({ sampleRate: 24000 });
+
+  // ── 출력 재생 ──
   const ai = outCtx.createAnalyser();
   ai.fftSize = 1024;
   ai.connect(outCtx.destination);
@@ -39,100 +47,123 @@ export const connectGemini: Connect = async (token, hooks) => {
     playhead = 0;
   };
 
-  // ── 마이크 ──
-  const mic = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-  });
-  const inCtx = new AudioContext({ sampleRate: 16000 });
-  await inCtx.audioWorklet.addModule("/pcm-capture-worklet.js");
-  const micSrc = inCtx.createMediaStreamSource(mic);
-  const worklet = new AudioWorkletNode(inCtx, "pcm-capture");
-  const user = inCtx.createAnalyser();
-  user.fftSize = 1024;
-  micSrc.connect(worklet);
-  micSrc.connect(user);
-
-  // ── WebSocket ──
-  const ws = new WebSocket(`${WS_URL}?access_token=${encodeURIComponent(token.client_secret)}`);
-  const send = (m: object) => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
-  };
+  // 연결 도중 실패해도, 정상 종료할 때도 같은 정리를 합니다 (마이크가 켜진 채 남지 않게).
   let ready = false;
-  let userText = "";
-  let aiText = "";
-  const flushUser = () => {
-    const t = userText.trim();
-    if (t) hooks.onUserTranscript(t);
-    userText = "";
+  let closed = false;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    ready = false;
+    if (ws && ws.readyState <= WebSocket.OPEN) ws.close(1000);
+    flush();
+    worklet?.disconnect();
+    mic?.getTracks().forEach((t) => t.stop());
+    void inCtx?.close();
+    void outCtx.close();
   };
 
-  const setupDone = new Promise<void>((resolve, reject) => {
-    ws.onopen = () => {
-      // 지시문·도구·음성 설정은 토큰에 잠겨 있어 모델만 보냅니다.
-      send({ setup: { model: `models/${token.model}` } });
-    };
-    ws.onclose = (e) => {
-      if (!ready) reject(new Error(`Gemini 연결 실패 ${e.code} ${e.reason}`));
-      hooks.onClosed(`${e.code} ${e.reason}`);
-    };
-    ws.onmessage = async (e) => {
-      const text = typeof e.data === "string" ? e.data : await (e.data as Blob).text();
-      const m = JSON.parse(text) as GeminiMessage;
+  try {
+    // ── 마이크 ──
+    mic = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+    });
+    inCtx = new AudioContext({ sampleRate: 16000 });
+    await inCtx.audioWorklet.addModule("/pcm-capture-worklet.js");
+    const micSrc = inCtx.createMediaStreamSource(mic);
+    const node = new AudioWorkletNode(inCtx, "pcm-capture");
+    worklet = node;
+    const user = inCtx.createAnalyser();
+    user.fftSize = 1024;
+    micSrc.connect(node);
+    micSrc.connect(user);
 
-      if (m.setupComplete) {
-        ready = true;
-        resolve();
-      }
+    // ── WebSocket ──
+    const socket = new WebSocket(`${WS_URL}?access_token=${encodeURIComponent(token.client_secret)}`);
+    ws = socket;
+    // 바이너리 프레임을 ArrayBuffer로 받아 동기로 해석합니다.
+    // Blob.text()를 await하면 메시지 처리 순서가 뒤바뀔 수 있습니다 (오디오 조각, 끼어들기 신호의 순서가 중요).
+    socket.binaryType = "arraybuffer";
+    const decoder = new TextDecoder();
+    const send = (m: object) => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(m));
+    };
 
-      const sc = m.serverContent;
-      if (sc) {
-        if (sc.interrupted) flush();
-        for (const p of sc.modelTurn?.parts ?? []) if (p.inlineData?.data) enqueue(p.inlineData.data);
-        if (sc.inputTranscription?.text) userText += sc.inputTranscription.text;
-        if (sc.outputTranscription?.text) aiText += sc.outputTranscription.text;
-        if (sc.turnComplete || sc.interrupted) {
-          flushUser();
-          if (aiText.trim()) hooks.onAiTranscript(aiText.trim(), !!sc.interrupted);
-          aiText = "";
+    let userText = "";
+    let aiText = "";
+    const flushUser = () => {
+      const t = userText.trim();
+      if (t) hooks.onUserTranscript(t);
+      userText = "";
+    };
+
+    const setupDone = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Gemini 설정 응답(setupComplete)이 오지 않았습니다")), SETUP_TIMEOUT_MS);
+
+      socket.onopen = () => {
+        // 지시문·도구·음성 설정은 토큰에 잠겨 있어 모델만 보냅니다.
+        send({ setup: { model: `models/${token.model}` } });
+      };
+      socket.onclose = (e) => {
+        clearTimeout(timer);
+        if (!ready) reject(new Error(`Gemini 연결 실패 ${e.code} ${e.reason}`));
+        hooks.onClosed(`${e.code} ${e.reason}`);
+      };
+      socket.onmessage = (e: MessageEvent<string | ArrayBuffer>) => {
+        const text = typeof e.data === "string" ? e.data : decoder.decode(e.data);
+        const m = JSON.parse(text) as GeminiMessage;
+
+        if (m.setupComplete) {
+          clearTimeout(timer);
+          ready = true;
+          resolve();
         }
-      }
 
-      for (const call of m.toolCall?.functionCalls ?? []) {
-        flushUser();
-        hooks.onToolCall(call.id, call.name, call.args ?? {});
-      }
+        const sc = m.serverContent;
+        if (sc) {
+          if (sc.interrupted) flush();
+          for (const p of sc.modelTurn?.parts ?? []) if (p.inlineData?.data) enqueue(p.inlineData.data);
+          if (sc.inputTranscription?.text) userText += sc.inputTranscription.text;
+          if (sc.outputTranscription?.text) aiText += sc.outputTranscription.text;
+          if (sc.turnComplete || sc.interrupted) {
+            flushUser();
+            if (aiText.trim()) hooks.onAiTranscript(aiText.trim(), !!sc.interrupted);
+            aiText = "";
+          }
+        }
 
-      if (m.goAway) hooks.onError("gemini_go_away", `goAway: 남은 시간 ${m.goAway.timeLeft ?? "?"} (재연결 필요)`);
+        for (const call of m.toolCall?.functionCalls ?? []) {
+          // 이 시점까지 모인 받아쓰기를 먼저 넘겨, 진행기가 도구 인자보다 받아쓰기를 쓰게 합니다.
+          flushUser();
+          hooks.onToolCall(call.id, call.name, call.args ?? {});
+        }
+
+        if (m.goAway) hooks.onError("gemini_go_away", `goAway: 남은 시간 ${m.goAway.timeLeft ?? "?"} (재연결 필요)`);
+      };
+    });
+    socket.onerror = () => hooks.onError("ws_error", "Gemini WebSocket 오류");
+
+    await setupDone;
+
+    node.port.onmessage = (e: MessageEvent<Float32Array>) => {
+      if (ready) send({ realtimeInput: { audio: { data: floatToPcm16Base64(e.data), mimeType: "audio/pcm;rate=16000" } } });
     };
-  });
-  ws.onerror = () => hooks.onError("ws_error", "Gemini WebSocket 오류");
 
-  await setupDone;
-
-  worklet.port.onmessage = (e: MessageEvent<Float32Array>) => {
-    if (ready) send({ realtimeInput: { audio: { data: floatToPcm16Base64(e.data), mimeType: "audio/pcm;rate=16000" } } });
-  };
-
-  return {
-    say(text) {
-      // 반응이 없으면 realtimeInput: { text } 방식으로 바꿔 봅니다.
-      send({ clientContent: { turns: [{ role: "user", parts: [{ text }] }], turnComplete: true } });
-    },
-    respondTool(callId, name, output) {
-      send({ toolResponse: { functionResponses: [{ id: callId, name, response: output }] } });
-    },
-    userAnalyser: () => user,
-    aiAnalyser: () => ai,
-    stop() {
-      ready = false;
-      ws.close(1000);
-      flush();
-      worklet.disconnect();
-      mic.getTracks().forEach((t) => t.stop());
-      void inCtx.close();
-      void outCtx.close();
-    },
-  };
+    return {
+      say(text) {
+        // 반응이 없으면 realtimeInput: { text } 방식으로 바꿔 봅니다.
+        send({ clientContent: { turns: [{ role: "user", parts: [{ text }] }], turnComplete: true } });
+      },
+      respondTool(callId, name, output) {
+        send({ toolResponse: { functionResponses: [{ id: callId, name, response: output }] } });
+      },
+      userAnalyser: () => user,
+      aiAnalyser: () => ai,
+      stop: cleanup,
+    };
+  } catch (e) {
+    cleanup();
+    throw e;
+  }
 };
 
 interface GeminiMessage {

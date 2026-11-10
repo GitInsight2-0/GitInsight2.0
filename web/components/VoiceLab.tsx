@@ -34,6 +34,7 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
   const [latencies, setLatencies] = useState<number[]>([]);
   const [delegations, setDelegations] = useState<number[]>([]);
   const [bargeIns, setBargeIns] = useState(0);
+  const [similarities, setSimilarities] = useState<number[]>([]);
   const session = useRef<{ stop(): void } | null>(null);
   const t0 = useRef(0);
 
@@ -46,6 +47,7 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
     setLatencies([]);
     setDelegations([]);
     setBargeIns(0);
+    setSimilarities([]);
     setRunning(true);
     t0.current = performance.now();
     try {
@@ -66,6 +68,10 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
             setBargeIns((n) => n + 1);
             add("system", "끼어들기 감지");
           },
+          transcriptSimilarity: (ratio) => {
+            setSimilarities((x) => [...x, ratio]);
+            add("system", `받아쓰기 vs 도구 인자 유사도 ${ratio.toFixed(2)}`);
+          },
         },
         { analysisId, labDelayMs, scenario: "g1_script" },
       );
@@ -84,6 +90,11 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
 
   const lat = stats(latencies);
   const del = stats(delegations);
+  const sim = {
+    n: similarities.length,
+    min: similarities.length ? Math.min(...similarities) : null,
+    mean: similarities.length ? Math.round((similarities.reduce((a, b) => a + b, 0) / similarities.length) * 100) / 100 : null,
+  };
   const errors = log.filter((l) => l.who === "error");
   // 자막 원문은 빼고 수치와 오류만 복사합니다 (docs/evals/voice-g1.md에 붙여 넣는 용도).
   const result = {
@@ -93,6 +104,8 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
     latency_ms: lat,
     delegation_ms: del,
     barge_ins: bargeIns,
+    // 받아쓰기와 음성 AI 도구 인자의 유사도. 1에서 멀수록 모델이 답변을 다듬거나 요약한 것입니다.
+    transcript_similarity: sim,
     errors: errors.map((e) => e.text),
   };
 
@@ -134,10 +147,16 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
         <button onClick={() => navigator.clipboard.writeText(JSON.stringify(result, null, 2))}>결과 JSON 복사</button>
       </div>
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
+      <section style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 16 }}>
         <Stat label="응답 지연 중앙값" value={lat.median} unit="ms" sub={`p90 ${lat.p90 ?? "-"} · ${lat.n}회`} />
         <Stat label="위임 왕복 중앙값" value={del.median} unit="ms" sub={`p90 ${del.p90 ?? "-"} · ${del.n}회`} />
         <Stat label="끼어들기 감지" value={bargeIns} unit="회" sub="AI가 실제로 멈췄는지는 귀로 확인" />
+        <Stat
+          label="받아쓰기 vs 도구 인자"
+          value={sim.mean}
+          unit="평균 유사도"
+          sub={`최저 ${sim.min ?? "-"} · ${sim.n}회`}
+        />
         <Stat label="오류" value={errors.length} unit="건" sub="" />
       </section>
 
