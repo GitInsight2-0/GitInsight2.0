@@ -1,0 +1,50 @@
+{
+  "name": "dont_know_and_failures",
+  "description": "모른다는 답변은 힌트 1번 뒤 다음 주제, 판단 시간 초과와 검증 실패는 미리 만든 꼬리질문으로 진행",
+  "analysis": "gitinsight_agent",
+  "duration_min": 10,
+  "seconds_per_turn": 20,
+  "turns": [
+    {
+      "transcript": "잘 모르겠습니다.",
+      "llm_behavior": "ok",
+      "judgment": {"intent": "DONT_KNOW", "coverage": [], "followup": null},
+      "expect_action": "HINT",
+      "expect_topic_id": "build-github-repo"
+    },
+    {
+      "transcript": "봐도 잘 모르겠어요.",
+      "llm_behavior": "ok",
+      "judgment": {"intent": "DONT_KNOW", "coverage": [], "followup": null},
+      "expect_action": "NEXT_TOPIC",
+      "expect_topic_id": "vector-service"
+    },
+    {
+      "transcript": "컬렉션을 하나 쓰는 것 같습니다.",
+      "llm_behavior": "timeout",
+      "judgment": null,
+      "expect_action": "FOLLOW_UP",
+      "expect_topic_id": "vector-service"
+    },
+    {
+      "transcript": "검색은 임베딩으로 합니다.",
+      "llm_behavior": "invalid",
+      "judgment": {
+        "intent": "ANSWER",
+        "coverage": [
+          {"point_id": "vs-2", "status": "covered", "evidence_quote": "메타데이터 필터로 범위를 좁힌다"}
+        ],
+        "followup": null
+      },
+      "expect_action": "FOLLOW_UP",
+      "expect_topic_id": "vector-service"
+    },
+    {
+      "transcript": "그건 잘 기억이 안 납니다.",
+      "llm_behavior": "timeout",
+      "judgment": null,
+      "expect_action": "NEXT_TOPIC",
+      "expect_topic_id": "classify-user-intent"
+    }
+  ]
+}
