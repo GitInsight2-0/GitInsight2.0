@@ -1,0 +1,71 @@
+[project]
+name = "gitinsight"
+version = "0.1.0"
+description = "GitInsight 2.0 모노레포 루트 (uv workspace)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "gitinsight-contracts",
+    "gitinsight-api",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14",
+    "pyright>=1.1.400",
+    "pytest>=8.3",
+    "pytest-asyncio>=1.0",
+    "httpx>=0.28",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["contracts", "api"]
+
+[tool.uv.sources]
+gitinsight-contracts = { workspace = true }
+gitinsight-api = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["contracts/ts", "node_modules"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "ASYNC", "SIM", "RUF"]
+# RUF001~003: 한국어 문자열과 주석의 전각 문장부호를 허용합니다.
+# E501: 코드 줄 길이는 ruff format이 맞추고, 긴 한국어 주석·문자열은 허용합니다.
+ignore = ["RUF001", "RUF002", "RUF003", "E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# 테스트에서는 tmp_path 파일을 바로 읽어도 됩니다.
+"**/tests/**" = ["ASYNC240"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["gitinsight_contracts", "gitinsight_api"]
+known-local-folder = ["api_test_support"]
+
+[tool.pyright]
+include = ["contracts", "api", "scripts"]
+exclude = ["**/node_modules", "contracts/ts", "**/__pycache__", ".venv"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+extraPaths = ["api/tests"]
+typeCheckingMode = "standard"
+
+[tool.pytest.ini_options]
+testpaths = ["contracts/tests", "api/tests"]
+addopts = "--import-mode=importlib -m \"not network and not live_llm\""
+pythonpath = ["api/tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    # LiteLLM 내부 TypedDict 경고입니다. 우리 코드와 관계없습니다.
+    "ignore:Items? .* (is|are) using the `ReadOnly` qualifier:UserWarning",
+]
+markers = [
+    "network: 외부 네트워크가 필요한 테스트 (수동 실행: uv run pytest -m network)",
+    "live_llm: 실제 LLM API 키가 필요한 테스트 (수동 실행)",
+]

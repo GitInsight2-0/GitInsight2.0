@@ -1,0 +1,1419 @@
+{
+  "$defs": {
+    "Action": {
+      "enum": [
+        "ASK",
+        "FOLLOW_UP",
+        "PROBE",
+        "HINT",
+        "NEXT_TOPIC",
+        "REPEAT",
+        "CLARIFY",
+        "WRAP_UP"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "AnalysisCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "repo_id": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "repo_id"
+      ],
+      "title": "AnalysisCreate",
+      "type": "object"
+    },
+    "AnalysisCreated": {
+      "additionalProperties": false,
+      "properties": {
+        "analysis_id": {
+          "type": "string"
+        },
+        "cached": {
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/AnalysisStatus"
+        }
+      },
+      "required": [
+        "analysis_id",
+        "status",
+        "cached"
+      ],
+      "title": "AnalysisCreated",
+      "type": "object"
+    },
+    "AnalysisResult": {
+      "additionalProperties": false,
+      "description": "면접에 필요한 분석 결과 전체입니다. 원본 코드는 들어가지 않습니다.",
+      "properties": {
+        "analysis_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        "commit_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        "languages": {
+          "items": {
+            "$ref": "#/$defs/LanguageStat"
+          },
+          "type": "array"
+        },
+        "repo_full_name": {
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+          "type": "string"
+        },
+        "symbol_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "topics": {
+          "items": {
+            "$ref": "#/$defs/Topic"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "analysis_id",
+        "repo_full_name",
+        "commit_sha",
+        "languages",
+        "symbol_count",
+        "topics"
+      ],
+      "title": "AnalysisResult",
+      "type": "object"
+    },
+    "AnalysisState": {
+      "additionalProperties": false,
+      "properties": {
+        "commit_sha": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "progress": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "status": {
+          "$ref": "#/$defs/AnalysisStatus"
+        }
+      },
+      "required": [
+        "status",
+        "progress",
+        "commit_sha",
+        "error"
+      ],
+      "title": "AnalysisState",
+      "type": "object"
+    },
+    "AnalysisStatus": {
+      "enum": [
+        "queued",
+        "stage1",
+        "stage2",
+        "done",
+        "failed"
+      ],
+      "title": "AnalysisStatus",
+      "type": "string"
+    },
+    "AnalysisSummary": {
+      "additionalProperties": false,
+      "description": "GET /api/analyses/{id}/summary 응답입니다.",
+      "properties": {
+        "languages": {
+          "items": {
+            "$ref": "#/$defs/LanguageStat"
+          },
+          "type": "array"
+        },
+        "symbol_count": {
+          "type": "integer"
+        },
+        "topics": {
+          "items": {
+            "$ref": "#/$defs/TopicPreview"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "languages",
+        "symbol_count",
+        "topics"
+      ],
+      "title": "AnalysisSummary",
+      "type": "object"
+    },
+    "BrainReply": {
+      "additionalProperties": false,
+      "description": "면접 두뇌가 정한 다음 발화입니다. 음성 모델은 utterance의 뜻을 바꾸지 않고 말합니다.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "depth": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "done": {
+          "type": "boolean"
+        },
+        "highlight": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SymbolRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "remaining_sec": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "topic_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turn_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "utterance": {
+          "maxLength": 400,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "action",
+        "utterance",
+        "highlight",
+        "topic_id",
+        "depth",
+        "remaining_sec",
+        "done"
+      ],
+      "title": "BrainReply",
+      "type": "object"
+    },
+    "CodeLink": {
+      "additionalProperties": false,
+      "properties": {
+        "symbol": {
+          "$ref": "#/$defs/SymbolRef"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol",
+        "url"
+      ],
+      "title": "CodeLink",
+      "type": "object"
+    },
+    "Competency": {
+      "enum": [
+        "code_understanding",
+        "design_judgment",
+        "problem_solving",
+        "scalability_operations",
+        "communication",
+        "role_decision"
+      ],
+      "title": "Competency",
+      "type": "string"
+    },
+    "CompetencyDraft": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceDraft"
+          },
+          "type": "array"
+        },
+        "level": {
+          "maximum": 4,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "name": {
+          "$ref": "#/$defs/Competency"
+        },
+        "rationale": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "level",
+        "rationale",
+        "evidence"
+      ],
+      "title": "CompetencyDraft",
+      "type": "object"
+    },
+    "CompetencyLevel": {
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "maximum": 4,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "name": {
+          "$ref": "#/$defs/Competency"
+        }
+      },
+      "required": [
+        "name",
+        "level"
+      ],
+      "title": "CompetencyLevel",
+      "type": "object"
+    },
+    "CompetencyScore": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "level": {
+          "maximum": 4,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "name": {
+          "$ref": "#/$defs/Competency"
+        }
+      },
+      "required": [
+        "name",
+        "level",
+        "evidence"
+      ],
+      "title": "CompetencyScore",
+      "type": "object"
+    },
+    "ContributionLabel": {
+      "description": "git 이력으로 본 기여 정도입니다. 질문 순서와 표현에만 쓰고 점수에는 쓰지 않습니다.",
+      "enum": [
+        "verified",
+        "shared",
+        "unverified"
+      ],
+      "title": "ContributionLabel",
+      "type": "string"
+    },
+    "CoverageStatus": {
+      "enum": [
+        "covered",
+        "missing",
+        "wrong"
+      ],
+      "title": "CoverageStatus",
+      "type": "string"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "quote": {
+          "type": "string"
+        },
+        "symbol": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SymbolRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turn_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "quote",
+        "symbol"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "EvidenceDraft": {
+      "additionalProperties": false,
+      "properties": {
+        "quote": {
+          "type": "string"
+        },
+        "symbol_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "quote",
+        "symbol_id"
+      ],
+      "title": "EvidenceDraft",
+      "type": "object"
+    },
+    "ExpectedPoint": {
+      "additionalProperties": false,
+      "description": "좋은 답변이라면 다뤄야 할 요점입니다.",
+      "properties": {
+        "point_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        "probe_question": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 300,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "point_id",
+        "text",
+        "probe_question"
+      ],
+      "title": "ExpectedPoint",
+      "type": "object"
+    },
+    "FallbackReason": {
+      "enum": [
+        "timeout",
+        "invalid",
+        "refusal",
+        "error",
+        "forced"
+      ],
+      "title": "FallbackReason",
+      "type": "string"
+    },
+    "Followup": {
+      "additionalProperties": false,
+      "properties": {
+        "question": {
+          "type": "string"
+        },
+        "symbol_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "question",
+        "symbol_id"
+      ],
+      "title": "Followup",
+      "type": "object"
+    },
+    "Intent": {
+      "enum": [
+        "ANSWER",
+        "DONT_KNOW",
+        "CLARIFY",
+        "REPEAT",
+        "OFF_TOPIC"
+      ],
+      "title": "Intent",
+      "type": "string"
+    },
+    "InterviewMode": {
+      "enum": [
+        "voice",
+        "text"
+      ],
+      "title": "InterviewMode",
+      "type": "string"
+    },
+    "InterviewPlanOutput": {
+      "additionalProperties": false,
+      "description": "JD가 있을 때 주제 순서를 바꾸는 LLM 출력입니다. 허용된 topic_id만 씁니다.",
+      "properties": {
+        "persona_keywords": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "topic_order": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "topic_order",
+        "persona_keywords"
+      ],
+      "title": "InterviewPlanOutput",
+      "type": "object"
+    },
+    "Judgment": {
+      "additionalProperties": false,
+      "properties": {
+        "coverage": {
+          "items": {
+            "$ref": "#/$defs/PointCoverage"
+          },
+          "type": "array"
+        },
+        "followup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Followup"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intent": {
+          "$ref": "#/$defs/Intent"
+        }
+      },
+      "required": [
+        "intent",
+        "coverage",
+        "followup"
+      ],
+      "title": "Judgment",
+      "type": "object"
+    },
+    "LanguageStat": {
+      "additionalProperties": false,
+      "properties": {
+        "file_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "language": {
+          "maxLength": 50,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "language",
+        "file_count"
+      ],
+      "title": "LanguageStat",
+      "type": "object"
+    },
+    "Me": {
+      "additionalProperties": false,
+      "properties": {
+        "avatar_url": {
+          "type": "string"
+        },
+        "login": {
+          "type": "string"
+        },
+        "user_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "user_id",
+        "login",
+        "avatar_url"
+      ],
+      "title": "Me",
+      "type": "object"
+    },
+    "MetricEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "at_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9_.-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "$ref": "#/$defs/MetricName"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9_.-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scenario": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9_.-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "turn_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "value_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name",
+        "at_ms"
+      ],
+      "title": "MetricEvent",
+      "type": "object"
+    },
+    "MetricName": {
+      "enum": [
+        "vad_start",
+        "vad_end",
+        "first_audio",
+        "barge_in",
+        "delegation_start",
+        "delegation_end",
+        "filler_start",
+        "error"
+      ],
+      "title": "MetricName",
+      "type": "string"
+    },
+    "PointCoverage": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_quote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "point_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/CoverageStatus"
+        }
+      },
+      "required": [
+        "point_id",
+        "status",
+        "evidence_quote"
+      ],
+      "title": "PointCoverage",
+      "type": "object"
+    },
+    "PreparedFollowup": {
+      "additionalProperties": false,
+      "description": "LLM 없이도 쓸 수 있게 미리 만든 꼬리질문입니다.",
+      "properties": {
+        "question": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        "symbol_id": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "question",
+        "symbol_id"
+      ],
+      "title": "PreparedFollowup",
+      "type": "object"
+    },
+    "ProgressEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "competencies": {
+          "items": {
+            "$ref": "#/$defs/CompetencyLevel"
+          },
+          "type": "array"
+        },
+        "date": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "session_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "date",
+        "competencies"
+      ],
+      "title": "ProgressEntry",
+      "type": "object"
+    },
+    "Repo": {
+      "additionalProperties": false,
+      "properties": {
+        "default_branch": {
+          "type": "string"
+        },
+        "full_name": {
+          "type": "string"
+        },
+        "private": {
+          "type": "boolean"
+        },
+        "repo_id": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "repo_id",
+        "full_name",
+        "private",
+        "default_branch"
+      ],
+      "title": "Repo",
+      "type": "object"
+    },
+    "Report": {
+      "additionalProperties": false,
+      "properties": {
+        "competencies": {
+          "items": {
+            "$ref": "#/$defs/CompetencyScore"
+          },
+          "type": "array"
+        },
+        "improvements": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/ReportKind"
+        },
+        "next_topics": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "report_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "session_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "strengths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "topics": {
+          "items": {
+            "$ref": "#/$defs/TopicReport"
+          },
+          "type": "array"
+        },
+        "turns": {
+          "items": {
+            "$ref": "#/$defs/TurnRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "report_id",
+        "session_id",
+        "kind",
+        "competencies",
+        "topics",
+        "strengths",
+        "improvements",
+        "next_topics",
+        "turns"
+      ],
+      "title": "Report",
+      "type": "object"
+    },
+    "ReportDraft": {
+      "additionalProperties": false,
+      "properties": {
+        "competencies": {
+          "items": {
+            "$ref": "#/$defs/CompetencyDraft"
+          },
+          "type": "array"
+        },
+        "improvements": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "next_topics": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "strengths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "topics": {
+          "items": {
+            "$ref": "#/$defs/TopicDraft"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "competencies",
+        "topics",
+        "strengths",
+        "improvements",
+        "next_topics"
+      ],
+      "title": "ReportDraft",
+      "type": "object"
+    },
+    "ReportKind": {
+      "enum": [
+        "full",
+        "turn_table"
+      ],
+      "title": "ReportKind",
+      "type": "string"
+    },
+    "SessionCreate": {
+      "additionalProperties": false,
+      "description": "POST /api/sessions 요청입니다.",
+      "properties": {
+        "analysis_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        "duration_min": {
+          "default": 10,
+          "maximum": 15,
+          "minimum": 3,
+          "type": "integer"
+        },
+        "jd_text": {
+          "anyOf": [
+            {
+              "maxLength": 5000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mode": {
+          "$ref": "#/$defs/InterviewMode"
+        }
+      },
+      "required": [
+        "analysis_id",
+        "mode"
+      ],
+      "title": "SessionCreate",
+      "type": "object"
+    },
+    "SessionCreated": {
+      "additionalProperties": false,
+      "properties": {
+        "first": {
+          "$ref": "#/$defs/BrainReply"
+        },
+        "session_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "first"
+      ],
+      "title": "SessionCreated",
+      "type": "object"
+    },
+    "SessionEnded": {
+      "additionalProperties": false,
+      "properties": {
+        "report_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "report_id"
+      ],
+      "title": "SessionEnded",
+      "type": "object"
+    },
+    "SymbolKind": {
+      "enum": [
+        "function",
+        "method",
+        "class"
+      ],
+      "title": "SymbolKind",
+      "type": "string"
+    },
+    "SymbolRef": {
+      "additionalProperties": false,
+      "description": "분석 결과에서 얻은 코드 위치입니다. LLM이 만들지 않습니다.",
+      "properties": {
+        "commit_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        "end_line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/SymbolKind"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "symbol_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol_id",
+        "name",
+        "kind",
+        "path",
+        "start_line",
+        "end_line",
+        "commit_sha"
+      ],
+      "title": "SymbolRef",
+      "type": "object"
+    },
+    "Topic": {
+      "additionalProperties": false,
+      "description": "면접 주제 하나입니다. 2단계 분석에서 만들어집니다.",
+      "properties": {
+        "base_question": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        "commits": {
+          "items": {
+            "pattern": "^[0-9a-f]{40}$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "contribution_label": {
+          "$ref": "#/$defs/ContributionLabel"
+        },
+        "difficulty": {
+          "maximum": 3,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "expected_points": {
+          "items": {
+            "$ref": "#/$defs/ExpectedPoint"
+          },
+          "maxItems": 5,
+          "minItems": 3,
+          "type": "array"
+        },
+        "hint": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        "prepared_followups": {
+          "items": {
+            "$ref": "#/$defs/PreparedFollowup"
+          },
+          "maxItems": 3,
+          "minItems": 1,
+          "type": "array"
+        },
+        "question_intent": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        "related_symbols": {
+          "items": {
+            "$ref": "#/$defs/SymbolRef"
+          },
+          "type": "array"
+        },
+        "summary": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "type": "string"
+        },
+        "symbol": {
+          "$ref": "#/$defs/SymbolRef"
+        },
+        "title": {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        "topic_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic_id",
+        "title",
+        "symbol",
+        "related_symbols",
+        "contribution_label",
+        "difficulty",
+        "summary",
+        "base_question",
+        "question_intent",
+        "expected_points",
+        "prepared_followups",
+        "hint",
+        "commits"
+      ],
+      "title": "Topic",
+      "type": "object"
+    },
+    "TopicDraft": {
+      "additionalProperties": false,
+      "properties": {
+        "model_answer": {
+          "type": "string"
+        },
+        "topic_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic_id",
+        "model_answer"
+      ],
+      "title": "TopicDraft",
+      "type": "object"
+    },
+    "TopicPreview": {
+      "additionalProperties": false,
+      "properties": {
+        "contribution_label": {
+          "$ref": "#/$defs/ContributionLabel"
+        },
+        "symbol": {
+          "$ref": "#/$defs/SymbolRef"
+        },
+        "title": {
+          "type": "string"
+        },
+        "topic_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic_id",
+        "title",
+        "symbol",
+        "contribution_label"
+      ],
+      "title": "TopicPreview",
+      "type": "object"
+    },
+    "TopicReport": {
+      "additionalProperties": false,
+      "properties": {
+        "code_links": {
+          "items": {
+            "$ref": "#/$defs/CodeLink"
+          },
+          "type": "array"
+        },
+        "covered": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "missing": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "model_answer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "topic_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic_id",
+        "question",
+        "covered",
+        "missing",
+        "model_answer",
+        "code_links"
+      ],
+      "title": "TopicReport",
+      "type": "object"
+    },
+    "TurnRequest": {
+      "additionalProperties": false,
+      "description": "POST /api/sessions/{id}/turns 요청입니다.\n\nturn_id는 클라이언트가 만든 UUID이고, 같은 값이 다시 오면 처음 결과를 그대로 돌려줍니다.\n시각은 클라이언트 epoch 밀리초이며 지연 측정에만 씁니다.",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/TurnSource"
+        },
+        "speech_ended_at": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "speech_started_at": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "transcript": {
+          "maxLength": 4000,
+          "type": "string"
+        },
+        "turn_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "transcript",
+        "source"
+      ],
+      "title": "TurnRequest",
+      "type": "object"
+    },
+    "TurnRow": {
+      "additionalProperties": false,
+      "description": "턴별 판단 표의 한 줄입니다.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "covered_points": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fallback_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FallbackReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Intent"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "topic_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "transcript": {
+          "type": "string"
+        },
+        "turn_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "topic_id",
+        "question",
+        "transcript",
+        "intent",
+        "covered_points",
+        "action",
+        "fallback_reason"
+      ],
+      "title": "TurnRow",
+      "type": "object"
+    },
+    "TurnSource": {
+      "enum": [
+        "voice",
+        "text"
+      ],
+      "title": "TurnSource",
+      "type": "string"
+    },
+    "VoiceToken": {
+      "additionalProperties": false,
+      "description": "POST /api/sessions/{id}/voice-token 응답입니다. 브라우저에는 임시 토큰만 보냅니다.",
+      "properties": {
+        "client_secret": {
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "instructions": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "openai",
+            "gemini"
+          ],
+          "type": "string"
+        },
+        "tools": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "provider",
+        "client_secret",
+        "expires_at",
+        "model",
+        "instructions",
+        "tools"
+      ],
+      "title": "VoiceToken",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "title": "GitInsightContracts",
+  "type": "object"
+}

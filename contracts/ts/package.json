@@ -1,0 +1,10 @@
+{
+  "name": "@gitinsight/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "contracts/src의 Pydantic 모델에서 자동 생성한 TS 타입입니다. 루트에서 `pnpm contracts:gen`으로 만듭니다.",
+  "types": "index.d.ts",
+  "files": [
+    "index.d.ts"
+  ]
+}

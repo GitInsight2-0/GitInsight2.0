@@ -1,0 +1,76 @@
+{
+  "name": "good_answers",
+  "description": "요점을 다루는 답변: 꼬리질문 2번 뒤 다음 주제, 충족률이 낮으면 빠진 포인트를 PROBE",
+  "analysis": "gitinsight_agent",
+  "duration_min": 10,
+  "seconds_per_turn": 20,
+  "turns": [
+    {
+      "transcript": "먼저 GitHub API로 최신 커밋 SHA를 가져와서 컬렉션 이름에 넣습니다. 그래서 커밋 단위로 캐시가 되고, 같은 컬렉션이 이미 있으면 GitHub를 다시 부르지 않고 저장된 청크를 복원합니다.",
+      "llm_behavior": "ok",
+      "judgment": {
+        "intent": "ANSWER",
+        "coverage": [
+          {"point_id": "bgr-1", "status": "covered", "evidence_quote": "최신 커밋 SHA를 가져와서 컬렉션 이름에 넣습니다"},
+          {"point_id": "bgr-2", "status": "covered", "evidence_quote": "같은 컬렉션이 이미 있으면 GitHub를 다시 부르지 않고"},
+          {"point_id": "bgr-3", "status": "missing", "evidence_quote": null},
+          {"point_id": "bgr-4", "status": "missing", "evidence_quote": null}
+        ],
+        "followup": {"question": "커밋 SHA를 못 가져오면 캐시 키는 어떻게 되나요?", "symbol_id": null}
+      },
+      "expect_action": "FOLLOW_UP",
+      "expect_topic_id": "build-github-repo"
+    },
+    {
+      "transcript": "그 경우에는 commit_hash가 latest로 남아서 다른 커밋도 같은 캐시를 쓰게 됩니다. 그리고 기술 스택은 트리 API로 받은 파일 확장자로 추정합니다.",
+      "llm_behavior": "ok",
+      "judgment": {
+        "intent": "ANSWER",
+        "coverage": [
+          {"point_id": "bgr-3", "status": "covered", "evidence_quote": "트리 API로 받은 파일 확장자로 추정합니다"}
+        ],
+        "followup": {"question": "확장자로 추정하는 방식의 한계는 무엇이라고 보시나요?", "symbol_id": "app/agents/builder.py::build_github_repo"}
+      },
+      "expect_action": "FOLLOW_UP",
+      "expect_topic_id": "build-github-repo"
+    },
+    {
+      "transcript": "Markdown이나 설정 파일만 있어도 언어로 잡히고, 실제로 쓰는 프레임워크는 알 수 없습니다.",
+      "llm_behavior": "ok",
+      "judgment": {
+        "intent": "ANSWER",
+        "coverage": [],
+        "followup": {"question": "그렇다면 어떻게 개선하시겠어요?", "symbol_id": null}
+      },
+      "expect_action": "NEXT_TOPIC",
+      "expect_topic_id": "vector-service"
+    },
+    {
+      "transcript": "VectorService는 github_code_chunks라는 고정 컬렉션 하나를 싱글턴으로 씁니다.",
+      "llm_behavior": "ok",
+      "judgment": {
+        "intent": "ANSWER",
+        "coverage": [
+          {"point_id": "vs-1", "status": "covered", "evidence_quote": "github_code_chunks라는 고정 컬렉션 하나를 싱글턴으로 씁니다"}
+        ],
+        "followup": null
+      },
+      "expect_action": "PROBE",
+      "expect_topic_id": "vector-service"
+    },
+    {
+      "transcript": "search는 쿼리와 가까운 청크를 찾고 where 필터로 레포를 좁힙니다. 그런데 builder는 커밋별 컬렉션에 저장해서 서로 다른 컬렉션을 보고 있습니다.",
+      "llm_behavior": "ok",
+      "judgment": {
+        "intent": "ANSWER",
+        "coverage": [
+          {"point_id": "vs-2", "status": "covered", "evidence_quote": "쿼리와 가까운 청크를 찾고 where 필터로 레포를 좁힙니다"},
+          {"point_id": "vs-3", "status": "covered", "evidence_quote": "builder는 커밋별 컬렉션에 저장해서"}
+        ],
+        "followup": {"question": "그 불일치를 어떻게 발견하고 고치시겠어요?", "symbol_id": "app/service/vector_service.py::VectorService.search"}
+      },
+      "expect_action": "FOLLOW_UP",
+      "expect_topic_id": "vector-service"
+    }
+  ]
+}

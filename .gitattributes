@@ -1,0 +1,2 @@
+# 생성 파일 비교(contracts:check)가 OS마다 달라지지 않도록 줄바꿈을 LF로 고정합니다.
+* text=auto eol=lf
