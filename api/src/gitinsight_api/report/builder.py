@@ -12,7 +12,8 @@ import logging
 from dataclasses import dataclass
 from uuid import uuid4
 
-from gitinsight_api.brain.judge import judge_answer, quote_in_transcript
+from gitinsight_api.brain.judge import judge_answer
+from gitinsight_api.brain.quotes import EXACT, QuoteMatcher
 from gitinsight_api.brain.state import SessionState, TurnRecord
 from gitinsight_api.llm import LLMClient, LLMError, Message
 from gitinsight_api.llm.untrusted import UNTRUSTED_NOTICE, untrusted_block
@@ -123,7 +124,10 @@ def _clean_list(items: list[str]) -> list[str]:
 
 
 def validate_competencies(
-    drafts: list[CompetencyDraft], turns: list[TurnRecord], analysis: AnalysisResult
+    drafts: list[CompetencyDraft],
+    turns: list[TurnRecord],
+    analysis: AnalysisResult,
+    matcher: QuoteMatcher = EXACT,
 ) -> list[CompetencyScore]:
     """근거가 실제 자막과 맞는 역량만 남깁니다. 근거가 하나도 남지 않으면 그 역량을 버립니다."""
     by_id = {str(t.turn_id): t for t in turns}
@@ -135,7 +139,7 @@ def validate_competencies(
         evidence: list[Evidence] = []
         for item in draft.evidence:
             turn = by_id.get(item.turn_id.strip())
-            if turn is None or not quote_in_transcript(item.quote, turn.transcript):
+            if turn is None or not matcher.matches(item.quote, turn.transcript):
                 continue
             symbol = None
             if item.symbol_id and turn.topic_id:
@@ -212,6 +216,8 @@ class ReportBuilder:
     judge_model: str | None = None
     # true면 LLM을 부르지 않고 턴별 판단 표만 만듭니다 (장애 대비 스위치).
     force_prepared: bool = False
+    # 판단 검증과 같은 인용문 비교 방식을 씁니다.
+    quote_matcher: QuoteMatcher = EXACT
 
     async def rejudge_missing(
         self, analysis: AnalysisResult, state: SessionState, turns: list[TurnRecord]
@@ -231,6 +237,7 @@ class ReportBuilder:
                     state.persona_keywords,
                     timeout_s=self.rejudge_timeout_s,
                     model=self.judge_model,
+                    quote_matcher=self.quote_matcher,
                 )
             if outcome.judgment is None:
                 return turn
@@ -266,7 +273,9 @@ class ReportBuilder:
             report_id=uuid4(),
             session_id=state.session_id,
             kind=ReportKind.FULL,
-            competencies=validate_competencies(draft.competencies, turns, analysis),
+            competencies=validate_competencies(
+                draft.competencies, turns, analysis, self.quote_matcher
+            ),
             topics=topic_reports(analysis, topic_ids, turns, model_answers),
             strengths=_clean_list(draft.strengths),
             improvements=_clean_list(draft.improvements),

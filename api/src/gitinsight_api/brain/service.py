@@ -25,6 +25,7 @@ from gitinsight_api.brain.protocol import (
     AnalysisNotFoundError,
     SessionClosedError,
 )
+from gitinsight_api.brain.quotes import EXACT, QuoteMatcher
 from gitinsight_api.brain.repository import SessionRepository
 from gitinsight_api.brain.rules import Decision, RuleInput, decide
 from gitinsight_api.brain.state import SessionState, TopicProgress, TurnRecord
@@ -56,6 +57,7 @@ class InterviewBrain:
         judge_model: str | None = None,
         plan_model: str | None = None,
         force_prepared: bool = False,
+        quote_matcher: QuoteMatcher = EXACT,
         clock: Clock = utc_now,
         perf_counter: Callable[[], float] = time.perf_counter,
     ) -> None:
@@ -69,6 +71,7 @@ class InterviewBrain:
         self._plan_model = plan_model
         # true면 LLM 없이 미리 만든 질문만 씁니다 (장애 대비 스위치 BRAIN_FORCE_PREPARED).
         self._force_prepared = force_prepared
+        self._quote_matcher = quote_matcher
         self._clock = clock
         self._perf_counter = perf_counter
 
@@ -205,6 +208,7 @@ class InterviewBrain:
             state.persona_keywords,
             timeout_s=self._judge_timeout_s,
             model=self._judge_model,
+            quote_matcher=self._quote_matcher,
         )
         return outcome.judgment, outcome.fallback_reason, outcome.elapsed_ms
 

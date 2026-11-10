@@ -9,6 +9,7 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "pydantic-settings>=2.6",
     "litellm>=1.70",
+    "rapidfuzz>=3.10",
 ]
 
 [tool.uv.sources]
