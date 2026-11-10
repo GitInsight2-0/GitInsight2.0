@@ -4,6 +4,9 @@
 - fuzzy: exact가 실패하면 rapidfuzz partial_ratio로 유사도를 봅니다. 음성 인식 오차
   ("SHA" ↔ "샤", 조사 하나 차이)를 허용하려는 것입니다.
   짧은 인용문은 우연히 비슷해지기 쉬워서 유사도 비교를 하지 않고 exact만 씁니다.
+  자막 앞뒤에 빈 글자를 붙여 비교해서, 인용문이 자막 바깥으로 넘어간 부분은 틀린 글자로 셉니다.
+  partial_ratio는 짧은 쪽을 긴 쪽 안에서 찾고 양 끝은 겹치는 부분만 비교합니다.
+  그래서 그대로 쓰면 자막 전체에 지어낸 문장을 덧붙인 인용문도 100점이 나옵니다.
 
 기준값 근거(2026-11-10 측정, 정규화한 문자열의 partial_ratio):
 자막 오차 사례 86~90점, 기대 포인트 문장·바꿔 쓴 요약 같은 지어낸 인용문 9~22점.
@@ -19,6 +22,8 @@ from rapidfuzz import fuzz
 QuoteMatchMode = Literal["exact", "fuzzy"]
 
 _NON_WORD = re.compile(r"[\W_]+", re.UNICODE)
+# 정규화한 문자열에는 나오지 않는 글자입니다. 자막 앞뒤를 채우는 데 씁니다.
+_PAD = "\0"
 
 
 def normalize(text: str) -> str:
@@ -43,7 +48,9 @@ class QuoteMatcher:
             return True
         if self.mode != "fuzzy" or len(needle) < self.min_fuzzy_chars:
             return False
-        return fuzz.partial_ratio(needle, haystack, score_cutoff=self.threshold) > 0
+        padding = _PAD * len(needle)
+        padded = f"{padding}{haystack}{padding}"
+        return fuzz.partial_ratio(needle, padded, score_cutoff=self.threshold) > 0
 
 
 EXACT = QuoteMatcher()

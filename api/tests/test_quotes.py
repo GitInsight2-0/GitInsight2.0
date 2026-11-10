@@ -46,6 +46,24 @@ def test_quote_matching(quote: str, exact: bool, fuzzy: bool) -> None:
     assert FUZZY.matches(quote, TRANSCRIPT) is fuzzy
 
 
+@pytest.mark.parametrize(
+    ("quote", "transcript"),
+    [
+        # 자막보다 긴 인용문: 자막 전체가 인용문 안에 있어도 덧붙인 내용은 지어낸 것입니다.
+        (
+            "캐시를 썼습니다. 그리고 TTL을 30초로 설정해 만료와 무효화를 직접 관리했습니다",
+            "캐시를 썼습니다",
+        ),
+        (f"{TRANSCRIPT} 그리고 TTL을 30초로 설정했습니다", TRANSCRIPT),
+        # 자막 앞이나 뒤에 지어낸 내용을 붙인 인용문
+        ("레디스를 먼저 띄우고 먼저 깃허브 API로 최신 커밋", TRANSCRIPT),
+        ("저장된 청크를 복원해요 그리고 TTL도 설정했어요", TRANSCRIPT),
+    ],
+)
+def test_fuzzy_rejects_text_outside_transcript(quote: str, transcript: str) -> None:
+    assert not FUZZY.matches(quote, transcript)
+
+
 def test_threshold_is_configurable() -> None:
     strict = QuoteMatcher(mode="fuzzy", threshold=95)
     assert not strict.matches("최신 커밋 SHA를 가져와서 컬렉션 이름에 넣습니다", TRANSCRIPT)
