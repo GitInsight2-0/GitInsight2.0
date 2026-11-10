@@ -12,7 +12,22 @@ README.md의 "전체 구조"를 따릅니다.
 - DB: Postgres (Railway)
 - 음성 AI: OpenAI GPT-Live 또는 Google Gemini Live (G1에서 결정)
 
-버전, 패키지 관리자, 폴더 구조는 정해지면 이 절에 적습니다.
+버전과 패키지 관리자는 아래와 같습니다. 첫 회의에서 바뀌면 이 절을 고칩니다.
+
+- Python 3.12, uv workspace (멤버: `contracts`, `api`, 분석 워커는 T6에서 `worker` 추가)
+- Node.js 22 이상, pnpm 10 (`corepack pnpm`으로 실행할 수 있습니다)
+
+폴더 구조는 아래와 같습니다.
+
+| 경로 | 내용 | 담당 |
+|---|---|---|
+| `contracts/src/gitinsight_contracts/` | 모듈 간 계약(Pydantic 모델) | B (변경 시 2명 승인) |
+| `contracts/schema/contracts.json`, `contracts/ts/index.d.ts` | 계약에서 자동 생성한 JSON Schema와 TS 타입. 직접 고치지 않습니다 | 자동 생성 |
+| `api/src/gitinsight_api/` | FastAPI 서버. `brain/`(면접 두뇌), `llm/`(LLMClient), `routes/` | B, D |
+| `fixtures/analysis/` | 데모 레포 분석 결과 샘플 | B |
+| `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |
+| `scripts/` | 계약 생성, 샘플 데이터 도구, 수동 LLM 평가 스크립트 | |
+| `docs/` | 루브릭, 평가 기록(`docs/evals/`), 결정 기록 | |
 
 ## 설계 원칙
 
@@ -28,7 +43,11 @@ README.md의 "핵심 설계 원칙"을 지킵니다. 코드에서 특히 주의�
 ## 코드 규칙
 
 - 한 줄에는 한 문장만 작성하고, 읽기 쉬운 줄바꿈을 유지합니다.
-- 포맷터, 린터, 타입 검사 설정은 정해지면 이 절에 적습니다.
+- Python은 ruff(포맷·린트)와 pyright(standard 모드)를 씁니다. 설정은 루트 `pyproject.toml`에 있습니다.
+- 계약 모델은 `Contract`(추가 필드 거부)를, LLM 출력 모델은 `LLMOutput`(기본값 없는 필드만)을 상속합니다.
+- 계약을 바꾸면 `pnpm contracts:gen`으로 생성 파일을 함께 커밋합니다. CI는 `pnpm contracts:check`로 검사합니다.
+- 모든 LLM 호출은 `gitinsight_api.llm.LLMClient`를 거칩니다. 코드, README, 자막, JD는 `untrusted_block()` 안에만 넣습니다.
+- 테스트는 FakeLLM만 씁니다. 실제 LLM 호출 테스트는 `live_llm`, 네트워크 테스트는 `network` 표시를 붙이고 기본 실행에서 뺍니다.
 
 ## 작업 흐름
 
@@ -40,4 +59,19 @@ README.md의 "핵심 설계 원칙"을 지킵니다. 코드에서 특히 주의�
 
 ## 명령
 
-개발 서버, 정적 검사, 테스트, 빌드 명령은 정해지면 여기에 적습니다.
+```text
+uv sync                                    # Python 의존성 설치
+pnpm install                               # Node 의존성 설치 (pnpm이 없으면 corepack pnpm install)
+uv run ruff check; uv run ruff format --check; uv run pyright
+uv run pytest                              # 기본 테스트 (network, live_llm 제외)
+uv run pytest -m network                   # 샘플 데이터 줄 범위를 고정 커밋과 대조 (네트워크 필요)
+pnpm contracts:gen                         # 계약 → JSON Schema → TS 타입 생성
+pnpm contracts:check                       # 생성 파일이 커밋된 내용과 같은지 검사
+uv run uvicorn --factory gitinsight_api.main:app_factory --reload   # API 서버 (기본 8000번)
+uv run python -m gitinsight_contracts.fixtures show                # 샘플 분석 결과 요약
+uv run python -m gitinsight_api.brain.cli [--real-llm]             # 터미널 텍스트 면접
+uv run python scripts/llm_latency.py --n 20                        # 판단 LLM 지연 측정 (수동, 비용 발생)
+uv run python scripts/eval_brain.py                                # 골든 대화 실제 LLM 평가 (수동, 비용 발생)
+```
+
+음성 PoC용 가짜 백엔드는 `LAB_ENABLED=true`로 서버를 띄우면 켜집니다. 이때 `POST /api/sessions/{id}/turns?lab_delay_ms=800`처럼 인위적 지연을 줄 수 있습니다. 데모와 배포에서는 끕니다.

@@ -8,7 +8,20 @@
 
 ## 개발 환경
 
-개발 환경과 검사 명령은 웹, 서버, 분석 워커의 구성이 정해지면 여기에 적습니다.
+1. [uv](https://docs.astral.sh/uv/)와 Node.js 22 이상을 설치합니다. pnpm은 `corepack enable`로 켜거나 `corepack pnpm`으로 실행합니다.
+2. 저장소 루트에서 `uv sync`와 `pnpm install`을 실행합니다. uv가 Python 3.12를 자동으로 받습니다.
+3. `.env.example`을 `.env`로 복사하고 필요한 값만 채웁니다. `.env`는 커밋하지 않습니다.
+4. PR 전에 아래 검사를 통과시킵니다.
+
+```text
+uv run ruff check
+uv run ruff format --check
+uv run pyright
+uv run pytest
+pnpm contracts:check
+```
+
+나머지 명령(API 서버, 텍스트 면접 CLI, 수동 LLM 평가)은 [`AGENTS.md`](./AGENTS.md)의 "명령" 절에 있습니다. 웹(C)과 분석 워커(A)의 명령은 각 구성이 생기면 추가합니다.
 
 ## 작업 흐름
 

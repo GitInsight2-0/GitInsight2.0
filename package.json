@@ -1,0 +1,16 @@
+{
+  "name": "gitinsight",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.20.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "contracts:gen": "node scripts/contracts.mjs gen",
+    "contracts:check": "node scripts/contracts.mjs check"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "16.0.0"
+  }
+}
