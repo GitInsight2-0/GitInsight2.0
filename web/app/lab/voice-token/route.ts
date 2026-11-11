@@ -7,7 +7,7 @@
  */
 import type { VoiceToken } from "@gitinsight/contracts";
 import { EndSensitivity, GoogleGenAI, Modality, Type } from "@google/genai";
-import { DELEGATION_TOOL, INSTRUCTIONS, TOOL_DESCRIPTION, TOOL_PARAMETERS, type VadSettings, parseVad } from "@/lib/voice/config";
+import { DELEGATION_TOOL, TOOL_DESCRIPTION, TOOL_PARAMETERS, type VadSettings, buildInstructions, parseVad } from "@/lib/voice/config";
 
 type Provider = VoiceToken["provider"];
 
@@ -15,14 +15,15 @@ export async function POST(req: Request) {
   if (process.env.LAB_ENABLED !== "true") {
     return Response.json({ detail: "LAB_ENABLED=true일 때만 쓸 수 있습니다" }, { status: 404 });
   }
-  const body = (await req.json().catch(() => null)) as { provider?: unknown; vad?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as { provider?: unknown; vad?: unknown; filler?: unknown } | null;
   const provider = body?.provider;
   if (provider !== "openai" && provider !== "gemini") {
     return Response.json({ detail: "provider는 openai 또는 gemini입니다" }, { status: 400 });
   }
   try {
     const vad = parseVad(body?.vad);
-    const token = provider === "openai" ? await openaiToken(vad) : await geminiToken(vad);
+    const instructions = buildInstructions({ filler: body?.filler === true });
+    const token = provider === "openai" ? await openaiToken(vad, instructions) : await geminiToken(vad, instructions);
     return Response.json(token satisfies VoiceToken);
   } catch (e) {
     // 제공사 오류 본문에 키가 들어가지는 않지만, 길이를 줄여 돌려줍니다.
@@ -32,7 +33,7 @@ export async function POST(req: Request) {
 
 const openaiTools = [{ type: "function", name: DELEGATION_TOOL, description: TOOL_DESCRIPTION, parameters: TOOL_PARAMETERS }];
 
-async function openaiToken(vad: VadSettings): Promise<VoiceToken> {
+async function openaiToken(vad: VadSettings, instructions: string): Promise<VoiceToken> {
   const apiKey = requireEnv("OPENAI_API_KEY");
   const model = process.env.OPENAI_REALTIME_MODEL || "gpt-realtime-2.1";
   // https://developers.openai.com/api/docs/guides/realtime-webrtc
@@ -43,7 +44,7 @@ async function openaiToken(vad: VadSettings): Promise<VoiceToken> {
       session: {
         type: "realtime",
         model,
-        instructions: INSTRUCTIONS,
+        instructions,
         audio: {
           input: {
             transcription: { model: process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-transcribe", language: "ko" },
@@ -64,12 +65,12 @@ async function openaiToken(vad: VadSettings): Promise<VoiceToken> {
     client_secret: data.value,
     expires_at: new Date((data.expires_at ?? Date.now() / 1000 + 60) * 1000).toISOString(),
     model,
-    instructions: INSTRUCTIONS,
+    instructions,
     tools: openaiTools,
   };
 }
 
-async function geminiToken(vad: VadSettings): Promise<VoiceToken> {
+async function geminiToken(vad: VadSettings, instructions: string): Promise<VoiceToken> {
   const apiKey = requireEnv("GEMINI_API_KEY");
   const model = process.env.GEMINI_LIVE_MODEL || "gemini-3.1-flash-live-preview";
   const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "v1alpha" } });
@@ -98,7 +99,7 @@ async function geminiToken(vad: VadSettings): Promise<VoiceToken> {
         model,
         config: {
           responseModalities: [Modality.AUDIO],
-          systemInstruction: { parts: [{ text: INSTRUCTIONS }] },
+          systemInstruction: { parts: [{ text: instructions }] },
           speechConfig: {
             languageCode: "ko-KR",
             voiceConfig: { prebuiltVoiceConfig: { voiceName: process.env.GEMINI_VOICE || "Kore" } },
@@ -130,7 +131,7 @@ async function geminiToken(vad: VadSettings): Promise<VoiceToken> {
     client_secret: token.name,
     expires_at: expireTime,
     model,
-    instructions: INSTRUCTIONS,
+    instructions,
     tools: [{ functionDeclarations }],
   };
 }
