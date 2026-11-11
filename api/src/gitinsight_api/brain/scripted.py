@@ -30,6 +30,7 @@ class _Line:
 class _ScriptedSession:
     started_at: float
     duration_sec: int
+    owner_id: str | None = None
     position: int = 0
     replies: dict[UUID, BrainReply] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -72,11 +73,22 @@ class ScriptedBrain:
         self._clock = clock
         self._sessions: dict[UUID, tuple[str, _ScriptedSession]] = {}
 
-    async def start(self, request: SessionCreate) -> tuple[UUID, BrainReply]:
+    async def owner_of(self, session_id: UUID) -> str | None:
+        try:
+            _, session = self._sessions[session_id]
+        except KeyError:
+            raise SessionNotFoundError(session_id) from None
+        return session.owner_id
+
+    async def start(
+        self, request: SessionCreate, owner_id: str | None = None
+    ) -> tuple[UUID, BrainReply]:
         if request.analysis_id not in self._analyses:
             raise AnalysisNotFoundError(request.analysis_id)
         session_id = uuid4()
-        session = _ScriptedSession(started_at=self._clock(), duration_sec=request.duration_min * 60)
+        session = _ScriptedSession(
+            started_at=self._clock(), duration_sec=request.duration_min * 60, owner_id=owner_id
+        )
         self._sessions[session_id] = (request.analysis_id, session)
         line = self._scripts[request.analysis_id][0]
         reply = self._reply(None, line, session, utterance.join(utterance.GREETING, line.question))

@@ -52,6 +52,19 @@ def build_report_service(
     )
 
 
+def build_server_services(settings: Settings) -> tuple[InterviewBrain, ReportService]:
+    """HTTP 서버용 면접 두뇌와 리포트 서비스를 만듭니다.
+
+    LLM 클라이언트는 만들기만 하고 부르지 않으므로 서버 시작 때 LLM이나 네트워크를 쓰지 않습니다.
+    세션과 리포트는 메모리 저장소에 둡니다.
+    """
+    brain = build_fixture_brain(settings, llm=build_judge_llm(settings))
+    reports = build_report_service(
+        settings, brain, load_analysis(settings.fixture_analysis), llm=build_report_llm(settings)
+    )
+    return brain, reports
+
+
 def build_fixture_brain(
     settings: Settings,
     *,

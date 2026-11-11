@@ -78,3 +78,7 @@ uv run python scripts/demo_check.py [--block-llm | --real-llm]     # 데모 완�
 ```
 
 음성 PoC용 가짜 백엔드는 `LAB_ENABLED=true`로 서버를 띄우면 켜집니다. 이때 `POST /api/sessions/{id}/turns?lab_delay_ms=800`처럼 인위적 지연을 줄 수 있습니다. 데모와 배포에서는 끕니다.
+
+`LAB_ENABLED=false`(기본)이면 서버는 진짜 면접 두뇌와 리포트 API(`POST /api/sessions/{id}/end`, `GET /api/reports/{id}`)를 씁니다.
+로그인(#18)이 붙기 전까지 이 모드의 요청은 401을 돌려줍니다.
+테스트는 `app.dependency_overrides`로 `get_current_user`를 바꿔 로그인 사용자를 넣습니다.
