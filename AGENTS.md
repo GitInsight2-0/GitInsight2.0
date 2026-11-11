@@ -10,7 +10,7 @@ README.md의 "전체 구조"를 따릅니다.
 - 서버: FastAPI (Railway)
 - 분석 워커 (Railway)
 - DB: Postgres (Railway)
-- 음성 AI: OpenAI GPT-Live 또는 Google Gemini Live (G1에서 결정)
+- 음성 AI: Google Gemini Live (G1에서 결정, `docs/evals/voice-g1.md`). OpenAI Realtime 어댑터는 대비용으로 남김
 
 버전과 패키지 관리자는 아래와 같습니다. 첫 회의에서 바뀌면 이 절을 고칩니다.
 
