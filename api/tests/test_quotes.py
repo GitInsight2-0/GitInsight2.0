@@ -64,6 +64,33 @@ def test_fuzzy_rejects_text_outside_transcript(quote: str, transcript: str) -> N
     assert not FUZZY.matches(quote, transcript)
 
 
+# 긴 인용문 끝에 짧은 주장을 덧붙이면 유사도는 80점을 넘지만 자막 바깥 글자가 많습니다.
+LONG_TRANSCRIPT = (
+    "먼저 깃허브 API로 최신 커밋 SHA를 가져와서 컬렉션 이름에 넣고요 "
+    "같은 커밋이면 저장된 청크를 복원해요"
+)
+LONG_QUOTE = "깃허브 API로 최신 커밋 SHA를 가져와서 컬렉션 이름에 넣고요 같은 커밋이면 저장된 청크를 복원해요"
+
+
+@pytest.mark.parametrize("added", [" TTL은 30초", " TTL 30초로 만료", " 레디스로 캐시"])
+def test_fuzzy_rejects_short_claim_added_to_long_quote(added: str) -> None:
+    assert not FUZZY.matches(LONG_QUOTE + added, LONG_TRANSCRIPT)
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        # 자막 끝 인용문에서 조사 하나가 다르거나 한 글자가 더 붙은 음성 인식 오차는 통과합니다.
+        "같은 커밋이면 저장된 청크가 복원해요",
+        "같은 커밋이면 저장된 청크를 복원해요요",
+        # 자막 맨 앞 인용문의 인식 오차
+        "먼저 깃허브 API로 최신 커밋 샤를",
+    ],
+)
+def test_fuzzy_allows_recognition_errors_at_transcript_edges(quote: str) -> None:
+    assert FUZZY.matches(quote, LONG_TRANSCRIPT)
+
+
 def test_threshold_is_configurable() -> None:
     strict = QuoteMatcher(mode="fuzzy", threshold=95)
     assert not strict.matches("최신 커밋 SHA를 가져와서 컬렉션 이름에 넣습니다", TRANSCRIPT)

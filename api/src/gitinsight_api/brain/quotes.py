@@ -7,6 +7,8 @@
   자막 앞뒤에 빈 글자를 붙여 비교해서, 인용문이 자막 바깥으로 넘어간 부분은 틀린 글자로 셉니다.
   partial_ratio는 짧은 쪽을 긴 쪽 안에서 찾고 양 끝은 겹치는 부분만 비교합니다.
   그래서 그대로 쓰면 자막 전체에 지어낸 문장을 덧붙인 인용문도 100점이 나옵니다.
+  유사도만 보면 인용문 길이의 20%까지는 자막 바깥 글자를 붙여도 통과합니다.
+  그래서 정렬 위치에서 자막 바깥 글자 수를 따로 세고, 조사 하나 정도(2자)까지만 허용합니다.
 
 기준값 근거(2026-11-10 측정, 정규화한 문자열의 partial_ratio):
 자막 오차 사례 86~90점, 기대 포인트 문장·바꿔 쓴 요약 같은 지어낸 인용문 9~22점.
@@ -38,6 +40,8 @@ class QuoteMatcher:
     threshold: float = 80.0
     # fuzzy 비교를 할 인용문의 최소 길이(정규화한 글자 수)입니다. 이보다 짧으면 exact만 씁니다.
     min_fuzzy_chars: int = 6
+    # fuzzy에서 인용문이 자막 앞뒤 바깥으로 넘어가도 되는 글자 수입니다. 조사 하나 정도입니다.
+    max_outside_chars: int = 2
 
     def matches(self, quote: str, transcript: str) -> bool:
         needle = normalize(quote)
@@ -50,7 +54,13 @@ class QuoteMatcher:
             return False
         padding = _PAD * len(needle)
         padded = f"{padding}{haystack}{padding}"
-        return fuzz.partial_ratio(needle, padded, score_cutoff=self.threshold) > 0
+        alignment = fuzz.partial_ratio_alignment(needle, padded, score_cutoff=self.threshold)
+        if alignment is None:
+            return False
+        start = len(padding)
+        end = start + len(haystack)
+        outside = max(0, start - alignment.dest_start) + max(0, alignment.dest_end - end)
+        return outside <= self.max_outside_chars
 
 
 EXACT = QuoteMatcher()
