@@ -47,6 +47,7 @@ README.md의 "핵심 설계 원칙"을 지킵니다. 코드에서 특히 주의�
 - Python은 ruff(포맷·린트)와 pyright(standard 모드)를 씁니다. 설정은 루트 `pyproject.toml`에 있습니다.
 - 계약 모델은 `Contract`(추가 필드 거부)를, LLM 출력 모델은 `LLMOutput`(기본값 없는 필드만)을 상속합니다.
 - 계약을 바꾸면 `pnpm contracts:gen`으로 생성 파일을 함께 커밋합니다. CI는 `pnpm contracts:check`로 검사합니다.
+- CI(`.github/workflows/ci.yml`)는 PR과 `main` push마다 아래 "명령"의 ruff, pyright, pytest, `pnpm contracts:check`를 실행합니다.
 - 모든 LLM 호출은 `gitinsight_api.llm.LLMClient`를 거칩니다. 코드, README, 자막, JD는 `untrusted_block()` 안에만 넣습니다.
 - 테스트는 FakeLLM만 씁니다. 실제 LLM 호출 테스트는 `live_llm`, 네트워크 테스트는 `network` 표시를 붙이고 기본 실행에서 뺍니다.
 
