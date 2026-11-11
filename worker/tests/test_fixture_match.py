@@ -8,12 +8,16 @@ import asyncio
 import pytest
 
 from gitinsight_contracts.fixtures import load_analysis
+from gitinsight_worker.contribution import Requester
 from gitinsight_worker.git import git_cloner
 from gitinsight_worker.stage1 import Stage1Result, run_stage1
 
 from worker_test_support import Recorder
 
 pytestmark = pytest.mark.network
+
+# 샘플 데이터의 기여 라벨은 레포 주인이 분석을 요청했다고 보고 정했습니다.
+REQUESTER = Requester.of(names=["tttae210-sys"])
 
 
 @pytest.fixture(scope="module")
@@ -25,6 +29,7 @@ def result(tmp_path_factory: pytest.TempPathFactory) -> Stage1Result:
             git_cloner(url, analysis.commit_sha),
             analysis.commit_sha,
             Recorder(),
+            requester=REQUESTER,
             work_dir=tmp_path_factory.mktemp("clone"),
         )
     )
@@ -45,3 +50,14 @@ def test_symbol_count_and_languages_match_sample(result: Stage1Result) -> None:
     assert {(s.language, s.file_count) for s in result.languages} == {
         (s.language, s.file_count) for s in analysis.languages
     }
+
+
+def test_contribution_label_and_commits_match_sample(result: Stage1Result) -> None:
+    analysis = load_analysis()
+
+    for topic in analysis.topics:
+        contribution = result.contributions[topic.symbol.symbol_id]
+        assert contribution.label is topic.contribution_label, topic.topic_id
+        assert list(contribution.commits) == topic.commits, topic.topic_id
+    # 샘플에는 세 라벨이 모두 있습니다.
+    assert len({t.contribution_label for t in analysis.topics}) == 3
