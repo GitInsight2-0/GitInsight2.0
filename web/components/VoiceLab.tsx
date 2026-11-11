@@ -47,7 +47,8 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
   const [similarities, setSimilarities] = useState<number[]>([]);
   const [missed, setMissed] = useState(0);
   const [vad, setVad] = useState<VadSettings>(DEFAULT_VAD);
-  const [filler, setFiller] = useState(true);
+  // #28 측정: 모델 맞장구는 위임 누락을 늘려 기본으로 끕니다.
+  const [filler, setFiller] = useState(false);
   const [fillers, setFillers] = useState<number[]>([]);
   const session = useRef<{ stop(): void } | null>(null);
   const t0 = useRef(0);

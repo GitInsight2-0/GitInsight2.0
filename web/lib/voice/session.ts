@@ -92,32 +92,34 @@ export async function startVoiceSession(
   let userSpokeSinceTool = false;
 
   // ── 응답 시간 측정 ──
-  // 사용자 말 끝을 기준으로, 도구 결과를 보내기 전에 난 AI 첫소리는 맞장구(filler_start),
-  // 도구 결과를 보낸 뒤 난 첫소리는 서버가 정한 발화(first_audio)로 셉니다.
-  let turnUserEnd: number | null = null;
-  let toolRespondedAt = 0;
-  let fillerMeasured = false;
-  let replyMeasured = false;
+  // 도구 결과를 보낸 뒤 난 AI 첫소리는 서버가 정한 발화(first_audio)로, 기준은 그 턴을 보낼 때의 사용자 말 끝입니다.
+  // 사용자가 말한 뒤 도구 결과 전에 난 AI 첫소리는 맞장구(filler_start)로 셉니다.
+  // 도구 결과를 보낸 뒤 마이크에 작은 소리가 잡혀도 질문 측정이 지워지지 않게, 두 상태를 따로 둡니다.
+  /** 도구 결과를 보냈고 아직 그 발화의 첫소리를 재지 않았다 */
+  let replyPending = false;
+  /** 질문 측정 기준인 사용자 말 끝 (epoch ms) */
+  let replyBaseEnd: number | null = null;
+  /** 사용자가 말을 마친 뒤 아직 AI 첫소리를 재지 않았다 */
+  let fillerArmed = false;
 
   const meter = new Meter({
     userStart: (at) => metric("vad_start", { at_ms: at }),
     userEnd: (at) => {
       metric("vad_end", { at_ms: at });
-      turnUserEnd = at;
-      toolRespondedAt = 0;
-      fillerMeasured = false;
-      replyMeasured = false;
+      fillerArmed = true;
     },
     aiStart: (at) => {
-      if (turnUserEnd === null || meter.userSpeaking) return;
-      const ms = at - turnUserEnd;
-      if (toolRespondedAt > 0 && at >= toolRespondedAt) {
-        if (replyMeasured) return;
-        replyMeasured = true;
+      if (meter.userSpeaking) return;
+      if (replyPending) {
+        replyPending = false;
+        fillerArmed = false;
+        if (replyBaseEnd === null) return;
+        const ms = at - replyBaseEnd;
         ui.latency(ms);
         metric("first_audio", { at_ms: at, value_ms: ms });
-      } else if (!fillerMeasured) {
-        fillerMeasured = true;
+      } else if (fillerArmed && meter.lastUserEnd !== null) {
+        fillerArmed = false;
+        const ms = at - meter.lastUserEnd;
         ui.filler(ms);
         metric("filler_start", { at_ms: at, value_ms: ms });
       }
@@ -181,8 +183,11 @@ export async function startVoiceSession(
 
   async function delegate(callId: string, name: string, args: Record<string, unknown>) {
     userSpokeSinceTool = false;
+    // 이 턴의 질문 측정 기준: 도구 호출을 받은 시점의 마지막 사용자 말 끝
+    const baseEnd = meter.lastUserEnd;
     const respond = (utterance: string, isDone: boolean) => {
-      toolRespondedAt = Date.now();
+      replyPending = true;
+      replyBaseEnd = baseEnd;
       handle?.respondTool(callId, name, { utterance, done: isDone });
     };
 
