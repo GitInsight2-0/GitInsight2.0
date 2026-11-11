@@ -22,11 +22,11 @@ from gitinsight_worker.stage1 import analyze_tree, run_stage1
 
 from worker_test_support import Recorder
 
-ME = Requester.of(names=["Me"], emails=["me@example.com"])
+ME = Requester.of(emails=["me@example.com"])
 
 
-def line(sha_char: str, name: str = "Other", email: str = "o@example.com", time: int = 0):
-    return BlameLine(sha_char * 40, name, email, time)
+def line(sha_char: str, email: str = "o@example.com", time: int = 0) -> BlameLine:
+    return BlameLine(sha_char * 40, email, time)
 
 
 @pytest.mark.parametrize(
@@ -44,15 +44,24 @@ def test_label_thresholds(share: float, label: ContributionLabel) -> None:
     assert label_for(share) is label
 
 
-def test_requester_matches_name_or_email_ignoring_case() -> None:
-    assert ME.matches("me", "x@example.com")
-    assert ME.matches("Someone", "ME@Example.com")
-    assert not ME.matches("Other", "o@example.com")
-    assert Requester.of(names=["", "  "]).names == frozenset()
+def test_requester_matches_email_ignoring_case() -> None:
+    assert ME.matches("ME@Example.com")
+    assert not ME.matches("o@example.com")
+    assert Requester.of(emails=["", "  "]).emails == frozenset()
+
+
+def test_requester_adds_github_noreply_addresses() -> None:
+    requester = Requester.of(emails=["me@example.com"], login="Me-Dev", user_id=42)
+
+    assert requester.matches("me-dev@users.noreply.github.com")
+    assert requester.matches("42+Me-Dev@users.noreply.github.com")
+    assert not requester.matches("41+me-dev@users.noreply.github.com")
+    # 숫자 id가 없으면 옛 noreply 형태만 더합니다.
+    assert Requester.of(login="me").emails == {"me@users.noreply.github.com"}
 
 
 def test_summarize_counts_only_lines_in_range() -> None:
-    blame = [line("a", "Me")] * 2 + [line("b")] * 8
+    blame = [line("a", "me@example.com")] * 2 + [line("b")] * 8
 
     assert summarize(blame, 1, 2, ME).label is ContributionLabel.VERIFIED
     assert summarize(blame, 1, 10, ME).label is ContributionLabel.SHARED
@@ -69,7 +78,7 @@ def test_summarize_keeps_most_recent_commits_first() -> None:
 
 
 def test_summarize_without_requester_or_lines() -> None:
-    blame = [line("a", "Me", time=1)]
+    blame = [line("a", "me@example.com", time=1)]
 
     assert summarize(blame, 1, 1, None) == Contribution(ContributionLabel.UNVERIFIED, ("a" * 40,))
     assert summarize(blame, 5, 6, ME) == UNKNOWN
@@ -84,12 +93,12 @@ def test_parse_line_porcelain_ignores_code_that_looks_like_headers() -> None:
     sha = "c" * 40
     output = (
         f"{sha} 1 1 2\nauthor Me\nauthor-mail <me@example.com>\ncommitter-time 7\n"
-        "\tauthor Fake\n"
+        "\tcommitter-time 1\n"
         f"{sha} 2 2\nauthor Me\nauthor-mail <me@example.com>\ncommitter-time 7\n"
         "\tauthor-mail <fake@example.com>\n"
     ).encode()
 
-    assert parse_line_porcelain(output) == [BlameLine(sha, "Me", "me@example.com", 7)] * 2
+    assert parse_line_porcelain(output) == [BlameLine(sha, "me@example.com", 7)] * 2
 
 
 def test_blame_file_rejects_bad_sha_and_hides_git_output(tmp_path: Path) -> None:
@@ -173,6 +182,26 @@ def test_analyze_tree_uses_the_pinned_commit_not_the_worktree(
     # 작업 폴더에는 theirs()가 있지만 첫 커밋에는 없으므로, 그 범위의 blame 결과도 없습니다.
     assert result.contributions["mod.py::theirs"] == UNKNOWN
     assert result.contributions["mod.py::mine"].commits == (first,)
+
+
+def test_same_name_with_other_email_is_not_the_requester(repo: tuple[Path, list[str]]) -> None:
+    path, (_, _, third) = repo
+    # mine()의 작성자 이름은 "Me"지만, 이메일이 다르면 다른 사람으로 봅니다.
+    requester = Requester.of(emails=["someone-else@example.com"])
+
+    result = analyze_tree(path, third, requester)
+
+    assert result.contributions["mod.py::mine"].label is ContributionLabel.UNVERIFIED
+
+
+def test_blame_budget_exhausted_leaves_symbols_unknown(repo: tuple[Path, list[str]]) -> None:
+    path, (_, _, third) = repo
+
+    result = analyze_tree(path, third, ME, blame_budget_s=0)
+
+    # 시간 상한을 넘겨도 분석은 끝나고, 심볼은 그대로 나오며 기여 근거만 비어 있습니다.
+    assert {s.name for s in result.symbols} == {"mine", "theirs"}
+    assert set(result.contributions.values()) == {UNKNOWN}
 
 
 def test_tree_without_git_gets_unknown_contribution(tmp_path: Path) -> None:

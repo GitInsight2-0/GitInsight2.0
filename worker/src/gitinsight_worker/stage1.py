@@ -13,6 +13,7 @@ import os
 import shutil
 import stat
 import tempfile
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +23,8 @@ from gitinsight_contracts.analysis import LanguageStat
 from gitinsight_contracts.api import AnalysisState, AnalysisStatus
 from gitinsight_contracts.common import SymbolRef
 from gitinsight_worker.contribution import (
+    BLAME_BUDGET_S,
+    BLAME_TIMEOUT_S,
     UNKNOWN,
     BlameError,
     BlameLine,
@@ -76,18 +79,29 @@ def iter_repo_files(root: Path) -> list[str]:
     return sorted(found)
 
 
-def _blame_or_none(root: Path, path: str, commit_sha: str) -> list[BlameLine] | None:
-    if not (root / ".git").exists():
+def _blame_or_none(
+    root: Path, path: str, commit_sha: str, deadline: float
+) -> list[BlameLine] | None:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0 or not (root / ".git").exists():
         return None
     try:
-        return blame_file(root, path, commit_sha)
+        return blame_file(root, path, commit_sha, timeout=min(BLAME_TIMEOUT_S, remaining))
     except BlameError as error:
         # 한 파일의 blame 실패로 분석 전체를 멈추지 않습니다. 라벨은 "확인 불가"가 됩니다.
         logger.info("blame_failed error=%s", type(error).__name__)
         return None
 
 
-def analyze_tree(root: Path, commit_sha: str, requester: Requester | None = None) -> Stage1Result:
+def analyze_tree(
+    root: Path,
+    commit_sha: str,
+    requester: Requester | None = None,
+    *,
+    blame_budget_s: float = BLAME_BUDGET_S,
+) -> Stage1Result:
+    """`blame_budget_s`를 넘기면 남은 파일은 blame하지 않고 기여 근거를 "확인 불가"로 둡니다."""
+    deadline = time.monotonic() + blame_budget_s
     paths = iter_repo_files(root)
     symbols: list[SymbolRef] = []
     contributions: dict[str, Contribution] = {}
@@ -100,7 +114,7 @@ def analyze_tree(root: Path, commit_sha: str, requester: Requester | None = None
         symbol_count += extracted.definition_count
         if not extracted.symbols:
             continue
-        blame = _blame_or_none(root, path, commit_sha)
+        blame = _blame_or_none(root, path, commit_sha, deadline)
         for symbol in extracted.symbols:
             contributions[symbol.symbol_id] = (
                 UNKNOWN
