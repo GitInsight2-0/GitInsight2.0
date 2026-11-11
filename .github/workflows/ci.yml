@@ -10,10 +10,11 @@ on:
 permissions:
   contents: read
 
-# 같은 브랜치에 새 커밋이 오면 이전 실행을 취소합니다.
+# PR에 새 커밋이 오면 이전 실행을 취소합니다.
+# main push는 취소하지 않아서, 연달아 머지해도 커밋마다 결과가 남습니다.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   checks:
