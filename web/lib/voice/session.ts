@@ -12,7 +12,7 @@
  */
 import type { BrainReply, MetricEvent, MetricName } from "@gitinsight/contracts";
 import { ApiError, createSession, fetchVoiceToken, postMetric, postTurn } from "./api";
-import { DELEGATION_TOOL, sayMessage } from "./config";
+import { DELEGATION_TOOL, type VadSettings, sayMessage } from "./config";
 import { Meter, epochMs } from "./meter";
 import { similarity } from "./similarity";
 import type { AdapterHandle, Connect, Provider } from "./types";
@@ -28,6 +28,8 @@ export interface SessionUi {
   bargeIn(): void;
   /** 받아쓰기와 도구 인자 transcript의 유사도 (0~1). 둘 다 있을 때만 */
   transcriptSimilarity(ratio: number): void;
+  /** 음성 AI가 사용자 말에 도구 호출 없이 직접 답했습니다 (위임 누락) */
+  delegationMissed(): void;
 }
 
 export interface SessionOptions {
@@ -36,6 +38,8 @@ export interface SessionOptions {
   labDelayMs: number;
   /** /api/metrics에 남길 시나리오 이름 */
   scenario: string;
+  /** 말 끝 판정 설정 */
+  vad: VadSettings;
 }
 
 /** 서버 응답을 못 받았을 때 음성 AI가 할 말. 면접을 진행시키지 않고 다시 말해 달라고만 합니다. */
@@ -65,7 +69,7 @@ export async function startVoiceSession(
     postMetric({ name, session_id: sessionId, at_ms: Date.now(), provider, scenario: opts.scenario, ...extra });
 
   ui.status("임시 토큰 받는 중");
-  const token = await fetchVoiceToken(provider);
+  const token = await fetchVoiceToken(provider, opts.vad);
   ui.log("system", `모델 ${token.model}`);
 
   let done = false;
@@ -79,6 +83,8 @@ export async function startVoiceSession(
   let asrWaiter: (() => void) | null = null;
   /** 마지막으로 턴을 보낸 시각 (epoch ms). 0이면 아직 없음 */
   let lastSentAt = 0;
+  /** 마지막 도구 호출 뒤 사용자 말(받아쓰기)이 있었는가. 이 상태로 AI가 말을 마치면 위임 누락입니다. */
+  let userSpokeSinceTool = false;
 
   const meter = new Meter({
     userStart: (at) => metric("vad_start", { at_ms: at }),
@@ -108,7 +114,21 @@ export async function startVoiceSession(
       return;
     }
     asrBuffer.push(text);
+    userSpokeSinceTool = true;
     asrWaiter?.();
+  }
+
+  function onAiTranscript(text: string, interrupted: boolean) {
+    ui.log("ai", interrupted ? `${text} (끊김)` : text);
+    // 사용자가 말한 뒤 도구 호출 없이 AI가 말을 끝까지 했다면, 서버 대신 모델이 직접 답한 것입니다.
+    // 끊긴 발화는 사용자가 끼어든 경우라 세지 않습니다.
+    if (interrupted || !userSpokeSinceTool) return;
+    userSpokeSinceTool = false;
+    ui.delegationMissed();
+    ui.log("system", "위임 누락: 음성 AI가 서버를 부르지 않고 직접 답했습니다");
+    metric("error", { error_code: "delegation_missed" });
+    // 모델이 직접 처리한 말은 다음 답변에 섞이지 않게 버립니다.
+    asrBuffer = [];
   }
 
   /** 받아쓰기가 아직 없으면 잠깐 기다린 뒤, 모인 받아쓰기를 꺼냅니다. */
@@ -126,10 +146,13 @@ export async function startVoiceSession(
     }
     const text = asrBuffer.join(" ").trim();
     asrBuffer = [];
+    // 기다리는 사이 도착한 받아쓰기도 이 턴에 쓰였으므로 위임 누락으로 세지 않습니다.
+    userSpokeSinceTool = false;
     return text;
   }
 
   async function delegate(callId: string, name: string, args: Record<string, unknown>) {
+    userSpokeSinceTool = false;
     const respond = (utterance: string, isDone: boolean) =>
       handle?.respondTool(callId, name, { utterance, done: isDone });
 
@@ -194,12 +217,13 @@ export async function startVoiceSession(
   // 연결에 실패하면 어댑터가 마이크와 오디오 자원을 정리한 뒤 예외를 던집니다.
   handle = await connect(token, {
     onToolCall: (callId, name, args) => {
+      userSpokeSinceTool = false;
       queue = queue
         .then(() => delegate(callId, name, args))
         .catch((e: unknown) => ui.log("error", `위임 처리 오류: ${String(e)}`));
     },
     onUserTranscript,
-    onAiTranscript: (text, interrupted) => ui.log("ai", interrupted ? `${text} (끊김)` : text),
+    onAiTranscript,
     onError: (code, message) => {
       ui.log("error", message);
       metric("error", { error_code: code });

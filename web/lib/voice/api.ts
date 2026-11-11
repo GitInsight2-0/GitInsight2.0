@@ -1,5 +1,6 @@
 /** FastAPI 면접 API 호출. 경로와 형식은 contracts의 계약을 따릅니다. */
 import type { BrainReply, MetricEvent, SessionCreate, SessionCreated, TurnRequest, VoiceToken } from "@gitinsight/contracts";
+import type { VadSettings } from "./config";
 
 export class ApiError extends Error {
   constructor(
@@ -19,6 +20,10 @@ async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Pr
   });
   const data: unknown = r.status === 204 ? null : await r.json().catch(() => null);
   if (!r.ok) {
+    // Next가 FastAPI에 닿지 못하면 본문 없는 500을 돌려줍니다.
+    if (r.status >= 500 && data === null && url.startsWith("/api/")) {
+      throw new ApiError(r.status, "API 서버에 연결할 수 없습니다. 터미널 1에서 API 서버가 켜져 있는지 확인하세요.");
+    }
     const detail = (data as { detail?: unknown } | null)?.detail;
     throw new ApiError(r.status, typeof detail === "string" ? detail : JSON.stringify(detail ?? data));
   }
@@ -66,7 +71,7 @@ export function postMetric(ev: MetricEvent): void {
   }).catch(() => undefined);
 }
 
-export function fetchVoiceToken(provider: VoiceToken["provider"]): Promise<VoiceToken> {
+export function fetchVoiceToken(provider: VoiceToken["provider"], vad: VadSettings): Promise<VoiceToken> {
   // TODO: FastAPI의 POST /api/sessions/{id}/voice-token이 생기면 그쪽으로 바꿉니다.
-  return postJson("/lab/voice-token", { provider });
+  return postJson("/lab/voice-token", { provider, vad });
 }

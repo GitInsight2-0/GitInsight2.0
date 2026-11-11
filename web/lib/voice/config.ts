@@ -8,17 +8,45 @@ export const DELEGATION_TOOL = "submit_turn";
 
 export const INSTRUCTIONS = `
 너는 한국어 기술면접관의 목소리다.
-무엇을 물을지는 면접 서버가 정한다.
-질문, 평가, 정답 설명을 스스로 만들지 않는다.
+무엇을 물을지, 질문을 다시 할지, 힌트를 줄지는 모두 면접 서버가 정한다.
+질문, 평가, 정답 설명, 질문 반복을 스스로 하지 않는다.
 
 규칙:
 1. "[면접 서버]"로 시작하는 메시지가 오면 따옴표 안 문장을 뜻을 바꾸지 말고 자연스러운 구어체로 말한다.
-2. 사용자가 말을 마칠 때마다 ${DELEGATION_TOOL} 도구를 호출하고, transcript에 사용자가 한 말 전체를 넣는다.
-3. 사용자가 다시 말해 달라고 하거나 모르겠다고 해도 직접 대응하지 말고 똑같이 도구를 호출한다.
-4. 도구를 기다리는 동안에는 "네" 같은 아주 짧은 맞장구만 할 수 있다.
-5. 도구 결과의 utterance를 뜻을 바꾸지 말고 말한다.
-6. 도구 결과의 done이 true면 utterance를 말한 뒤 더는 말하지 않는다.
+2. 사용자가 무슨 말이든 하고 나면, 너는 말하기 전에 반드시 먼저 ${DELEGATION_TOOL} 도구를 호출한다. 예외는 없다.
+3. transcript에는 사용자가 한 말을 요약하거나 고치지 말고 들은 그대로 넣는다.
+4. 아래 같은 말도 직접 대답하지 말고 똑같이 도구를 호출한다. 이전 질문을 기억하고 있어도 네가 다시 말하지 않는다.
+   - "질문 다시 해 주시겠어요?", "다시 말씀해 주세요", "잘 못 들었어요"
+   - "모르겠습니다", "힌트 주세요", "잠깐만요"
+5. 도구를 기다리는 동안에는 "네" 같은 아주 짧은 맞장구만 할 수 있다.
+6. 도구 결과의 utterance를 뜻을 바꾸지 말고 말한다.
+7. 도구 결과의 done이 true면 utterance를 말한 뒤 더는 말하지 않는다.
 `.trim();
+
+/**
+ * 말 끝 판정 설정. 면접 답변은 생각하느라 멈추는 일이 많아, 제공사 기본값보다 덜 민감하게 둡니다.
+ * G1 측정에서 기본값(민감도 HIGH)은 2초 멈춤에서 AI가 말을 끊고 시작했습니다.
+ */
+export interface VadSettings {
+  /** 이만큼 조용하면 답변이 끝난 것으로 봅니다 (ms). 길수록 덜 끼어들지만 응답이 늦어집니다. */
+  silenceMs: number;
+  /** Gemini 말 끝 판정 민감도. "default"는 제공사 기본값(HIGH) */
+  endSensitivity: "low" | "high" | "default";
+}
+
+export const DEFAULT_VAD: VadSettings = { silenceMs: 2000, endSensitivity: "low" };
+
+export const VAD_LIMITS = { minSilenceMs: 200, maxSilenceMs: 5000 } as const;
+
+export function parseVad(v: unknown): VadSettings {
+  const o = (v ?? {}) as Partial<Record<keyof VadSettings, unknown>>;
+  const ms = typeof o.silenceMs === "number" && Number.isFinite(o.silenceMs) ? Math.round(o.silenceMs) : DEFAULT_VAD.silenceMs;
+  const sens = o.endSensitivity === "low" || o.endSensitivity === "high" || o.endSensitivity === "default" ? o.endSensitivity : DEFAULT_VAD.endSensitivity;
+  return {
+    silenceMs: Math.min(VAD_LIMITS.maxSilenceMs, Math.max(VAD_LIMITS.minSilenceMs, ms)),
+    endSensitivity: sens,
+  };
+}
 
 export const TOOL_DESCRIPTION = "사용자의 답변을 면접 서버에 보내고 다음에 할 말을 받는다. 사용자가 말을 마칠 때마다 호출한다.";
 

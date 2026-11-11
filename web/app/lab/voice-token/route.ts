@@ -6,8 +6,8 @@
  * 실제 API 키는 서버에만 두고, 브라우저에는 짧게 사는 임시 토큰만 보냅니다.
  */
 import type { VoiceToken } from "@gitinsight/contracts";
-import { GoogleGenAI, Modality, Type } from "@google/genai";
-import { DELEGATION_TOOL, INSTRUCTIONS, TOOL_DESCRIPTION, TOOL_PARAMETERS } from "@/lib/voice/config";
+import { EndSensitivity, GoogleGenAI, Modality, Type } from "@google/genai";
+import { DELEGATION_TOOL, INSTRUCTIONS, TOOL_DESCRIPTION, TOOL_PARAMETERS, type VadSettings, parseVad } from "@/lib/voice/config";
 
 type Provider = VoiceToken["provider"];
 
@@ -15,13 +15,14 @@ export async function POST(req: Request) {
   if (process.env.LAB_ENABLED !== "true") {
     return Response.json({ detail: "LAB_ENABLED=true일 때만 쓸 수 있습니다" }, { status: 404 });
   }
-  const body = (await req.json().catch(() => null)) as { provider?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as { provider?: unknown; vad?: unknown } | null;
   const provider = body?.provider;
   if (provider !== "openai" && provider !== "gemini") {
     return Response.json({ detail: "provider는 openai 또는 gemini입니다" }, { status: 400 });
   }
   try {
-    const token = provider === "openai" ? await openaiToken() : await geminiToken();
+    const vad = parseVad(body?.vad);
+    const token = provider === "openai" ? await openaiToken(vad) : await geminiToken(vad);
     return Response.json(token satisfies VoiceToken);
   } catch (e) {
     // 제공사 오류 본문에 키가 들어가지는 않지만, 길이를 줄여 돌려줍니다.
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
 
 const openaiTools = [{ type: "function", name: DELEGATION_TOOL, description: TOOL_DESCRIPTION, parameters: TOOL_PARAMETERS }];
 
-async function openaiToken(): Promise<VoiceToken> {
+async function openaiToken(vad: VadSettings): Promise<VoiceToken> {
   const apiKey = requireEnv("OPENAI_API_KEY");
   const model = process.env.OPENAI_REALTIME_MODEL || "gpt-realtime-2.1";
   // https://developers.openai.com/api/docs/guides/realtime-webrtc
@@ -46,8 +47,8 @@ async function openaiToken(): Promise<VoiceToken> {
         audio: {
           input: {
             transcription: { model: process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-transcribe", language: "ko" },
-            // 면접 답변은 생각하느라 멈추는 일이 많습니다. 비교 테스트 때 바꿔 보며 기록합니다.
-            turn_detection: { type: "server_vad", silence_duration_ms: 900 },
+            // 면접 답변은 생각하느라 멈추는 일이 많습니다. 테스트 화면에서 바꿔 보며 기록합니다.
+            turn_detection: { type: "server_vad", silence_duration_ms: vad.silenceMs },
           },
           output: { voice: process.env.OPENAI_VOICE || "marin" },
         },
@@ -68,7 +69,7 @@ async function openaiToken(): Promise<VoiceToken> {
   };
 }
 
-async function geminiToken(): Promise<VoiceToken> {
+async function geminiToken(vad: VadSettings): Promise<VoiceToken> {
   const apiKey = requireEnv("GEMINI_API_KEY");
   const model = process.env.GEMINI_LIVE_MODEL || "gemini-3.1-flash-live-preview";
   const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "v1alpha" } });
@@ -105,6 +106,18 @@ async function geminiToken(): Promise<VoiceToken> {
           inputAudioTranscription: {},
           outputAudioTranscription: {},
           sessionResumption: {},
+          // 말 끝 판정. https://ai.google.dev/api/live 의 AutomaticActivityDetection
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              silenceDurationMs: vad.silenceMs,
+              ...(vad.endSensitivity === "default"
+                ? {}
+                : {
+                    endOfSpeechSensitivity:
+                      vad.endSensitivity === "low" ? EndSensitivity.END_SENSITIVITY_LOW : EndSensitivity.END_SENSITIVITY_HIGH,
+                  }),
+            },
+          },
           tools: [{ functionDeclarations }],
         },
       },
