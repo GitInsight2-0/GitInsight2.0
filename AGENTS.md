@@ -14,7 +14,7 @@ README.md의 "전체 구조"를 따릅니다.
 
 버전과 패키지 관리자는 아래와 같습니다. 첫 회의에서 바뀌면 이 절을 고칩니다.
 
-- Python 3.12, uv workspace (멤버: `contracts`, `api`, 분석 워커는 T6에서 `worker` 추가)
+- Python 3.12, uv workspace (멤버: `contracts`, `api`, `worker`)
 - Node.js 22 이상, pnpm 10 (`corepack pnpm`으로 실행할 수 있습니다)
 
 폴더 구조는 아래와 같습니다.
@@ -24,6 +24,7 @@ README.md의 "전체 구조"를 따릅니다.
 | `contracts/src/gitinsight_contracts/` | 모듈 간 계약(Pydantic 모델) | B (변경 시 2명 승인) |
 | `contracts/schema/contracts.json`, `contracts/ts/index.d.ts` | 계약에서 자동 생성한 JSON Schema와 TS 타입. 직접 고치지 않습니다 | 자동 생성 |
 | `api/src/gitinsight_api/` | FastAPI 서버. `brain/`(면접 두뇌), `llm/`(LLMClient), `routes/` | B, D |
+| `worker/src/gitinsight_worker/` | 분석 워커. 지금은 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출) | A |
 | `fixtures/analysis/` | 데모 레포 분석 결과 샘플 | B |
 | `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |
 | `scripts/` | 계약 생성, 샘플 데이터 도구, 수동 LLM 평가 스크립트 | |
@@ -64,7 +65,7 @@ uv sync                                    # Python 의존성 설치
 pnpm install                               # Node 의존성 설치 (pnpm이 없으면 corepack pnpm install)
 uv run ruff check; uv run ruff format --check; uv run pyright
 uv run pytest                              # 기본 테스트 (network, live_llm 제외)
-uv run pytest -m network                   # 샘플 데이터 줄 범위를 고정 커밋과 대조 (네트워크 필요)
+uv run pytest -m network                   # 샘플 데이터 줄 범위를 고정 커밋과 대조, 워커가 같은 심볼을 뽑는지 확인 (네트워크 필요)
 pnpm contracts:gen                         # 계약 → JSON Schema → TS 타입 생성
 pnpm contracts:check                       # 생성 파일이 커밋된 내용과 같은지 검사
 uv run uvicorn --factory gitinsight_api.main:app_factory --reload   # API 서버 (기본 8000번)
