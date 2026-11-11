@@ -23,7 +23,10 @@ export interface SessionUi {
   log(who: LogWho, text: string): void;
   status(text: string): void;
   reply(r: BrainReply): void;
+  /** 사용자 말 끝 → 서버가 정한 발화(도구 결과)의 첫소리 (ms) */
   latency(ms: number): void;
+  /** 사용자 말 끝 → 도구 결과 전에 나온 AI 첫소리(맞장구) (ms) */
+  filler(ms: number): void;
   delegation(ms: number): void;
   bargeIn(): void;
   /** 받아쓰기와 도구 인자 transcript의 유사도 (0~1). 둘 다 있을 때만 */
@@ -40,6 +43,8 @@ export interface SessionOptions {
   scenario: string;
   /** 말 끝 판정 설정 */
   vad: VadSettings;
+  /** 도구 호출 전에 짧은 맞장구를 하게 할지 (#28) */
+  filler: boolean;
 }
 
 /** 서버 응답을 못 받았을 때 음성 AI가 할 말. 면접을 진행시키지 않고 다시 말해 달라고만 합니다. */
@@ -69,7 +74,7 @@ export async function startVoiceSession(
     postMetric({ name, session_id: sessionId, at_ms: Date.now(), provider, scenario: opts.scenario, ...extra });
 
   ui.status("임시 토큰 받는 중");
-  const token = await fetchVoiceToken(provider, opts.vad);
+  const token = await fetchVoiceToken(provider, opts.vad, opts.filler);
   ui.log("system", `모델 ${token.model}`);
 
   let done = false;
@@ -86,13 +91,36 @@ export async function startVoiceSession(
   /** 마지막 도구 호출 뒤 사용자 말(받아쓰기)이 있었는가. 이 상태로 AI가 말을 마치면 위임 누락입니다. */
   let userSpokeSinceTool = false;
 
+  // ── 응답 시간 측정 ──
+  // 사용자 말 끝을 기준으로, 도구 결과를 보내기 전에 난 AI 첫소리는 맞장구(filler_start),
+  // 도구 결과를 보낸 뒤 난 첫소리는 서버가 정한 발화(first_audio)로 셉니다.
+  let turnUserEnd: number | null = null;
+  let toolRespondedAt = 0;
+  let fillerMeasured = false;
+  let replyMeasured = false;
+
   const meter = new Meter({
     userStart: (at) => metric("vad_start", { at_ms: at }),
-    userEnd: (at) => metric("vad_end", { at_ms: at }),
-    aiStart: (at, latency) => {
-      if (latency === null) return;
-      ui.latency(latency);
-      metric("first_audio", { at_ms: at, value_ms: latency });
+    userEnd: (at) => {
+      metric("vad_end", { at_ms: at });
+      turnUserEnd = at;
+      toolRespondedAt = 0;
+      fillerMeasured = false;
+      replyMeasured = false;
+    },
+    aiStart: (at) => {
+      if (turnUserEnd === null || meter.userSpeaking) return;
+      const ms = at - turnUserEnd;
+      if (toolRespondedAt > 0 && at >= toolRespondedAt) {
+        if (replyMeasured) return;
+        replyMeasured = true;
+        ui.latency(ms);
+        metric("first_audio", { at_ms: at, value_ms: ms });
+      } else if (!fillerMeasured) {
+        fillerMeasured = true;
+        ui.filler(ms);
+        metric("filler_start", { at_ms: at, value_ms: ms });
+      }
     },
     bargeIn: (at) => {
       ui.bargeIn();
@@ -153,8 +181,10 @@ export async function startVoiceSession(
 
   async function delegate(callId: string, name: string, args: Record<string, unknown>) {
     userSpokeSinceTool = false;
-    const respond = (utterance: string, isDone: boolean) =>
+    const respond = (utterance: string, isDone: boolean) => {
+      toolRespondedAt = Date.now();
       handle?.respondTool(callId, name, { utterance, done: isDone });
+    };
 
     if (name !== DELEGATION_TOOL) {
       ui.log("error", `모르는 도구 호출: ${name}`);

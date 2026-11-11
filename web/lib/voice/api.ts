@@ -71,7 +71,11 @@ export function postMetric(ev: MetricEvent): void {
   }).catch(() => undefined);
 }
 
-export function fetchVoiceToken(provider: VoiceToken["provider"], vad: VadSettings): Promise<VoiceToken> {
+export function fetchVoiceToken(
+  provider: VoiceToken["provider"],
+  vad: VadSettings,
+  filler: boolean,
+): Promise<VoiceToken> {
   // TODO: FastAPI의 POST /api/sessions/{id}/voice-token이 생기면 그쪽으로 바꿉니다.
-  return postJson("/lab/voice-token", { provider, vad });
+  return postJson("/lab/voice-token", { provider, vad, filler });
 }

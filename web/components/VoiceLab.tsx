@@ -47,6 +47,8 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
   const [similarities, setSimilarities] = useState<number[]>([]);
   const [missed, setMissed] = useState(0);
   const [vad, setVad] = useState<VadSettings>(DEFAULT_VAD);
+  const [filler, setFiller] = useState(true);
+  const [fillers, setFillers] = useState<number[]>([]);
   const session = useRef<{ stop(): void } | null>(null);
   const t0 = useRef(0);
 
@@ -61,6 +63,7 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
     setBargeIns(0);
     setSimilarities([]);
     setMissed(0);
+    setFillers([]);
     setRunning(true);
     t0.current = performance.now();
     try {
@@ -76,6 +79,7 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
             add("system", `${r.action}${where}${r.done ? " · 종료" : ""}`);
           },
           latency: (ms) => setLatencies((x) => [...x, ms]),
+          filler: (ms) => setFillers((x) => [...x, ms]),
           delegation: (ms) => setDelegations((x) => [...x, ms]),
           bargeIn: () => {
             setBargeIns((n) => n + 1);
@@ -87,7 +91,7 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
             add("system", `받아쓰기 vs 도구 인자 유사도 ${ratio.toFixed(2)}`);
           },
         },
-        { analysisId, labDelayMs, scenario: "g1_script", vad },
+        { analysisId, labDelayMs, scenario: "g1_script", vad, filler },
       );
     } catch (e) {
       add("error", explainError(e));
@@ -104,6 +108,7 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
 
   const lat = stats(latencies);
   const del = stats(delegations);
+  const fil = stats(fillers);
   const sim = {
     n: similarities.length,
     min: similarities.length ? Math.min(...similarities) : null,
@@ -115,8 +120,12 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
     provider,
     lab_delay_ms: labDelayMs,
     vad,
+    filler,
     tested_at: new Date().toISOString(),
+    // 말 끝 → 서버가 정한 발화 첫소리
     latency_ms: lat,
+    // 말 끝 → 맞장구 첫소리 (맞장구가 나온 턴만)
+    filler_ms: fil,
     delegation_ms: del,
     barge_ins: bargeIns,
     // 받아쓰기와 음성 AI 도구 인자의 유사도. 1에서 멀수록 모델이 답변을 다듬거나 요약한 것입니다.
@@ -181,6 +190,10 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
             <option value="default">제공사 기본값</option>
           </select>
         </label>
+        <label title="도구를 부르기 전에 &quot;네.&quot;처럼 짧게 먼저 반응합니다.">
+          <input type="checkbox" checked={filler} onChange={(e) => setFiller(e.target.checked)} disabled={running} /> AI
+          맞장구
+        </label>
         <button onClick={start} disabled={running}>
           시작
         </button>
@@ -191,7 +204,8 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
       </div>
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
-        <Stat label="응답 지연 중앙값" value={lat.median} unit="ms" sub={`p90 ${lat.p90 ?? "-"} · ${lat.n}회`} />
+        <Stat label="말 끝 → 맞장구 중앙값" value={fil.median} unit="ms" sub={`p90 ${fil.p90 ?? "-"} · ${fil.n}회`} />
+        <Stat label="말 끝 → 질문 중앙값" value={lat.median} unit="ms" sub={`p90 ${lat.p90 ?? "-"} · ${lat.n}회`} />
         <Stat label="위임 왕복 중앙값" value={del.median} unit="ms" sub={`p90 ${del.p90 ?? "-"} · ${del.n}회`} />
         <Stat label="끼어들기 감지" value={bargeIns} unit="회" sub="AI가 실제로 멈췄는지는 귀로 확인" />
         <Stat

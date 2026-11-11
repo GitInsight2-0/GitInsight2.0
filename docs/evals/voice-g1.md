@@ -94,6 +94,19 @@ Gemini `realtimeInputConfig.automaticActivityDetection`의 `silenceDurationMs`, 
 - 위임 누락: 사용자가 말한 뒤 도구 호출 없이 AI가 끝까지 말한 턴. 화면과 결과 JSON, `/api/metrics`의 `error`(`delegation_missed`)로 셉니다.
 - 같은 모델에서 이 설정이 적용되지 않는다는 보고가 있어 (google-gemini/cookbook#1262), 값만 바꾸지 않고 측정으로 확인합니다.
 
+## 맞장구 비교 (#28)
+
+말 끝 설정은 침묵 2000ms, 민감도 LOW로 고정하고, 테스트 화면의 "AI 맞장구"를 켜고 끄며 같은 대본을 말합니다.
+
+| 맞장구 | 말 끝 → 맞장구 중앙값 (ms) | 말 끝 → 질문 중앙값 (ms) | 위임 누락 | 멈춤에서 끼어듦 | 메모 |
+|---|---|---|---|---|---|
+| 끔 | - | | | | |
+| 켬 | | | | | |
+
+- 말 끝 → 맞장구: 도구 결과를 보내기 전에 난 AI 첫소리 (`filler_start`).
+- 말 끝 → 질문: 도구 결과를 보낸 뒤 난 AI 첫소리 (`first_audio`). #28 전의 "응답 지연"과 같은 값입니다.
+- 맞장구와 질문 사이 소리가 0.4초 안 끊기면 한 발화로 잡혀 질문 시간이 빠집니다. 위임 왕복이 0.8초 이상이면 생기지 않습니다.
+
 ## 결정
 
 - 선택: **Gemini Live** (`gemini-3.1-flash-live-preview`), 2026-11-11 팀 결정
