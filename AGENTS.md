@@ -10,7 +10,7 @@ README.md의 "전체 구조"를 따릅니다.
 - 서버: FastAPI (Railway)
 - 분석 워커 (Railway)
 - DB: Postgres (Railway)
-- 음성 AI: OpenAI GPT-Live 또는 Google Gemini Live (G1에서 결정)
+- 음성 AI: Google Gemini Live (G1에서 결정, `docs/evals/voice-g1.md`). OpenAI Realtime은 쓰지 않습니다
 
 버전과 패키지 관리자는 아래와 같습니다. 첫 회의에서 바뀌면 이 절을 고칩니다.
 
@@ -25,6 +25,7 @@ README.md의 "전체 구조"를 따릅니다.
 | `contracts/schema/contracts.json`, `contracts/ts/index.d.ts` | 계약에서 자동 생성한 JSON Schema와 TS 타입. 직접 고치지 않습니다 | 자동 생성 |
 | `api/src/gitinsight_api/` | FastAPI 서버. `brain/`(면접 두뇌), `llm/`(LLMClient), `routes/` | B, D |
 | `worker/src/gitinsight_worker/` | 분석 워커. 지금은 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출, git blame 기여 라벨과 최근 커밋) | A |
+| `web/` | Next.js 웹. 지금은 음성 PoC(`/lab/voice`), 임시 토큰 라우트(`/lab/voice-token`), 텍스트 면접 화면 중간 단계(`/lab/interview`)가 있습니다 | C |
 | `fixtures/analysis/` | 데모 레포 분석 결과 샘플 | B |
 | `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |
 | `scripts/` | 계약 생성, 샘플 데이터 도구, 수동 LLM 평가 스크립트 | |
@@ -75,9 +76,12 @@ uv run python -m gitinsight_api.brain.cli [--real-llm]             # 터미널 �
 uv run python scripts/llm_latency.py --n 20                        # 판단 LLM 지연 측정 (수동, 비용 발생)
 uv run python scripts/eval_brain.py                                # 골든 대화 실제 LLM 평가 (수동, 비용 발생)
 uv run python scripts/demo_check.py [--block-llm | --real-llm]     # 데모 완주 점검 (docs/runbook-demo.md)
+pnpm --filter @gitinsight/web dev                                  # 웹 (기본 3000번, /api/*는 API_ORIGIN으로 넘김)
+pnpm --filter @gitinsight/web typecheck                            # 웹 타입 검사
 ```
 
 음성 PoC용 가짜 백엔드는 `LAB_ENABLED=true`로 서버를 띄우면 켜집니다. 이때 `POST /api/sessions/{id}/turns?lab_delay_ms=800`처럼 인위적 지연을 줄 수 있습니다. 데모와 배포에서는 끕니다.
+웹의 음성 비교 화면(`/lab/voice`)도 `web/.env.local`의 `LAB_ENABLED=true`일 때만 열립니다. 방법과 기록은 `docs/evals/voice-g1.md`에 있습니다.
 
 `LAB_ENABLED=false`(기본)이면 서버는 진짜 면접 두뇌와 리포트 API(`POST /api/sessions/{id}/end`, `GET /api/reports/{id}`)를 씁니다.
 로그인(#18)이 붙기 전까지 이 모드의 요청은 401을 돌려줍니다.
