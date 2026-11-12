@@ -48,7 +48,7 @@ AI 면접관이 음성으로 질문하고 꼬리질문까지 이어 가는 모�
 ```mermaid
 flowchart LR
   W["웹 화면 (Next.js, Vercel)<br/>면접 화면 · 코드 뷰어 · 음성 연결"]
-  V["음성 AI<br/>(OpenAI GPT-Live 또는 Google Gemini Live)"]
+  V["음성 AI<br/>(Google Gemini Live)"]
   S["서버 (FastAPI, Railway)<br/>로그인 · 면접 두뇌 · 리포트"]
   K["분석 워커 (Railway)<br/>레포 분석"]
   D[("DB (Postgres, Railway)")]
