@@ -418,7 +418,7 @@ async def generate_topics(
     progress: ProgressFn | None = None,
 ) -> list[Topic]:
     """후보 순서대로 주제를 만듭니다. 실패한 후보는 다음 후보로 채워서 최대 `target`개를 돌려줍니다."""
-    # 기여 근거가 없으면(#10 연결 전, 요청자 정보 없음) 모두 "확인 불가"로 둡니다.
+    # 기여 근거를 넘기지 않으면 모두 "확인 불가"로 둡니다.
     contribution = contribution_of or _no_contribution
     candidates = select_candidates(stage1.symbols, lambda s: contribution(s.symbol_id)[0])
     prepared = await asyncio.to_thread(_prepare, root, candidates[:MAX_CANDIDATES])

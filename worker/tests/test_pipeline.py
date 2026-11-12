@@ -9,9 +9,10 @@ from gitinsight_api.brain.repository import InMemorySessionRepository
 from gitinsight_api.brain.service import InterviewBrain
 from gitinsight_api.llm import LLMTimeoutError
 from gitinsight_api.llm.fake import FakeLLM, FakeStep
-from gitinsight_contracts.analysis import AnalysisResult
+from gitinsight_contracts.analysis import AnalysisResult, ContributionLabel
 from gitinsight_contracts.api import AnalysisStatus
 from gitinsight_contracts.interview import InterviewMode, SessionCreate
+from gitinsight_worker.contribution import Requester
 from gitinsight_worker.git import git_cloner
 from gitinsight_worker.pipeline import run_analysis
 from gitinsight_worker.stage1 import analyze_tree
@@ -44,7 +45,13 @@ def origin(tmp_path: Path) -> tuple[Path, str]:
     return path, make_origin(path)
 
 
-async def analyze(origin: tuple[Path, str], work: Path, llm: FakeLLM, recorder: Recorder):
+async def analyze(
+    origin: tuple[Path, str],
+    work: Path,
+    llm: FakeLLM,
+    recorder: Recorder,
+    requester: Requester | None = None,
+):
     path, sha = origin
     work.mkdir()
     return await run_analysis(
@@ -54,6 +61,7 @@ async def analyze(origin: tuple[Path, str], work: Path, llm: FakeLLM, recorder: 
         llm,
         analysis_id="analysis-1",
         repo_full_name="owner/repo",
+        requester=requester,
         work_dir=work,
     )
 
@@ -118,3 +126,27 @@ async def test_interview_brain_can_start_with_the_result(
     topic = result.topic(first.topic_id or "")
     assert topic.base_question in first.utterance
     assert first.highlight == topic.symbol
+
+
+async def test_contribution_from_stage1_is_attached_to_topics(
+    origin: tuple[Path, str], tmp_path: Path
+) -> None:
+    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    mine = Requester.of(emails=["t@example.com"])
+
+    result = await analyze(origin, tmp_path / "work", llm, Recorder(), requester=mine)
+
+    # 라벨과 커밋은 LLM이 아니라 1단계 blame 결과에서 옵니다.
+    assert {t.contribution_label for t in result.topics} == {ContributionLabel.VERIFIED}
+    assert {tuple(t.commits) for t in result.topics} == {(origin[1],)}
+
+
+async def test_without_requester_label_is_unverified_but_commits_remain(
+    origin: tuple[Path, str], tmp_path: Path
+) -> None:
+    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+
+    result = await analyze(origin, tmp_path / "work", llm, Recorder())
+
+    assert {t.contribution_label for t in result.topics} == {ContributionLabel.UNVERIFIED}
+    assert {tuple(t.commits) for t in result.topics} == {(origin[1],)}
