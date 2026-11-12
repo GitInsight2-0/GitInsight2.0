@@ -10,7 +10,7 @@ README.md의 "전체 구조"를 따릅니다.
 - 서버: FastAPI (Railway)
 - 분석 워커 (Railway)
 - DB: Postgres (Railway)
-- 음성 AI: OpenAI GPT-Live 또는 Google Gemini Live (G1에서 결정)
+- 음성 AI: Google Gemini Live (G1에서 결정, `docs/evals/voice-g1.md`). OpenAI Realtime은 쓰지 않습니다
 
 버전과 패키지 관리자는 아래와 같습니다. 첫 회의에서 바뀌면 이 절을 고칩니다.
 
@@ -24,7 +24,8 @@ README.md의 "전체 구조"를 따릅니다.
 | `contracts/src/gitinsight_contracts/` | 모듈 간 계약(Pydantic 모델) | B (변경 시 2명 승인) |
 | `contracts/schema/contracts.json`, `contracts/ts/index.d.ts` | 계약에서 자동 생성한 JSON Schema와 TS 타입. 직접 고치지 않습니다 | 자동 생성 |
 | `api/src/gitinsight_api/` | FastAPI 서버. `brain/`(면접 두뇌), `llm/`(LLMClient), `routes/` | B, D |
-| `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출), 2단계(규칙으로 주제 후보 선택, LLM으로 주제 재료 생성과 서버 검증), 전체 흐름 `pipeline.run_analysis` | A |
+| `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출, git blame 기여 라벨과 최근 커밋), 2단계(규칙으로 주제 후보 선택, LLM으로 주제 재료 생성과 서버 검증), 전체 흐름 `pipeline.run_analysis` | A |
+| `web/` | Next.js 웹. 지금은 음성 PoC(`/lab/voice`), 임시 토큰 라우트(`/lab/voice-token`), 텍스트 면접 화면 중간 단계(`/lab/interview`)가 있습니다 | C |
 | `fixtures/analysis/` | 데모 레포 분석 결과 샘플 | B |
 | `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |
 | `scripts/` | 계약 생성, 샘플 데이터 도구, 수동 LLM 평가 스크립트 | |
@@ -47,6 +48,7 @@ README.md의 "핵심 설계 원칙"을 지킵니다. 코드에서 특히 주의�
 - Python은 ruff(포맷·린트)와 pyright(standard 모드)를 씁니다. 설정은 루트 `pyproject.toml`에 있습니다.
 - 계약 모델은 `Contract`(추가 필드 거부)를, LLM 출력 모델은 `LLMOutput`(기본값 없는 필드만)을 상속합니다.
 - 계약을 바꾸면 `pnpm contracts:gen`으로 생성 파일을 함께 커밋합니다. CI는 `pnpm contracts:check`로 검사합니다.
+- CI(`.github/workflows/ci.yml`)는 PR과 `main` push마다 아래 "명령"의 ruff, pyright, pytest, `pnpm contracts:check`를 실행합니다.
 - 모든 LLM 호출은 `gitinsight_api.llm.LLMClient`를 거칩니다. 코드, README, 자막, JD는 `untrusted_block()` 안에만 넣습니다.
 - 테스트는 FakeLLM만 씁니다. 실제 LLM 호출 테스트는 `live_llm`, 네트워크 테스트는 `network` 표시를 붙이고 기본 실행에서 뺍니다.
 
@@ -75,6 +77,13 @@ uv run python scripts/llm_latency.py --n 20                        # 판단 LLM 
 uv run python scripts/eval_brain.py                                # 골든 대화 실제 LLM 평가 (수동, 비용 발생)
 uv run python scripts/eval_stage2.py                               # 샘플 레포 2단계 분석 실제 LLM 평가 (수동, 비용 발생)
 uv run python scripts/demo_check.py [--block-llm | --real-llm]     # 데모 완주 점검 (docs/runbook-demo.md)
+pnpm --filter @gitinsight/web dev                                  # 웹 (기본 3000번, /api/*는 API_ORIGIN으로 넘김)
+pnpm --filter @gitinsight/web typecheck                            # 웹 타입 검사
 ```
 
 음성 PoC용 가짜 백엔드는 `LAB_ENABLED=true`로 서버를 띄우면 켜집니다. 이때 `POST /api/sessions/{id}/turns?lab_delay_ms=800`처럼 인위적 지연을 줄 수 있습니다. 데모와 배포에서는 끕니다.
+웹의 음성 비교 화면(`/lab/voice`)도 `web/.env.local`의 `LAB_ENABLED=true`일 때만 열립니다. 방법과 기록은 `docs/evals/voice-g1.md`에 있습니다.
+
+`LAB_ENABLED=false`(기본)이면 서버는 진짜 면접 두뇌와 리포트 API(`POST /api/sessions/{id}/end`, `GET /api/reports/{id}`)를 씁니다.
+로그인(#18)이 붙기 전까지 이 모드의 요청은 401을 돌려줍니다.
+테스트는 `app.dependency_overrides`로 `get_current_user`를 바꿔 로그인 사용자를 넣습니다.

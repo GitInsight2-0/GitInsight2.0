@@ -30,7 +30,7 @@ class TopicProgress(BaseModel):
 class SessionState(BaseModel):
     session_id: UUID
     analysis_id: str
-    # 인증(D의 T4)이 붙으면 소유자 확인에 씁니다.
+    # HTTP API가 로그인 사용자(auth.get_current_user)로 채우고 소유자 확인에 씁니다.
     owner_id: str | None = None
     mode: InterviewMode
     duration_sec: int

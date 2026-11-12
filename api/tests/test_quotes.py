@@ -1,7 +1,9 @@
+import logging
+
 import pytest
 
 from gitinsight_api.brain.judge import JudgmentInvalidError, validate_judgment
-from gitinsight_api.brain.quotes import EXACT, QuoteMatcher
+from gitinsight_api.brain.quotes import EXACT, QuoteMatcher, fuzzy_alignment, normalize
 from gitinsight_api.settings import Settings
 from gitinsight_contracts.fixtures import load_analysis
 from gitinsight_contracts.llm import (
@@ -44,6 +46,92 @@ TRANSCRIPT = (
 def test_quote_matching(quote: str, exact: bool, fuzzy: bool) -> None:
     assert EXACT.matches(quote, TRANSCRIPT) is exact
     assert FUZZY.matches(quote, TRANSCRIPT) is fuzzy
+
+
+@pytest.mark.parametrize(
+    ("quote", "transcript"),
+    [
+        # 자막보다 긴 인용문: 자막 전체가 인용문 안에 있어도 덧붙인 내용은 지어낸 것입니다.
+        (
+            "캐시를 썼습니다. 그리고 TTL을 30초로 설정해 만료와 무효화를 직접 관리했습니다",
+            "캐시를 썼습니다",
+        ),
+        (f"{TRANSCRIPT} 그리고 TTL을 30초로 설정했습니다", TRANSCRIPT),
+        # 자막 앞이나 뒤에 지어낸 내용을 붙인 인용문
+        ("레디스를 먼저 띄우고 먼저 깃허브 API로 최신 커밋", TRANSCRIPT),
+        ("저장된 청크를 복원해요 그리고 TTL도 설정했어요", TRANSCRIPT),
+    ],
+)
+def test_fuzzy_rejects_text_outside_transcript(quote: str, transcript: str) -> None:
+    assert not EXACT.matches(quote, transcript)
+    assert not FUZZY.matches(quote, transcript)
+
+
+def test_appended_sentence_is_rejected_by_outside_chars_not_score() -> None:
+    # 유사도(77.9점)는 기준값과 2점 차이라, 기준값을 낮춰도 막히도록 바깥 글자 수로 확인합니다.
+    quote = f"{TRANSCRIPT} 그리고 TTL을 30초로 설정했습니다"
+    _, outside = fuzzy_alignment(normalize(quote), normalize(TRANSCRIPT))
+    assert outside > FUZZY.max_outside_chars
+    assert not QuoteMatcher(mode="fuzzy", threshold=50).matches(quote, TRANSCRIPT)
+
+
+# 긴 인용문 끝에 짧은 주장을 덧붙이면 유사도는 80점을 넘지만 자막 바깥 글자가 많습니다.
+LONG_TRANSCRIPT = (
+    "먼저 깃허브 API로 최신 커밋 SHA를 가져와서 컬렉션 이름에 넣고요 "
+    "같은 커밋이면 저장된 청크를 복원해요"
+)
+LONG_QUOTE = "깃허브 API로 최신 커밋 SHA를 가져와서 컬렉션 이름에 넣고요 같은 커밋이면 저장된 청크를 복원해요"
+
+
+@pytest.mark.parametrize("added", [" TTL은 30초", " TTL 30초로 만료", " 레디스로 캐시"])
+def test_fuzzy_rejects_short_claim_added_to_long_quote(added: str) -> None:
+    assert not EXACT.matches(LONG_QUOTE + added, LONG_TRANSCRIPT)
+    assert not FUZZY.matches(LONG_QUOTE + added, LONG_TRANSCRIPT)
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        # NUL 문자만 있는 인용문
+        "\0" * 20,
+        # 자막 바깥 패딩과 겹치도록 NUL 문자를 섞은, 지어낸 내용이 붙은 인용문
+        "\0" * 10 + LONG_QUOTE + " TTL은 30초" + "\0" * 10,
+    ],
+)
+def test_fuzzy_rejects_quote_with_nul(quote: str) -> None:
+    # 패딩(NUL 문자)과 실제 글자가 겹치지 않는다는 전제를 고정합니다.
+    assert "\0" not in normalize(quote)
+    assert not EXACT.matches(quote, LONG_TRANSCRIPT)
+    assert not FUZZY.matches(quote, LONG_TRANSCRIPT)
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        # 자막 끝 인용문에서 조사 하나가 다르거나 한 글자가 더 붙은 음성 인식 오차는 통과합니다.
+        "같은 커밋이면 저장된 청크가 복원해요",
+        "같은 커밋이면 저장된 청크를 복원해요요",
+        # 자막 맨 앞 인용문의 인식 오차
+        "먼저 깃허브 API로 최신 커밋 샤를",
+    ],
+)
+def test_fuzzy_allows_recognition_errors_at_transcript_edges(quote: str) -> None:
+    assert not EXACT.matches(quote, LONG_TRANSCRIPT)
+    assert FUZZY.matches(quote, LONG_TRANSCRIPT)
+
+
+def test_rejection_log_has_score_and_outside_chars_only(caplog: pytest.LogCaptureFixture) -> None:
+    quote = LONG_QUOTE + " TTL은 30초"
+    with caplog.at_level(logging.INFO, logger="gitinsight_api.brain.quotes"):
+        assert not FUZZY.matches(quote, LONG_TRANSCRIPT)
+
+    [record] = [r for r in caplog.records if r.name == "gitinsight_api.brain.quotes"]
+    message = record.getMessage()
+    assert "score=86.3" in message
+    assert "outside=5" in message
+    # 인용문과 자막 원문은 로그에 남기지 않습니다.
+    assert "TTL" not in message
+    assert normalize(LONG_QUOTE)[:6] not in message
 
 
 def test_threshold_is_configurable() -> None:

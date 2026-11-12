@@ -19,9 +19,10 @@ uv run ruff format --check
 uv run pyright
 uv run pytest
 pnpm contracts:check
+pnpm --filter @gitinsight/web typecheck   # web/을 바꾼 경우
 ```
 
-나머지 명령(API 서버, 텍스트 면접 CLI, 수동 LLM 평가)은 [`AGENTS.md`](./AGENTS.md)의 "명령" 절에 있습니다. 웹(C)과 분석 워커(A)의 명령은 각 구성이 생기면 추가합니다.
+나머지 명령(API 서버, 텍스트 면접 CLI, 수동 LLM 평가)은 [`AGENTS.md`](./AGENTS.md)의 "명령" 절에 있습니다. 웹(C) 명령도 같은 절에 있습니다. 분석 워커(A)의 명령은 구성이 생기면 추가합니다.
 
 ## 작업 흐름
 
