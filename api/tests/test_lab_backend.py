@@ -7,6 +7,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
+from gitinsight_api.auth import CurrentUser, get_current_user
 from gitinsight_api.brain.scripted import ScriptedBrain
 from gitinsight_api.main import create_app
 from gitinsight_api.settings import Settings
@@ -73,6 +74,7 @@ async def test_lab_delay_is_rejected_when_lab_disabled(
 ) -> None:
     brain = ScriptedBrain({ANALYSIS_ID: load_analysis()})
     app = create_app(lab_settings(metrics_path, lab=False), brain=brain)
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(user_id="u1", login="u1")
     async with client_for(app) as client:
         created = await start(client)
         response = await client.post(
@@ -83,15 +85,14 @@ async def test_lab_delay_is_rejected_when_lab_disabled(
     assert "LAB_ENABLED" in response.json()["detail"]
 
 
-async def test_sessions_unavailable_without_brain(
-    client_for: ClientFactory, metrics_path: Path
-) -> None:
+async def test_real_mode_requires_login(client_for: ClientFactory, metrics_path: Path) -> None:
     async with client_for(create_app(lab_settings(metrics_path, lab=False))) as client:
         response = await client.post(
             "/api/sessions", json={"analysis_id": ANALYSIS_ID, "mode": "voice"}
         )
 
-    assert response.status_code == 503
+    assert response.status_code == 401
+    assert response.json()["detail"] == "로그인이 필요합니다"
 
 
 async def test_duplicate_turn_id_is_processed_once(

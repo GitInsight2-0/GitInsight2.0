@@ -48,6 +48,7 @@ README.md의 "핵심 설계 원칙"을 지킵니다. 코드에서 특히 주의�
 - Python은 ruff(포맷·린트)와 pyright(standard 모드)를 씁니다. 설정은 루트 `pyproject.toml`에 있습니다.
 - 계약 모델은 `Contract`(추가 필드 거부)를, LLM 출력 모델은 `LLMOutput`(기본값 없는 필드만)을 상속합니다.
 - 계약을 바꾸면 `pnpm contracts:gen`으로 생성 파일을 함께 커밋합니다. CI는 `pnpm contracts:check`로 검사합니다.
+- CI(`.github/workflows/ci.yml`)는 PR과 `main` push마다 아래 "명령"의 ruff, pyright, pytest, `pnpm contracts:check`를 실행합니다.
 - 모든 LLM 호출은 `gitinsight_api.llm.LLMClient`를 거칩니다. 코드, README, 자막, JD는 `untrusted_block()` 안에만 넣습니다.
 - 테스트는 FakeLLM만 씁니다. 실제 LLM 호출 테스트는 `live_llm`, 네트워크 테스트는 `network` 표시를 붙이고 기본 실행에서 뺍니다.
 
@@ -81,3 +82,7 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 
 음성 PoC용 가짜 백엔드는 `LAB_ENABLED=true`로 서버를 띄우면 켜집니다. 이때 `POST /api/sessions/{id}/turns?lab_delay_ms=800`처럼 인위적 지연을 줄 수 있습니다. 데모와 배포에서는 끕니다.
 웹의 음성 비교 화면(`/lab/voice`)도 `web/.env.local`의 `LAB_ENABLED=true`일 때만 열립니다. 방법과 기록은 `docs/evals/voice-g1.md`에 있습니다.
+
+`LAB_ENABLED=false`(기본)이면 서버는 진짜 면접 두뇌와 리포트 API(`POST /api/sessions/{id}/end`, `GET /api/reports/{id}`)를 씁니다.
+로그인(#18)이 붙기 전까지 이 모드의 요청은 401을 돌려줍니다.
+테스트는 `app.dependency_overrides`로 `get_current_user`를 바꿔 로그인 사용자를 넣습니다.

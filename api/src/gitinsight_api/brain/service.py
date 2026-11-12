@@ -24,6 +24,7 @@ from gitinsight_api.brain.planner import plan_interview
 from gitinsight_api.brain.protocol import (
     AnalysisNotFoundError,
     SessionClosedError,
+    SessionNotFoundError,
 )
 from gitinsight_api.brain.quotes import EXACT, QuoteMatcher
 from gitinsight_api.brain.repository import SessionRepository
@@ -85,7 +86,15 @@ class InterviewBrain:
             raise AnalysisNotFoundError(analysis_id)
         return analysis
 
-    async def start(self, request: SessionCreate) -> tuple[UUID, BrainReply]:
+    async def owner_of(self, session_id: UUID) -> str | None:
+        state = await self._repository.get(session_id)
+        if state is None:
+            raise SessionNotFoundError(session_id)
+        return state.owner_id
+
+    async def start(
+        self, request: SessionCreate, owner_id: str | None = None
+    ) -> tuple[UUID, BrainReply]:
         analysis = await self._analysis(request.analysis_id)
         plan = await plan_interview(
             analysis,
@@ -100,6 +109,7 @@ class InterviewBrain:
         state = SessionState(
             session_id=uuid4(),
             analysis_id=analysis.analysis_id,
+            owner_id=owner_id,
             mode=request.mode,
             duration_sec=request.duration_min * 60,
             started_at=now,
