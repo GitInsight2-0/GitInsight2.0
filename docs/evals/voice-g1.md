@@ -121,11 +121,11 @@ Gemini `realtimeInputConfig.automaticActivityDetection`의 `silenceDurationMs`, 
 
 ## 결정
 
-- 선택: **Gemini Live** (`gemini-3.1-flash-live-preview`), 2026-11-11 팀 결정
+- 선택: **Gemini Live** (`gemini-3.1-flash-live-preview`), 2026-11-11 팀 결정. 2026-11-12 팀에서 **OpenAI Realtime은 쓰지 않기로** 확정했습니다
 - 이유 (측정으로 확인한 것):
   - 한국어 음성 면접을 대본 두뇌와 끝까지 진행했고, 위임(도구 호출)·끼어들기·하이라이트 전환이 동작했습니다.
   - 무료 등급으로 개발과 측정을 할 수 있습니다.
-  - OpenAI Realtime은 결제 키가 없어 측정하지 않았습니다. 같은 조건의 비교 결과는 없습니다.
+  - OpenAI Realtime은 측정하지 않았습니다. 같은 조건의 비교 결과는 없고, 비교 없이 Gemini 단독으로 정했습니다.
 - 이유 (회의에서 나온 것): <!-- 회의 기록이 있으면 채웁니다 -->
 - 남은 과제 (G4 전에 해결):
   - 응답 지연: 기본 설정 약 3.1초, 멈춤에 강한 설정(2000ms, LOW) 약 4.1초 → 목표 1.5초. 위임 대기 중 짧은 맞장구(계약의 `filler_start`)를 검토합니다.
@@ -133,4 +133,4 @@ Gemini `realtimeInputConfig.automaticActivityDetection`의 `silenceDurationMs`, 
   - "다시 말해 달라"를 모델이 직접 처리한 경우 (서버 REPEAT 판단과 어긋남). #26 지시문 보강 뒤 0회.
   - 코드 용어 오인식 (useReducer, ChromaDB 등).
   - 무료 등급은 보낸 데이터가 모델 학습에 쓰일 수 있어, 팀원 비공개 레포로 하는 데모 전에 유료 등급 전환을 결정합니다.
-- 대비 어댑터: OpenAI 어댑터(`web/lib/voice/openai.ts`)는 지우지 않고 남깁니다. 실제 연결로 확인하지 않았으므로, 런북 "음성 제공사" 1차 대비책으로 쓰려면 리허설 전에 한 번 연결해 봐야 합니다.
+- 대비책: 다른 음성 제공사를 두지 않습니다. 런북 "음성 제공사"의 1차 대비책은 텍스트 모드, 2차는 녹화 영상입니다.
