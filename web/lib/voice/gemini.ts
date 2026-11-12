@@ -14,7 +14,8 @@ const WS_URL =
 /** setupComplete를 기다리는 시간 */
 const SETUP_TIMEOUT_MS = 10_000;
 
-export const connectGemini: Connect = async (token, hooks) => {
+export const connectGemini: Connect = async (token, hooks, { signal }) => {
+  if (signal.aborted) throw abortError();
   let mic: MediaStream | null = null;
   let ws: WebSocket | null = null;
   let worklet: AudioWorkletNode | null = null;
@@ -62,13 +63,29 @@ export const connectGemini: Connect = async (token, hooks) => {
     void outCtx.close();
   };
 
+  // 연결 중에 멈추면 기다리던 단계를 바로 끝냅니다.
+  const aborted = new Promise<never>((_, reject) => {
+    signal.addEventListener(
+      "abort",
+      () => {
+        cleanup();
+        reject(abortError());
+      },
+      { once: true },
+    );
+  });
+  aborted.catch(() => undefined);
+  const orAbort = <T,>(p: Promise<T>) => Promise.race([p, aborted]);
+
   try {
     // ── 마이크 ──
-    mic = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-    });
+    mic = await orAbort(
+      navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+      }),
+    );
     inCtx = new AudioContext({ sampleRate: 16000 });
-    await inCtx.audioWorklet.addModule("/pcm-capture-worklet.js");
+    await orAbort(inCtx.audioWorklet.addModule("/pcm-capture-worklet.js"));
     const micSrc = inCtx.createMediaStreamSource(mic);
     const node = new AudioWorkletNode(inCtx, "pcm-capture");
     worklet = node;
@@ -90,9 +107,15 @@ export const connectGemini: Connect = async (token, hooks) => {
 
     let userText = "";
     let aiText = "";
+    // Gemini는 item id가 없어 사용자 턴 번호를 직접 매깁니다.
+    // 도구 호출이 오면 그 턴을 닫고 다음 번호로 넘어갑니다.
+    // 도구 호출 뒤 AI 답변 소리가 오기 전에 도착한 받아쓰기 조각은 닫힌 턴(이전 번호)의 늦은 결과로 표시합니다.
+    let userTurn = 1;
+    let awaitingReply = false;
+    const keyOf = (n: number) => `g${n}`;
     const flushUser = () => {
       const t = userText.trim();
-      if (t) hooks.onUserTranscript(t);
+      if (t) hooks.onUserTranscript(t, keyOf(awaitingReply ? userTurn - 1 : userTurn));
       userText = "";
     };
 
@@ -121,6 +144,14 @@ export const connectGemini: Connect = async (token, hooks) => {
         const sc = m.serverContent;
         if (sc) {
           if (sc.interrupted) flush();
+          const hasAudio = (sc.modelTurn?.parts ?? []).some((p) => p.inlineData?.data);
+          // 늦은 조각을 먼저 이전 턴으로 넘긴 뒤, AI 답변이 시작되면 새 턴을 받기 시작합니다.
+          if (awaitingReply && sc.inputTranscription?.text) {
+            userText += sc.inputTranscription.text;
+            flushUser();
+            sc.inputTranscription = undefined;
+          }
+          if (awaitingReply && (hasAudio || sc.interrupted || sc.turnComplete)) awaitingReply = false;
           for (const p of sc.modelTurn?.parts ?? []) if (p.inlineData?.data) enqueue(p.inlineData.data);
           if (sc.inputTranscription?.text) userText += sc.inputTranscription.text;
           if (sc.outputTranscription?.text) aiText += sc.outputTranscription.text;
@@ -134,7 +165,9 @@ export const connectGemini: Connect = async (token, hooks) => {
         for (const call of m.toolCall?.functionCalls ?? []) {
           // 이 시점까지 모인 받아쓰기를 먼저 넘겨, 진행기가 도구 인자보다 받아쓰기를 쓰게 합니다.
           flushUser();
-          hooks.onToolCall(call.id, call.name, call.args ?? {});
+          hooks.onToolCall(call.id, call.name, call.args ?? {}, keyOf(userTurn));
+          userTurn += 1;
+          awaitingReply = true;
         }
 
         if (m.goAway) hooks.onError("gemini_go_away", `goAway: 남은 시간 ${m.goAway.timeLeft ?? "?"} (재연결 필요)`);
@@ -142,7 +175,7 @@ export const connectGemini: Connect = async (token, hooks) => {
     });
     socket.onerror = () => hooks.onError("ws_error", "Gemini WebSocket 오류");
 
-    await setupDone;
+    await orAbort(setupDone);
 
     node.port.onmessage = (e: MessageEvent<Float32Array>) => {
       if (ready) send({ realtimeInput: { audio: { data: floatToPcm16Base64(e.data), mimeType: "audio/pcm;rate=16000" } } });
@@ -165,6 +198,10 @@ export const connectGemini: Connect = async (token, hooks) => {
     throw e;
   }
 };
+
+function abortError() {
+  return new DOMException("연결을 멈췄습니다", "AbortError");
+}
 
 interface GeminiMessage {
   setupComplete?: object;

@@ -6,17 +6,33 @@
  * 주의: 스피커로 들으면 AI 목소리가 마이크로 들어가 잘못 잽니다. 이어폰을 씁니다.
  */
 
-const USER_ON = 0.02; // 마이크 RMS 기준. 환경에 따라 조정합니다.
-const AI_ON = 0.01;
-const USER_SILENCE_MS = 500; // 이만큼 조용하면 사용자 말 끝
-const AI_SILENCE_MS = 400;
+/** 마이크 RMS 기준. 환경에 따라 조정합니다. */
+export const USER_ON = 0.02;
+export const AI_ON = 0.01;
+/** 이만큼 조용하면 사용자 말 끝 */
+export const USER_SILENCE_MS = 500;
+/** 이만큼 조용하면 AI 발화 하나가 끝난 것으로 봅니다 (맞장구와 질문을 나누는 기준) */
+export const AI_SILENCE_MS = 400;
+/**
+ * 끼어들기 뒤 AI가 "멈췄다"고 보는 침묵 길이.
+ * G1 기준(끊으면 500ms 안에 멈춤)을 숫자로 재야 해서 발화 구분 기준(400ms)보다 짧게 둡니다.
+ * 멈춘 시각은 조용해지기 시작한 시각으로 기록하므로, 이 값은 판정 지연만 만들고 측정값에는 더해지지 않습니다.
+ */
+export const BARGE_STOP_QUIET_MS = 150;
+/** 끼어들기 뒤 이 시간 안에 AI가 멈추지 않으면 "안 멈춤"으로 기록합니다 */
+export const BARGE_STOP_TIMEOUT_MS = 5000;
 
 export interface MeterEvents {
   userStart(atMs: number): void;
   userEnd(atMs: number): void;
-  /** AI 목소리 시작. 직전 사용자 말 끝으로부터의 지연을 함께 줍니다 (없으면 null). */
-  aiStart(atMs: number, latencyMs: number | null): void;
+  /** AI 목소리 시작 */
+  aiStart(atMs: number): void;
+  /** AI 발화 하나가 끝남 (조용해지기 시작한 시각) */
+  aiEnd(atMs: number): void;
+  /** AI가 말하는 중에 사용자가 말을 시작함 */
   bargeIn(atMs: number): void;
+  /** 끼어들기 뒤 AI가 멈춤. stopMs는 끼어들기 시작부터 AI가 조용해진 시각까지, 제한 시간 안에 안 멈추면 null */
+  bargeStop(bargeAtMs: number, stopMs: number | null): void;
 }
 
 /** performance.now() 값을 epoch 밀리초로 바꿉니다 (계약의 시각은 epoch ms). */
@@ -30,7 +46,8 @@ export class Meter {
   lastUserEnd: number | null = null;
   private userQuietSince = 0;
   private aiQuietSince = 0;
-  private aiLastEnd = 0;
+  /** 진행 중인 끼어들기 시작 (performance.now) */
+  private bargeAt: number | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private ev: MeterEvents) {}
@@ -64,7 +81,10 @@ export class Meter {
         this.userSpeaking = true;
         this.lastUserStart = epochMs(now);
         this.ev.userStart(this.lastUserStart);
-        if (this.aiSpeaking) this.ev.bargeIn(this.lastUserStart);
+        if (this.aiSpeaking) {
+          this.ev.bargeIn(this.lastUserStart);
+          if (this.bargeAt === null) this.bargeAt = now;
+        }
       }
       this.userQuietSince = 0;
     } else if (this.userSpeaking) {
@@ -81,18 +101,28 @@ export class Meter {
     if (level > AI_ON) {
       if (!this.aiSpeaking) {
         this.aiSpeaking = true;
-        const at = epochMs(now);
-        // 마지막 AI 발화 이후 사용자가 말을 마쳤다면 그 간격이 응답 지연입니다.
-        const answered = this.lastUserEnd !== null && this.lastUserEnd > this.aiLastEnd && !this.userSpeaking;
-        this.ev.aiStart(at, answered ? at - this.lastUserEnd! : null);
+        this.ev.aiStart(epochMs(now));
       }
       this.aiQuietSince = 0;
     } else if (this.aiSpeaking) {
       if (!this.aiQuietSince) this.aiQuietSince = now;
       if (now - this.aiQuietSince > AI_SILENCE_MS) {
         this.aiSpeaking = false;
-        this.aiLastEnd = epochMs(this.aiQuietSince);
+        this.ev.aiEnd(epochMs(this.aiQuietSince));
       }
+    }
+    this.checkBargeStop(level, now);
+  }
+
+  private checkBargeStop(level: number, now: number) {
+    if (this.bargeAt === null) return;
+    if (level <= AI_ON && this.aiQuietSince && now - this.aiQuietSince >= BARGE_STOP_QUIET_MS) {
+      const stopMs = Math.max(0, Math.round(this.aiQuietSince - this.bargeAt));
+      this.ev.bargeStop(epochMs(this.bargeAt), stopMs);
+      this.bargeAt = null;
+    } else if (now - this.bargeAt > BARGE_STOP_TIMEOUT_MS) {
+      this.ev.bargeStop(epochMs(this.bargeAt), null);
+      this.bargeAt = null;
     }
   }
 }
