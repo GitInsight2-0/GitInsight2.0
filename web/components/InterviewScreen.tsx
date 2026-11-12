@@ -35,7 +35,10 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pendingTurnId = useRef<string | null>(null);
+  /** 실패한 턴. 같은 내용을 다시 보낼 때만 같은 turn_id를 씁니다 (고친 답변이 중복으로 버려지지 않게). */
+  const pendingTurn = useRef<{ id: string; transcript: string } | null>(null);
+  /** state인 busy는 연달아 누른 Enter에서 아직 false로 보일 수 있어, 보내는 중인지는 ref로 막습니다. */
+  const sending = useRef(false);
 
   const push = (item: HistoryItem) => setHistory((h) => [...h, item]);
 
@@ -56,12 +59,15 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
 
   async function submit() {
     const transcript = draft.trim();
-    if (!sessionId || !transcript || busy || reply?.done) return;
+    if (!sessionId || !transcript || sending.current || reply?.done) return;
+    sending.current = true;
     setBusy(true);
     setError(null);
-    // 같은 답변을 다시 보낼 때(네트워크 오류 뒤 재시도) 같은 turn_id를 써서 서버가 한 번만 반영하게 합니다.
-    const turnId = pendingTurnId.current ?? crypto.randomUUID();
-    pendingTurnId.current = turnId;
+    // 실패 뒤 같은 답변을 그대로 다시 보내면 같은 turn_id를 써서 서버가 한 번만 반영하게 합니다.
+    // 답변을 고쳤으면 새 턴이므로 새 turn_id를 씁니다.
+    const pending = pendingTurn.current;
+    const turnId = pending && pending.transcript === transcript ? pending.id : crypto.randomUUID();
+    pendingTurn.current = { id: turnId, transcript };
     try {
       const next = await postTurn(sessionId, {
         turn_id: turnId,
@@ -70,20 +76,22 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
         speech_started_at: null,
         speech_ended_at: null,
       });
-      pendingTurnId.current = null;
+      pendingTurn.current = null;
       push({ who: "me", text: transcript });
       push({ who: "interviewer", text: next.utterance });
       setReply(next);
       setDraft("");
     } catch (e) {
+      // 서버(api/routes/sessions.py)는 /turns에서 409를 "이미 끝난 세션"에만 씁니다.
       if (e instanceof ApiError && e.status === 409) {
-        pendingTurnId.current = null;
+        pendingTurn.current = null;
         push({ who: "system", text: "이미 끝난 면접입니다." });
         setReply((r) => (r ? { ...r, done: true } : r));
       } else {
         setError(`답변을 보내지 못했습니다. 다시 보내 주세요. (${String((e as Error).message ?? e)})`);
       }
     } finally {
+      sending.current = false;
       setBusy(false);
     }
   }
@@ -96,7 +104,9 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
         <button onClick={start} disabled={busy}>
           면접 시작
         </button>
-        {error && <p style={{ color: "#c00" }}>{error}</p>}
+        <p role="status" aria-live="polite" style={{ color: "#c00" }}>
+          {error}
+        </p>
       </main>
     );
   }
@@ -115,7 +125,7 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)", gap: 16 }}>
         <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 16, fontSize: 16, lineHeight: 1.6 }}>
+          <div aria-live="polite" style={{ border: "1px solid #ddd", borderRadius: 8, padding: 16, fontSize: 16, lineHeight: 1.6 }}>
             {reply?.utterance}
           </div>
 
@@ -133,13 +143,16 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
                     void submit();
                   }
                 }}
+                aria-label="답변"
                 placeholder="답변을 입력하세요 (Enter 보내기, Shift+Enter 줄바꿈)"
                 rows={5}
                 disabled={busy}
                 style={{ width: "100%", boxSizing: "border-box", fontSize: 15, padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
               />
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6 }}>
-                {error && <span style={{ color: "#c00", fontSize: 13, marginRight: "auto" }}>{error}</span>}
+                <span role="status" aria-live="polite" style={{ color: "#c00", fontSize: 13, marginRight: "auto" }}>
+                  {error}
+                </span>
                 <button onClick={() => void submit()} disabled={busy || !draft.trim()}>
                   {busy ? "보내는 중…" : "답변 보내기"}
                 </button>
