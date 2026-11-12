@@ -1,11 +1,13 @@
 "use client";
 
 import type { BrainReply } from "@gitinsight/contracts";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { isAbort } from "@/lib/voice/api";
 import { DEFAULT_VAD, TEST_SCRIPT, VAD_LIMITS, type VadSettings } from "@/lib/voice/config";
 import { connectGemini } from "@/lib/voice/gemini";
 import { connectOpenAI } from "@/lib/voice/openai";
-import { type LogWho, startVoiceSession } from "@/lib/voice/session";
+import { type LogWho, type VoiceSession, startVoiceSession } from "@/lib/voice/session";
+import { summarize } from "@/lib/voice/stats";
 import type { Provider } from "@/lib/voice/types";
 
 interface LogLine {
@@ -27,12 +29,8 @@ function explainError(e: unknown): string {
   return String(e);
 }
 
-function stats(xs: number[]) {
-  if (!xs.length) return { n: 0, median: null as number | null, p90: null as number | null };
-  const s = [...xs].sort((a, b) => a - b);
-  const q = (p: number) => s[Math.min(s.length - 1, Math.floor(p * s.length))];
-  return { n: s.length, median: q(0.5), p90: q(0.9) };
-}
+/** G1 기준: 끊으면 이 시간 안에 AI가 멈춰야 합니다 */
+const BARGE_STOP_TARGET_MS = 500;
 
 export default function VoiceLab({ analysisId }: { analysisId: string }) {
   const [provider, setProvider] = useState<Provider>("gemini");
@@ -50,8 +48,17 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
   // #28 측정: 모델 맞장구는 위임 누락을 늘려 기본으로 끕니다.
   const [filler, setFiller] = useState(false);
   const [fillers, setFillers] = useState<number[]>([]);
-  const session = useRef<{ stop(): void } | null>(null);
+  /** 끼어들기 뒤 AI가 멈추기까지 (ms). null은 제한 시간 안에 안 멈춤 */
+  const [bargeStops, setBargeStops] = useState<(number | null)[]>([]);
+  /** 지금 답하고 있는 대본 줄 (1부터). 서버로 턴을 보낼 때마다 하나씩 넘어갑니다. */
+  const [scriptLine, setScriptLine] = useState(1);
+  const scriptLineRef = useRef(1);
+  const session = useRef<VoiceSession | null>(null);
+  const abort = useRef<AbortController | null>(null);
   const t0 = useRef(0);
+
+  // 페이지를 떠나면 마이크와 연결을 닫습니다.
+  useEffect(() => () => abort.current?.abort(), []);
 
   const add = (who: LogWho, text: string) =>
     setLog((l) => [...l, { sec: Math.round((performance.now() - t0.current) / 100) / 10, who, text }]);
@@ -65,8 +72,13 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
     setSimilarities([]);
     setMissed(0);
     setFillers([]);
+    setBargeStops([]);
+    setScriptLine(1);
+    scriptLineRef.current = 1;
     setRunning(true);
     t0.current = performance.now();
+    const ac = new AbortController();
+    abort.current = ac;
     try {
       session.current = await startVoiceSession(
         provider,
@@ -86,30 +98,64 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
             setBargeIns((n) => n + 1);
             add("system", "끼어들기 감지");
           },
+          bargeStop: (ms) => {
+            setBargeStops((x) => [...x, ms]);
+            add("system", ms === null ? "끼어들기 뒤 AI가 멈추지 않음" : `끼어들기 뒤 AI 멈춤 ${ms}ms`);
+          },
+          turnSent: () => {
+            scriptLineRef.current = Math.min(scriptLineRef.current + 1, TEST_SCRIPT.length);
+            setScriptLine(scriptLineRef.current);
+          },
+          ended: (reason) => {
+            add("system", reason);
+            session.current = null;
+            setRunning(false);
+          },
           delegationMissed: () => setMissed((n) => n + 1),
           transcriptSimilarity: (ratio) => {
             setSimilarities((x) => [...x, ratio]);
             add("system", `받아쓰기 vs 도구 인자 유사도 ${ratio.toFixed(2)}`);
           },
         },
-        { analysisId, labDelayMs, scenario: "g1_script", vad, filler },
+        {
+          analysisId,
+          labDelayMs,
+          // 대본 줄별로 나눠 볼 수 있게 줄 번호를 붙입니다 (예: g1_s3).
+          scenario: () => `g1_s${scriptLineRef.current}`,
+          vad,
+          filler,
+          signal: ac.signal,
+        },
       );
     } catch (e) {
-      add("error", explainError(e));
-      setStatus("실패");
+      // 사용자가 멈춘 것은 오류로 기록하지 않습니다.
+      if (isAbort(e)) add("system", "시작 중에 멈췄습니다");
+      else {
+        add("error", explainError(e));
+        setStatus("실패");
+      }
       setRunning(false);
     }
   }
 
   function stop() {
+    // 연결 중이면 신호로 멈추고, 진행 중이면 세션을 닫습니다. 둘 다 같은 정리 경로를 탑니다.
+    abort.current?.abort();
     session.current?.stop();
     session.current = null;
     setRunning(false);
   }
 
-  const lat = stats(latencies);
-  const del = stats(delegations);
-  const fil = stats(fillers);
+  const lat = summarize(latencies);
+  const del = summarize(delegations);
+  const fil = summarize(fillers);
+  const stopped = bargeStops.filter((x): x is number => x !== null);
+  const barge = {
+    n: bargeStops.length,
+    within_target: stopped.filter((x) => x <= BARGE_STOP_TARGET_MS).length,
+    not_stopped: bargeStops.length - stopped.length,
+    stop_ms: summarize(stopped),
+  };
   const sim = {
     n: similarities.length,
     min: similarities.length ? Math.min(...similarities) : null,
@@ -129,6 +175,8 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
     filler_ms: fil,
     delegation_ms: del,
     barge_ins: bargeIns,
+    // 끼어들기 뒤 AI가 멈추기까지. within_target은 500ms 안에 멈춘 횟수
+    barge_stop: barge,
     // 받아쓰기와 음성 AI 도구 인자의 유사도. 1에서 멀수록 모델이 답변을 다듬거나 요약한 것입니다.
     transcript_similarity: sim,
     // 음성 AI가 서버를 부르지 않고 직접 답한 횟수
@@ -205,10 +253,15 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
       </div>
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
-        <Stat label="말 끝 → 맞장구 중앙값" value={fil.median} unit="ms" sub={`p90 ${fil.p90 ?? "-"} · ${fil.n}회`} />
-        <Stat label="말 끝 → 질문 중앙값" value={lat.median} unit="ms" sub={`p90 ${lat.p90 ?? "-"} · ${lat.n}회`} />
-        <Stat label="위임 왕복 중앙값" value={del.median} unit="ms" sub={`p90 ${del.p90 ?? "-"} · ${del.n}회`} />
-        <Stat label="끼어들기 감지" value={bargeIns} unit="회" sub="AI가 실제로 멈췄는지는 귀로 확인" />
+        <Stat label="말 끝 → 맞장구 중앙값" value={fil.median} unit="ms" sub={`p90 ${fil.p90 ?? "-"} · p95 ${fil.p95 ?? "-"} · ${fil.n}회`} />
+        <Stat label="말 끝 → 질문 중앙값" value={lat.median} unit="ms" sub={`p90 ${lat.p90 ?? "-"} · p95 ${lat.p95 ?? "-"} · ${lat.n}회`} />
+        <Stat label="위임 왕복 중앙값" value={del.median} unit="ms" sub={`p90 ${del.p90 ?? "-"} · p95 ${del.p95 ?? "-"} · ${del.n}회`} />
+        <Stat
+          label={`끼어들기 뒤 ${BARGE_STOP_TARGET_MS}ms 안에 멈춤`}
+          value={barge.n ? barge.within_target : null}
+          unit={`/ ${barge.n}회`}
+          sub={`멈추기까지 중앙값 ${barge.stop_ms.median ?? "-"}ms · 안 멈춤 ${barge.not_stopped}회 · 감지 ${bargeIns}회`}
+        />
         <Stat
           label="받아쓰기 vs 도구 인자"
           value={sim.mean}
@@ -252,8 +305,10 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
           )}
           <h2 style={{ fontSize: 16, marginTop: 16 }}>테스트 대본 (질문이 나올 때마다 순서대로)</h2>
           <ol style={{ fontSize: 14, lineHeight: 1.6 }}>
-            {TEST_SCRIPT.map((s) => (
-              <li key={s}>{s}</li>
+            {TEST_SCRIPT.map((s, i) => (
+              <li key={s} style={{ fontWeight: running && i + 1 === scriptLine ? 600 : 400 }}>
+                {s}
+              </li>
             ))}
           </ol>
         </section>

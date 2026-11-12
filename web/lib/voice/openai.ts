@@ -9,7 +9,8 @@ import type { Connect } from "./types";
 /** 데이터 채널이 열릴 때까지 기다리는 시간 */
 const OPEN_TIMEOUT_MS = 10_000;
 
-export const connectOpenAI: Connect = async (token, hooks) => {
+export const connectOpenAI: Connect = async (token, hooks, { signal }) => {
+  if (signal.aborted) throw abortError();
   const ctx = new AudioContext();
   const pc = new RTCPeerConnection();
   const audioEl = new Audio();
@@ -30,6 +31,20 @@ export const connectOpenAI: Connect = async (token, hooks) => {
     void ctx.close();
   };
 
+  // 연결 중에 멈추면 기다리던 단계를 바로 끝냅니다.
+  const aborted = new Promise<never>((_, reject) => {
+    signal.addEventListener(
+      "abort",
+      () => {
+        cleanup();
+        reject(abortError());
+      },
+      { once: true },
+    );
+  });
+  aborted.catch(() => undefined);
+  const orAbort = <T,>(p: Promise<T>) => Promise.race([p, aborted]);
+
   try {
     pc.ontrack = (e) => {
       const stream = e.streams[0];
@@ -39,9 +54,9 @@ export const connectOpenAI: Connect = async (token, hooks) => {
       ctx.createMediaStreamSource(stream).connect(ai); // 측정만 합니다. 재생은 audioEl
     };
 
-    mic = await navigator.mediaDevices.getUserMedia({
+    mic = await orAbort(navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
+    }));
     pc.addTrack(mic.getAudioTracks()[0], mic);
     const user = ctx.createAnalyser();
     user.fftSize = 1024;
@@ -74,11 +89,20 @@ export const connectOpenAI: Connect = async (token, hooks) => {
       };
     });
 
+    // 받아쓰기와 도구 호출을 사용자 음성 item id로 묶습니다.
+    // 도구 호출은 그 응답이 만들어질 때 마지막으로 확정된 사용자 음성에 답한 것으로 봅니다.
+    let lastUserItem: string | null = null;
+    let responseUserItem: string | null = null;
+
     channel.onmessage = (msg) => {
       const ev = JSON.parse(String(msg.data)) as { type: string } & Record<string, unknown>;
       switch (ev.type) {
+        case "input_audio_buffer.committed":
+          if (typeof ev.item_id === "string") lastUserItem = ev.item_id;
+          break;
         case "response.created":
           responseActive = true;
+          responseUserItem = lastUserItem;
           break;
         case "response.done":
           responseActive = false;
@@ -88,13 +112,14 @@ export const connectOpenAI: Connect = async (token, hooks) => {
           }
           break;
         case "conversation.item.input_audio_transcription.completed":
-          if (typeof ev.transcript === "string" && ev.transcript.trim()) hooks.onUserTranscript(ev.transcript.trim());
+          if (typeof ev.transcript === "string" && ev.transcript.trim())
+            hooks.onUserTranscript(ev.transcript.trim(), typeof ev.item_id === "string" ? ev.item_id : null);
           break;
         case "response.output_audio_transcript.done":
           if (typeof ev.transcript === "string") hooks.onAiTranscript(ev.transcript, false);
           break;
         case "response.function_call_arguments.done":
-          hooks.onToolCall(String(ev.call_id), String(ev.name), parseArgs(ev.arguments));
+          hooks.onToolCall(String(ev.call_id), String(ev.name), parseArgs(ev.arguments), responseUserItem);
           break;
         case "error": {
           const err = (ev.error ?? {}) as { code?: unknown };
@@ -120,10 +145,11 @@ export const connectOpenAI: Connect = async (token, hooks) => {
       method: "POST",
       body: offer.sdp,
       headers: { Authorization: `Bearer ${token.client_secret}`, "Content-Type": "application/sdp" },
+      signal,
     });
     if (!sdp.ok) throw new Error(`SDP 교환 실패 ${sdp.status}: ${(await sdp.text()).slice(0, 300)}`);
     await pc.setRemoteDescription({ type: "answer", sdp: await sdp.text() });
-    await opened;
+    await orAbort(opened);
 
     return {
       say(text) {
@@ -149,6 +175,10 @@ export const connectOpenAI: Connect = async (token, hooks) => {
     throw e;
   }
 };
+
+function abortError() {
+  return new DOMException("연결을 멈췄습니다", "AbortError");
+}
 
 function parseArgs(raw: unknown): Record<string, unknown> {
   if (typeof raw !== "string") return {};

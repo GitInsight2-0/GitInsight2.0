@@ -19,8 +19,14 @@ class AnalysisNotFoundError(Exception):
 
 
 class Brain(Protocol):
-    async def start(self, request: SessionCreate) -> tuple[UUID, BrainReply]:
+    async def start(
+        self, request: SessionCreate, owner_id: str | None = None
+    ) -> tuple[UUID, BrainReply]:
         """세션을 만들고 첫 질문을 돌려줍니다."""
+        ...
+
+    async def owner_of(self, session_id: UUID) -> str | None:
+        """세션 소유자를 알려줍니다. 세션이 없으면 SessionNotFoundError를 냅니다."""
         ...
 
     async def handle_turn(self, session_id: UUID, request: TurnRequest) -> BrainReply:
