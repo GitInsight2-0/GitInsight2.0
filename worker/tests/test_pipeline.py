@@ -105,6 +105,8 @@ async def test_stage2_failure_reports_failed_and_removes_checkout(
 
     assert recorder.states[-1].status is AnalysisStatus.FAILED
     assert recorder.states[-1].error == "Stage2Error"
+    # 실패 직전 진행률(2단계 시작)을 유지해 어느 단계에서 실패했는지 알 수 있습니다.
+    assert recorder.states[-1].progress == 0.5
     assert list((tmp_path / "work").iterdir()) == []
 
 

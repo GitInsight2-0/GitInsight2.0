@@ -65,17 +65,24 @@ async def run_analysis(
     `requester`가 없으면 기여 라벨은 모두 "확인 불가"이고, 최근 커밋은 그대로 붙입니다.
     """
     checkout = Path(tempfile.mkdtemp(prefix="gitinsight-", dir=work_dir))
+    # 실패를 보고할 때 마지막 진행률을 남겨, 화면이 어느 단계에서 실패했는지 보여 줄 수 있게 합니다.
+    last = PROGRESS_STARTED
+
+    async def report(status: AnalysisStatus, value: float) -> None:
+        nonlocal last
+        await reporter.report(_state(status, value, commit_sha))
+        last = value
+
     try:
-        await reporter.report(_state(AnalysisStatus.STAGE1, PROGRESS_STARTED, commit_sha))
+        await report(AnalysisStatus.STAGE1, PROGRESS_STARTED)
         await asyncio.to_thread(clone, checkout)
-        await reporter.report(_state(AnalysisStatus.STAGE1, PROGRESS_CLONED, commit_sha))
+        await report(AnalysisStatus.STAGE1, PROGRESS_CLONED)
         stage1 = await asyncio.to_thread(analyze_tree, checkout, commit_sha, requester)
-        await reporter.report(_state(AnalysisStatus.STAGE2, PROGRESS_STAGE1_DONE, commit_sha))
+        await report(AnalysisStatus.STAGE2, PROGRESS_STAGE1_DONE)
 
         async def progress(fraction: float) -> None:
             span = PROGRESS_STAGE2_END - PROGRESS_STAGE1_DONE
-            value = PROGRESS_STAGE1_DONE + span * fraction
-            await reporter.report(_state(AnalysisStatus.STAGE2, value, commit_sha))
+            await report(AnalysisStatus.STAGE2, PROGRESS_STAGE1_DONE + span * fraction)
 
         return await run_stage2(
             checkout,
@@ -92,7 +99,7 @@ async def run_analysis(
         await reporter.report(
             AnalysisState(
                 status=AnalysisStatus.FAILED,
-                progress=PROGRESS_STARTED,
+                progress=last,
                 commit_sha=commit_sha,
                 error=type(error).__name__,
             )

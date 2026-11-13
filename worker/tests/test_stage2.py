@@ -13,6 +13,7 @@ from gitinsight_worker.stage2 import (
     MAX_CODE_CHARS,
     TOPIC_PURPOSE,
     LLMConfigError,
+    LLMQuotaError,
     Stage2Error,
     TopicContext,
     TopicMaterial,
@@ -78,7 +79,8 @@ def test_followup_symbol_is_added_to_related_symbols(tmp_path: Path) -> None:
     ("change", "problem"),
     [
         ({"base_question": "42번째 줄의 반복문은 왜 필요했나요?"}, "줄 번호"),
-        ({"hint": "L12를 보세요."}, "줄 번호"),
+        ({"hint": "line 12를 보세요."}, "줄 번호"),
+        ({"hint": "10행부터 보세요."}, "줄 번호"),
         ({"base_question": "무엇을 하나요? 왜 그렇게 했나요?"}, "한 문장"),
         ({"question_intent": "  "}, "비어 있음"),
         ({"points": 2}, "3~5개"),
@@ -99,6 +101,26 @@ def test_invalid_material_is_rejected(tmp_path: Path, change: dict, problem: str
         validate_material(material(**change), candidates[0], CTX)
 
     assert any(problem in p for p in info.value.problems), info.value.problems
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "L2 캐시를 먼저 확인하는 이유는 무엇인가요?",
+        "L7 로드밸런서 대신 이 방식을 쓴 이유는요?",
+        "L1 정규화와 비교하면 어떤가요?",
+        "2행렬 곱셈은 어디에서 쓰이나요?",
+        "HTTP/2와 UTF-8 처리는 어떻게 하나요?",
+    ],
+)
+def test_technical_terms_are_not_line_numbers(tmp_path: Path, question: str) -> None:
+    # 기술 용어를 줄 번호로 잘못 잡으면 캐시·네트워크 코드 주제가 조용히 빠집니다(PR #36 리뷰).
+    write_repo(tmp_path)
+    _, candidates = stage1_and_candidates(tmp_path)
+
+    topic = validate_material(material(base_question=question), candidates[0], CTX)
+
+    assert topic.base_question == question
 
 
 def test_duplicate_points_are_merged_before_counting(tmp_path: Path) -> None:
@@ -248,6 +270,32 @@ async def test_auth_error_stops_analysis_immediately(tmp_path: Path) -> None:
     # 가짜 LLM은 기다림 없이 응답해서 취소 전에 첫 묶음이 모두 시작될 수 있습니다.
     assert len(select_candidates(stage1.symbols)) == 10
     assert len(llm.calls_for(TOPIC_PURPOSE)) <= stage2.TARGET_TOPICS
+
+
+def test_quota_breaker_trips_only_on_consecutive_exhaustion() -> None:
+    breaker = stage2._QuotaBreaker(limit=2)
+
+    breaker.exhausted("RateLimitError")
+    breaker.succeeded()
+    breaker.exhausted("RateLimitError")
+    with pytest.raises(LLMQuotaError, match="RateLimitError"):
+        breaker.exhausted("RateLimitError")
+
+
+@pytest.mark.usefixtures("no_backoff")
+async def test_exhausted_daily_quota_stops_analysis_early(tmp_path: Path) -> None:
+    body = "".join(f"    v{i} = {i}\n" for i in range(8))
+    files = {f"app/m{n}.py": f"def f{n}():\n{body}    return v0\n" for n in range(10)}
+    write_repo(tmp_path, files)
+    stage1 = analyze_tree(tmp_path, SHA)
+    llm = FakeLLM(responder=lambda *_: FakeStep(error=LLMUnavailableError("RateLimitError")))
+
+    with pytest.raises(LLMQuotaError):
+        await run_stage2(tmp_path, stage1, llm, analysis_id="a1", repo_full_name="o/r")
+
+    # 차단기가 없으면 후보 10개 x 3회 = 30회 호출하고 몇 분 뒤 실패합니다.
+    # 연속 2개 후보가 한도에 막히면 멈춥니다. 그동안 시작된 후보 하나의 호출까지 합쳐 9회 이하입니다.
+    assert len(llm.calls_for(TOPIC_PURPOSE)) <= 3 * (stage2.QUOTA_BREAKER_LIMIT + 1)
 
 
 async def test_failed_candidates_are_replaced_by_next_ones(tmp_path: Path) -> None:

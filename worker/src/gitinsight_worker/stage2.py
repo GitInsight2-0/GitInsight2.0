@@ -58,16 +58,18 @@ RETRYABLE_ERRORS = frozenset(
 )
 # 키나 모델 이름이 잘못된 경우입니다. 기다리거나 다른 후보로 바꿔도 해결되지 않습니다.
 CONFIG_ERRORS = frozenset({"AuthenticationError", "PermissionDeniedError", "NotFoundError"})
+# 백오프를 다 쓰고도 사용량 제한이었던 후보가 이만큼 연속이면 분석을 멈춥니다.
+QUOTA_BREAKER_LIMIT = 2
 # 아주 긴 함수는 앞부분만 보냅니다. 비용과 지연을 제한합니다.
 MAX_CODE_CHARS = 8_000
 MAX_README_CHARS = 3_000
 
 # 면접관이 줄 번호를 말하면 안 됩니다. 코드 위치는 분석 결과에서만 가져옵니다.
-# 한글도 단어 문자라서 \b를 쓰면 "L12를"처럼 조사가 붙은 경우를 놓칩니다. 앞뒤 영숫자만 확인합니다.
+# 단독 "L12" 표기는 "L2 캐시", "L7 로드밸런서" 같은 기술 용어와 구분할 수 없어서 잡지 않습니다(PR #36 리뷰).
+# 프롬프트가 줄 번호를 금지하므로 단독 표기는 드뭅니다. "행렬"도 줄 번호가 아닙니다.
 LINE_NUMBER = re.compile(
-    r"\d+\s*(번째\s*)?(줄|행|라인)"
+    r"\d+\s*(번째\s*)?(줄|행(?!렬)|라인)"
     r"|(?<![A-Za-z])[Ll][Ii][Nn][Ee]\s*\d+"
-    r"|(?<![A-Za-z0-9_])L\d+(?![0-9])"
 )
 _SLUG_INVALID = re.compile(r"[^a-z0-9]+")
 
@@ -128,8 +130,36 @@ class Stage2Error(Exception):
     """주제를 하나도 만들지 못했습니다."""
 
 
-class LLMConfigError(Stage2Error):
-    """LLM 키나 모델 설정이 잘못되어 분석을 바로 멈춥니다. 메시지에는 예외 종류 이름만 넣습니다."""
+class Stage2AbortError(Stage2Error):
+    """다른 후보로 바꿔도 해결되지 않아 분석을 바로 멈춥니다. 메시지에는 예외 종류 이름만 넣습니다."""
+
+
+class LLMConfigError(Stage2AbortError):
+    """LLM 키나 모델 설정이 잘못되었습니다."""
+
+
+class LLMQuotaError(Stage2AbortError):
+    """기다리고 다시 시도해도 사용량 제한이 풀리지 않습니다(하루 한도 소진 등)."""
+
+
+class _QuotaBreaker:
+    """백오프를 다 쓰고도 사용량 제한이었던 후보가 연속으로 나오면 분석을 멈춥니다.
+
+    분당 한도는 기다리면 풀리지만, 하루 한도는 남은 후보를 다 시도해도 호출만 쓰고 몇 분 뒤 실패합니다.
+    중간에 한 번이라도 응답을 받으면 다시 0부터 셉니다.
+    """
+
+    def __init__(self, limit: int = QUOTA_BREAKER_LIMIT) -> None:
+        self.limit = limit
+        self.consecutive = 0
+
+    def succeeded(self) -> None:
+        self.consecutive = 0
+
+    def exhausted(self, kind: str) -> None:
+        self.consecutive += 1
+        if self.consecutive >= self.limit:
+            raise LLMQuotaError(kind)
 
 
 @dataclass(frozen=True)
@@ -334,15 +364,21 @@ def _feedback(problems: list[str]) -> str:
 
 
 async def _complete_with_backoff(
-    llm: LLMClient, messages: list[Message], *, timeout_s: float, model: str | None
+    llm: LLMClient,
+    messages: list[Message],
+    *,
+    timeout_s: float,
+    model: str | None,
+    breaker: _QuotaBreaker,
 ) -> LLMResult[TopicMaterial] | None:
     """제공사 장애·사용량 제한은 기다렸다 다시 시도합니다. 시간 초과와 거부는 다시 시도하지 않습니다.
 
     키나 모델 설정 오류는 다른 후보로도 해결되지 않으므로 LLMConfigError로 분석을 멈춥니다.
+    다시 시도해도 사용량 제한이 계속되면 차단기가 LLMQuotaError로 분석을 멈춥니다.
     """
     for delay_s in (*UNAVAILABLE_BACKOFF_S, None):
         try:
-            return await llm.complete_structured(
+            result = await llm.complete_structured(
                 TopicMaterial, messages, purpose=TOPIC_PURPOSE, timeout_s=timeout_s, model=model
             )
         except LLMUnavailableError as error:
@@ -351,12 +387,19 @@ async def _complete_with_backoff(
             logger.info("topic_llm_failed error=%s retry=%s", kind, delay_s)
             if kind in CONFIG_ERRORS:
                 raise LLMConfigError(kind) from None
-            if kind not in RETRYABLE_ERRORS or delay_s is None:
+            if kind not in RETRYABLE_ERRORS:
+                return None
+            if delay_s is None:
+                if kind == "RateLimitError":
+                    breaker.exhausted(kind)
                 return None
             await asyncio.sleep(delay_s)
+            continue
         except LLMError as error:
             logger.info("topic_llm_failed error=%s", type(error).__name__)
             return None
+        breaker.succeeded()
+        return result
     return None
 
 
@@ -368,10 +411,14 @@ async def generate_topic(
     *,
     timeout_s: float = TOPIC_TIMEOUT_S,
     model: str | None = None,
+    breaker: _QuotaBreaker | None = None,
 ) -> Topic | None:
     """주제 하나를 만듭니다. 검증 실패는 한 번 다시 요청하고, 그래도 실패하거나 LLM 오류면 None입니다."""
+    breaker = breaker or _QuotaBreaker()
     for attempt in (1, 2):
-        result = await _complete_with_backoff(llm, messages, timeout_s=timeout_s, model=model)
+        result = await _complete_with_backoff(
+            llm, messages, timeout_s=timeout_s, model=model, breaker=breaker
+        )
         if result is None:
             return None
         try:
@@ -424,6 +471,7 @@ async def generate_topics(
     prepared = await asyncio.to_thread(_prepare, root, candidates[:MAX_CANDIDATES])
     semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
     used_slugs: set[str] = set()
+    breaker = _QuotaBreaker()
     topics: list[Topic] = []
     next_index = 0
 
@@ -432,18 +480,24 @@ async def generate_topics(
         ctx = TopicContext(topic_slug(item.candidate.symbol.name, used_slugs), label, commits)
         async with semaphore:
             return await generate_topic(
-                llm, item.candidate, item.messages, ctx, timeout_s=timeout_s, model=model
+                llm,
+                item.candidate,
+                item.messages,
+                ctx,
+                timeout_s=timeout_s,
+                model=model,
+                breaker=breaker,
             )
 
     # 부족한 만큼만 다음 후보를 한 번에 요청합니다. 결과 순서는 후보 순서를 따릅니다.
     while len(topics) < target and next_index < len(prepared):
         wave = prepared[next_index : next_index + target - len(topics)]
         next_index += len(wave)
-        # 설정 오류(LLMConfigError)가 나면 TaskGroup이 같은 묶음의 다른 요청을 취소합니다.
+        # 즉시 중단 오류(설정 오류, 한도 소진)가 나면 TaskGroup이 같은 묶음의 다른 요청을 취소합니다.
         try:
             async with asyncio.TaskGroup() as group:
                 tasks = [group.create_task(one(item)) for item in wave]
-        except* LLMConfigError as errors:
+        except* Stage2AbortError as errors:
             raise errors.exceptions[0] from None
         topics += [t for t in (task.result() for task in tasks) if t is not None]
         if progress is not None:
