@@ -24,7 +24,7 @@ README.md의 "전체 구조"를 따릅니다.
 | `contracts/src/gitinsight_contracts/` | 모듈 간 계약(Pydantic 모델) | B (변경 시 2명 승인) |
 | `contracts/schema/contracts.json`, `contracts/ts/index.d.ts` | 계약에서 자동 생성한 JSON Schema와 TS 타입. 직접 고치지 않습니다 | 자동 생성 |
 | `api/src/gitinsight_api/` | FastAPI 서버. `brain/`(면접 두뇌), `llm/`(LLMClient), `routes/` | B, D |
-| `worker/src/gitinsight_worker/` | 분석 워커. 지금은 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출, git blame 기여 라벨과 최근 커밋) | A |
+| `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출, git blame 기여 라벨과 최근 커밋), 2단계(규칙으로 주제 후보 선택, LLM으로 주제 재료 생성과 서버 검증), 전체 흐름 `pipeline.run_analysis` | A |
 | `web/` | Next.js 웹. 지금은 음성 PoC(`/lab/voice`), 임시 토큰 라우트(`/lab/voice-token`), 텍스트 면접 화면 중간 단계(`/lab/interview`)가 있습니다 | C |
 | `fixtures/analysis/` | 데모 레포 분석 결과 샘플 | B |
 | `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |
@@ -75,6 +75,7 @@ uv run python -m gitinsight_contracts.fixtures show                # 샘플 분�
 uv run python -m gitinsight_api.brain.cli [--real-llm]             # 터미널 텍스트 면접
 uv run python scripts/llm_latency.py --n 20                        # 판단 LLM 지연 측정 (수동, 비용 발생)
 uv run python scripts/eval_brain.py                                # 골든 대화 실제 LLM 평가 (수동, 비용 발생)
+uv run python scripts/eval_stage2.py                               # 샘플 레포 2단계 분석 실제 LLM 평가 (수동, 비용 발생)
 uv run python scripts/demo_check.py [--block-llm | --real-llm]     # 데모 완주 점검 (docs/runbook-demo.md)
 pnpm --filter @gitinsight/web dev                                  # 웹 (기본 3000번, /api/*는 API_ORIGIN으로 넘김)
 pnpm --filter @gitinsight/web typecheck                            # 웹 타입 검사

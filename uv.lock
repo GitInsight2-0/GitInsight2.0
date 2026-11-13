@@ -358,6 +358,7 @@ name = "gitinsight-worker"
 version = "0.1.0"
 source = { editable = "worker" }
 dependencies = [
+    { name = "gitinsight-api" },
     { name = "gitinsight-contracts" },
     { name = "tree-sitter" },
     { name = "tree-sitter-python" },
@@ -365,6 +366,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "gitinsight-api", editable = "api" },
     { name = "gitinsight-contracts", editable = "contracts" },
     { name = "tree-sitter", specifier = ">=0.26.1" },
     { name = "tree-sitter-python", specifier = ">=0.25.0" },
