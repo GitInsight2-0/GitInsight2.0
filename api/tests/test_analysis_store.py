@@ -8,6 +8,7 @@ import pytest
 
 from gitinsight_api.analyses.store import (
     STALE_AFTER,
+    STALE_ERROR,
     UNKNOWN_ERROR,
     AnalysisKey,
     AnalysisRecordNotFoundError,
@@ -134,6 +135,30 @@ async def test_stale_in_progress_record_is_replaced(store: AnalysisStore, clock:
 
     assert created
     assert second.analysis_id != first.analysis_id
+    # 교체된 옛 기록은 failed로 닫혀서, 화면은 실패를 알 수 있고 늦게 온 옛 워커는 막힙니다(PR #37 리뷰).
+    old = await store.get_record(first.analysis_id)
+    assert old is not None
+    assert (old.state.status, old.state.error) == (AnalysisStatus.FAILED, STALE_ERROR)
+
+
+async def test_slow_old_worker_cannot_write_after_replacement(
+    store: AnalysisStore, clock: FakeClock
+) -> None:
+    first, _ = await store.get_or_create(KEY)
+    clock.now += STALE_AFTER
+    second, _ = await store.get_or_create(KEY)
+
+    # 죽은 줄 알았던 옛 워커가 늦게 진행률과 결과를 보냅니다.
+    await store.update_state(first.analysis_id, stage1(0.9))
+    with pytest.raises(ValueError, match="진행 중"):
+        await store.save_result(first.analysis_id, result_for(first.analysis_id))
+
+    old = await store.get_record(first.analysis_id)
+    assert old is not None and old.state.status is AnalysisStatus.FAILED
+    assert await store.get(first.analysis_id) is None
+    # 새 기록은 그대로 진행 중이고, 같은 키의 재요청은 새 기록을 재사용합니다.
+    again, created = await store.get_or_create(KEY)
+    assert (again.analysis_id, created) == (second.analysis_id, False)
 
 
 async def test_progress_update_keeps_record_alive(store: AnalysisStore, clock: FakeClock) -> None:
