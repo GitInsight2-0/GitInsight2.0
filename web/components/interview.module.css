@@ -1,0 +1,517 @@
+/* 면접 화면 무대형 디자인 (#42). 색과 글꼴은 app/globals.css의 값을 씁니다. */
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--gi-bg);
+  color: var(--gi-ink);
+}
+
+/* ── 상단 바 ── */
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  padding: 16px 36px;
+}
+
+.brand {
+  flex: 1 1 200px;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--gi-muted);
+}
+
+.chip {
+  padding: 4px 10px;
+  border-radius: var(--gi-radius-pill);
+  background: var(--gi-surface);
+  color: var(--gi-ink);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.controls {
+  flex: 1 1 200px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.time {
+  font-size: 14px;
+  color: var(--gi-muted);
+}
+
+.time b {
+  color: var(--gi-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.toggle {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--gi-line);
+  border-radius: var(--gi-radius-pill);
+}
+
+.toggle button {
+  height: 38px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--gi-radius-pill);
+  background: transparent;
+  color: var(--gi-muted);
+  font-size: 14px;
+}
+
+.toggle button[aria-pressed="true"] {
+  background: var(--gi-ink);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.toggle button:disabled[aria-pressed="false"] {
+  opacity: 0.45;
+}
+
+/* ── 본문 ── */
+
+.layout {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.stage {
+  flex: 999 1 640px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  padding: 24px 48px 48px;
+  text-align: center;
+}
+
+.notice {
+  max-width: 760px;
+  margin: 0;
+  padding: 10px 16px;
+  border-radius: var(--gi-radius);
+  background: var(--gi-notice-bg);
+  color: var(--gi-notice-ink);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.error {
+  margin: 0;
+  color: var(--gi-error);
+  font-size: 14px;
+}
+
+/* ── 음성 상태 ── */
+
+.voice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.orb {
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 36px;
+  background: var(--gi-accent-soft);
+  box-shadow:
+    0 0 0 18px var(--gi-accent-softer),
+    0 0 0 36px var(--gi-accent-softest);
+  transition:
+    background 0.3s,
+    box-shadow 0.3s;
+}
+
+.orbIdle {
+  background: var(--gi-surface);
+  box-shadow:
+    0 0 0 18px #f8f8f6,
+    0 0 0 36px #fbfbfa;
+}
+
+.orbIdle .bar {
+  background: #b9bcc2;
+}
+
+.orbThinking {
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  50% {
+    box-shadow:
+      0 0 0 24px var(--gi-accent-softer),
+      0 0 0 48px var(--gi-accent-softest);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbThinking {
+    animation: none;
+  }
+}
+
+.wave {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 80px;
+}
+
+.bar {
+  width: 5px;
+  border-radius: 3px;
+  background: var(--gi-accent);
+  transition: height 60ms linear;
+}
+
+.state {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--gi-accent-text);
+}
+
+.stateIdle {
+  color: var(--gi-muted);
+}
+
+/* ── 질문과 답변 ── */
+
+.question {
+  max-width: 820px;
+  margin: 0;
+  font-size: clamp(24px, 2.4vw, 34px);
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  word-break: keep-all;
+}
+
+.answer {
+  width: 100%;
+  max-width: 760px;
+}
+
+.label {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--gi-muted);
+}
+
+.answerText {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.65;
+  color: var(--gi-muted);
+  word-break: keep-all;
+}
+
+.hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--gi-muted);
+}
+
+/* ── 텍스트 입력 ── */
+
+.composer {
+  width: 100%;
+  max-width: 760px;
+  text-align: left;
+}
+
+.composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  padding: 14px 16px;
+  border: 1px solid var(--gi-line);
+  border-radius: var(--gi-radius);
+  background: #ffffff;
+  font-size: 16px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.composer textarea:focus-visible {
+  outline: 2px solid var(--gi-accent-text);
+  outline-offset: 0;
+  border-color: transparent;
+}
+
+.composerRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 12px;
+  margin-top: 10px;
+}
+
+.composerRow .error {
+  margin-right: auto;
+}
+
+.primary,
+.secondary {
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: var(--gi-radius-pill);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.primary {
+  border: 0;
+  background: var(--gi-ink);
+  color: #ffffff;
+}
+
+.secondary {
+  border: 1px solid var(--gi-line);
+  background: var(--gi-bg);
+  color: var(--gi-ink);
+}
+
+.primary:disabled,
+.secondary:disabled {
+  opacity: 0.45;
+}
+
+.done {
+  margin: 0;
+  font-size: 17px;
+  color: var(--gi-muted);
+}
+
+/* ── 대화 기록 ── */
+
+.history {
+  width: 100%;
+  max-width: 760px;
+  text-align: left;
+  font-size: 14px;
+}
+
+.history summary {
+  cursor: pointer;
+  color: var(--gi-muted);
+}
+
+.history ol {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  line-height: 1.6;
+}
+
+.who {
+  display: inline-block;
+  min-width: 52px;
+  font-weight: 600;
+}
+
+.historySystem {
+  color: var(--gi-muted);
+}
+
+/* ── 시작 화면 ── */
+
+.intro {
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.intro h1 {
+  margin: 0;
+  font-size: clamp(30px, 3vw, 40px);
+  letter-spacing: -0.02em;
+}
+
+.intro p {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--gi-muted);
+  word-break: keep-all;
+}
+
+.introActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+
+/* ── 코드 패널 ── */
+
+.code {
+  flex: 1 1 460px;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--gi-surface);
+  border-left: 1px solid var(--gi-line);
+}
+
+.codeHead {
+  padding: 20px 24px 14px;
+}
+
+.codeWhere {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+}
+
+.codePath {
+  font-family: var(--gi-font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.codeRange {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gi-accent-text);
+}
+
+.codeName {
+  font-family: var(--gi-font-mono);
+  font-size: 13px;
+  color: var(--gi-muted);
+}
+
+.codeBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.codeBox {
+  position: relative;
+  flex: 1 1 320px;
+  min-height: 320px;
+  max-height: calc(100vh - 160px);
+  overflow: auto;
+  margin: 0 16px 16px;
+  padding: 12px 16px 16px 0;
+  border: 1px solid var(--gi-line);
+  border-radius: var(--gi-radius);
+  background: #ffffff;
+  font-family: var(--gi-font-mono);
+  font-size: 13px;
+  line-height: 24px;
+  color: var(--gi-code-ink);
+}
+
+.codeMessage {
+  margin: 0 16px 16px;
+  padding: 16px;
+  border: 1px dashed var(--gi-line);
+  border-radius: var(--gi-radius);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--gi-muted);
+}
+
+.codeWarn {
+  margin: 0 24px 10px;
+  font-size: 13px;
+  color: var(--gi-error);
+}
+
+.row {
+  display: flex;
+}
+
+.rowHit {
+  background: var(--gi-code-hit);
+}
+
+.lineNo {
+  flex: none;
+  width: 56px;
+  padding-right: 20px;
+  text-align: right;
+  color: var(--gi-code-gutter);
+  user-select: none;
+}
+
+.rowHit .lineNo {
+  color: var(--gi-accent-text);
+}
+
+.lineText {
+  white-space: pre;
+}
+
+/* ── 좁은 화면 ── */
+
+@media (max-width: 720px) {
+  .topbar {
+    padding: 12px 16px;
+  }
+
+  .stage {
+    padding: 16px 20px 32px;
+    gap: 24px;
+  }
+
+  .orb {
+    width: 150px;
+    height: 150px;
+    margin: 24px;
+  }
+
+  .orb .wave {
+    transform: scale(0.75);
+  }
+
+  .code {
+    border-left: 0;
+    border-top: 1px solid var(--gi-line);
+  }
+}

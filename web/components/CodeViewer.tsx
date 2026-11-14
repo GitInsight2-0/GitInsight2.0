@@ -3,6 +3,7 @@
 import type { SymbolRef } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import { fetchFileLines } from "@/lib/github/code";
+import styles from "./interview.module.css";
 
 /** 강조 범위 앞뒤로 보여 줄 줄 수 */
 const CONTEXT_LINES = 4;
@@ -50,20 +51,28 @@ export default function CodeViewer({ repo, target }: { repo: string | null; targ
   }, [state, target?.start_line]);
 
   if (!target) {
-    return <Frame title="관련 코드">이 질문에는 강조할 코드가 없습니다.</Frame>;
-  }
-
-  const location = `${target.path}:${target.start_line}-${target.end_line} · ${target.name}`;
-  if (!repo || state.kind === "error") {
     return (
-      <Frame title={location}>
-        <p style={{ margin: 0, color: "#666" }}>
-          코드를 불러오지 못해 위치만 보여 줍니다{state.kind === "error" ? ` (${state.message})` : ""}.
-        </p>
-      </Frame>
+      <Panel target={null}>
+        <p className={styles.codeMessage}>이 질문에는 강조할 코드가 없습니다.</p>
+      </Panel>
     );
   }
-  if (state.kind !== "ok" || state.key !== key) return <Frame title={location}>코드를 불러오는 중…</Frame>;
+  if (!repo || state.kind === "error") {
+    return (
+      <Panel target={target}>
+        <p className={styles.codeMessage}>
+          코드를 불러오지 못해 위치만 보여 줍니다{state.kind === "error" ? ` (${state.message})` : ""}.
+        </p>
+      </Panel>
+    );
+  }
+  if (state.kind !== "ok" || state.key !== key) {
+    return (
+      <Panel target={target}>
+        <p className={styles.codeMessage}>코드를 불러오는 중…</p>
+      </Panel>
+    );
+  }
 
   const from = Math.max(1, target.start_line - CONTEXT_LINES);
   const to = Math.min(state.lines.length, target.end_line + CONTEXT_LINES);
@@ -74,40 +83,47 @@ export default function CodeViewer({ repo, target }: { repo: string | null; targ
   const outOfRange = target.end_line > state.lines.length;
 
   return (
-    <Frame title={location}>
+    <Panel target={target}>
       {outOfRange && (
-        <p style={{ margin: "0 0 8px", color: "#c00", fontSize: 13 }}>
+        <p className={styles.codeWarn}>
           파일이 {state.lines.length}줄이라 강조 범위({target.start_line}-{target.end_line})와 맞지 않습니다. 분석 커밋을 확인하세요.
         </p>
       )}
-      <div ref={scrollRef} style={{ position: "relative", maxHeight: 420, overflow: "auto", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 13, lineHeight: 1.5 }}>
+      <div ref={scrollRef} className={styles.codeBox} tabIndex={0} aria-label={`${target.path} 코드`}>
         {rows.map((r) => (
           <div
             key={r.no}
             ref={r.no === target.start_line ? firstLineRef : undefined}
-            style={{ display: "flex", background: r.hit ? "#fff6d5" : "transparent" }}
+            className={r.hit ? `${styles.row} ${styles.rowHit}` : styles.row}
           >
-            <span style={{ width: 48, flex: "none", textAlign: "right", paddingRight: 12, color: "#999", userSelect: "none" }}>
-              {r.no}
-            </span>
-            <span style={{ whiteSpace: "pre" }}>{r.text}</span>
+            <span className={styles.lineNo}>{r.no}</span>
+            <span className={styles.lineText}>{r.text}</span>
           </div>
         ))}
       </div>
-    </Frame>
+    </Panel>
   );
 }
 
-function Frame({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({ target, children }: { target: SymbolRef | null; children: React.ReactNode }) {
   return (
-    <section aria-label="관련 코드" style={{ border: "1px solid #ddd", borderRadius: 8, overflow: "hidden" }}>
-      <div style={{ padding: "8px 12px", borderBottom: "1px solid #eee", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 13, background: "#fafafa" }}>
-        {title}
+    <aside aria-label="질문이 가리키는 코드" className={styles.code}>
+      <div className={styles.codeHead}>
+        <div className={styles.label}>질문이 가리키는 코드</div>
+        {target && (
+          <div className={styles.codeWhere}>
+            <span className={styles.codePath}>{target.path}</span>
+            <span className={styles.codeRange}>
+              {target.start_line}–{target.end_line}줄
+            </span>
+            <span className={styles.codeName}>{target.name}</span>
+          </div>
+        )}
       </div>
       {/* 불러오는 중, 실패 안내를 화면 낭독기가 읽도록 알림 영역으로 둡니다. */}
-      <div style={{ padding: 12 }} aria-live="polite">
+      <div aria-live="polite" className={styles.codeBody}>
         {children}
       </div>
-    </section>
+    </aside>
   );
 }
