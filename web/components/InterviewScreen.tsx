@@ -286,7 +286,7 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
                   텍스트로 시작
                 </button>
               </div>
-              <p className={styles.hint}>
+              <p className={styles.note}>
                 <MicIcon />
                 음성은 Chrome에서 이어폰을 끼고 쓰세요. 스피커로 들으면 AI가 자기 목소리를 듣고 끊길 수 있습니다.
               </p>
