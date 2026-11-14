@@ -105,7 +105,6 @@ export function postMetric(ev: MetricEvent): void {
 }
 
 export async function fetchVoiceToken(
-  provider: VoiceToken["provider"],
   vad: VadSettings,
   filler: boolean,
   outer?: AbortSignal,
@@ -113,7 +112,7 @@ export async function fetchVoiceToken(
   // TODO: FastAPI의 POST /api/sessions/{id}/voice-token이 생기면 그쪽으로 바꿉니다.
   const s = linkedSignal(outer, SETUP_TIMEOUT_MS);
   try {
-    return await postJson("/lab/voice-token", { provider, vad, filler }, s.signal);
+    return await postJson("/lab/voice-token", { vad, filler }, s.signal);
   } finally {
     s.done();
   }

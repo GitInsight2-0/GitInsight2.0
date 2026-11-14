@@ -189,7 +189,7 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
     };
 
     try {
-      voice.current = await startVoiceSession("gemini", connectGemini, ui, {
+      voice.current = await startVoiceSession(connectGemini, ui, {
         analysisId,
         labDelayMs: 0,
         scenario: () => "interview",
