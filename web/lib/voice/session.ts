@@ -42,6 +42,11 @@ export interface SessionUi {
   turnSent(): void;
   /** 면접이 끝났습니다. 이유는 화면에 보여 줄 문구입니다. */
   ended(reason: string): void;
+  /**
+   * 세션이 정해졌습니다 (새로 만들었거나 이어받음). 음성 연결 전에 불리므로,
+   * 연결에 실패해도 화면은 이 세션으로 텍스트 면접을 이어 갈 수 있습니다.
+   */
+  started?(sessionId: string, current: BrainReply): void;
 }
 
 export interface SessionOptions {
@@ -56,6 +61,12 @@ export interface SessionOptions {
   filler: boolean;
   /** 이 신호가 멈추면 연결 중이든 진행 중이든 면접을 끝냅니다. */
   signal: AbortSignal;
+  /**
+   * 이미 진행 중인 세션을 이어받습니다 (텍스트 면접 도중 음성으로 바꿀 때).
+   * 주면 세션을 새로 만들지 않고, current의 발화부터 음성으로 다시 말합니다.
+   * 음성 연결을 닫아도 서버 세션은 끝내지 않습니다.
+   */
+  existing?: { sessionId: string; current: BrainReply };
 }
 
 export interface VoiceSession {
@@ -111,9 +122,12 @@ export async function startVoiceSession(
 
   try {
     ui.status("세션 만드는 중");
-    const created = await createSession({ analysis_id: opts.analysisId, mode: "voice" }, life.signal);
+    const created = opts.existing
+      ? { session_id: opts.existing.sessionId, first: opts.existing.current }
+      : await createSession({ analysis_id: opts.analysisId, mode: "voice" }, life.signal);
     ensureOpen();
     const sessionId = created.session_id;
+    ui.started?.(sessionId, created.first);
     ui.reply(created.first);
     ui.log("system", `세션 ${sessionId.slice(0, 8)}`);
 

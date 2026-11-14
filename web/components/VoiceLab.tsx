@@ -3,6 +3,7 @@
 import type { BrainReply } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import { isAbort } from "@/lib/voice/api";
+import { explainError } from "@/lib/voice/errors";
 import { DEFAULT_VAD, TEST_SCRIPT, VAD_LIMITS, type VadSettings } from "@/lib/voice/config";
 import { connectGemini } from "@/lib/voice/gemini";
 import { connectOpenAI } from "@/lib/voice/openai";
@@ -18,16 +19,6 @@ interface LogLine {
 
 const CONNECT = { openai: connectOpenAI, gemini: connectGemini } as const;
 const NAMES: Record<Provider, string> = { openai: "OpenAI Realtime (WebRTC)", gemini: "Gemini Live (WebSocket)" };
-
-/** 브라우저 오류를 사람이 바로 이해할 수 있는 문구로 바꿉니다. */
-function explainError(e: unknown): string {
-  const name = (e as { name?: unknown } | null)?.name;
-  if (name === "NotAllowedError") {
-    return "마이크 권한이 막혀 있습니다. Chrome에서 이 페이지를 열고 주소창 왼쪽 아이콘에서 마이크를 허용하세요. (Claude 앱 안의 브라우저는 마이크를 쓸 수 없습니다)";
-  }
-  if (name === "NotFoundError") return "마이크를 찾을 수 없습니다. 이어폰이나 마이크 연결을 확인하세요.";
-  return String(e);
-}
 
 /** G1 기준: 끊으면 이 시간 안에 AI가 멈춰야 합니다 */
 const BARGE_STOP_TARGET_MS = 500;
