@@ -20,8 +20,10 @@ export async function POST(req: Request) {
     const token = await geminiToken(vad, instructions);
     return Response.json(token satisfies VoiceToken);
   } catch (e) {
-    // 제공사 오류 본문에 키가 들어가지는 않지만, 길이를 줄여 돌려줍니다.
-    return Response.json({ detail: `Gemini 토큰 발급 실패: ${String(e).slice(0, 500)}` }, { status: 502 });
+    // 제공사 오류 원문은 브라우저로 보내지 않고 서버 터미널에만 남깁니다.
+    console.error("[voice-token] Gemini 토큰 발급 실패", e);
+    const detail = e instanceof MissingEnvError ? e.message : "음성 연결 토큰을 받지 못했습니다. 잠시 뒤 다시 시도하거나 텍스트로 진행하세요.";
+    return Response.json({ detail }, { status: 502 });
   }
 }
 
@@ -91,8 +93,11 @@ async function geminiToken(vad: VadSettings, instructions: string): Promise<Voic
   };
 }
 
+/** 키가 없는 설정 오류. 개발자가 바로 고칠 수 있게 이 문구는 그대로 보여 줍니다 (값은 들어가지 않음) */
+class MissingEnvError extends Error {}
+
 function requireEnv(name: string): string {
   const v = process.env[name];
-  if (!v) throw new Error(`${name}가 없습니다 (web/.env.local)`);
+  if (!v) throw new MissingEnvError(`${name}가 없습니다 (web/.env.local)`);
   return v;
 }

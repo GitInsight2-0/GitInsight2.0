@@ -86,6 +86,8 @@ export interface VoiceSession {
 /** 서버 응답을 못 받았을 때 음성 AI가 할 말. 면접을 진행시키지 않고 다시 말해 달라고만 합니다. */
 const RETRY_UTTERANCE = "잠시 연결이 불안정했어요. 방금 답변을 한 번만 더 말씀해 주시겠어요?";
 const EMPTY_UTTERANCE = "잘 못 들었어요. 한 번만 더 말씀해 주시겠어요?";
+/** 턴이 이만큼 연달아 실패하면 같은 부탁을 반복하지 않고 음성을 끝냅니다 (화면은 텍스트로 이어 갑니다) */
+const MAX_TURN_FAILURES = 2;
 /** 서버가 이미 끝난 세션이라고 답했을 때 (409) */
 const ENDED_UTTERANCE = "면접이 끝났습니다. 수고하셨습니다.";
 
@@ -149,6 +151,8 @@ export async function startVoiceSession(
     ui.log("system", `모델 ${token.model}`);
 
     let done = false;
+    /** 연달아 실패한 턴 수. 성공하면 0으로 돌아갑니다 */
+    let turnFailures = 0;
     // 연결이 준비되기 전에 온 도구 호출의 답은 준비될 때까지 보류합니다.
     let resolveHandle!: (h: AdapterHandle) => void;
     const handleReady = new Promise<AdapterHandle>((r) => (resolveHandle = r));
@@ -330,6 +334,7 @@ export async function startVoiceSession(
           { labDelayMs: opts.labDelayMs, signal: life.signal },
         );
         done = reply.done;
+        turnFailures = 0;
         ui.reply(reply);
         respond(reply.utterance, reply.done);
       } catch (e) {
@@ -343,6 +348,12 @@ export async function startVoiceSession(
         }
         ui.log("error", `서버 응답 실패: ${String(e)}`);
         metric("error", { turn_id: turnId, error_code: "turn_failed" });
+        turnFailures++;
+        if (turnFailures >= MAX_TURN_FAILURES) {
+          // 같은 답변을 계속 거절당하거나 서버가 계속 늦으면, 다시 말해 달라는 부탁만 반복하게 됩니다.
+          shutdown("서버 응답이 계속 실패해 음성을 멈췄습니다");
+          return;
+        }
         respond(RETRY_UTTERANCE, false);
       } finally {
         const ms = Math.round(performance.now() - t0);

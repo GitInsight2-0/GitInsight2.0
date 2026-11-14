@@ -3,7 +3,7 @@
 import type { Action, BrainReply } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import CodeViewer from "@/components/CodeViewer";
-import { ApiError, createSession, isAbort, postTurn } from "@/lib/voice/api";
+import { ApiError, TRANSCRIPT_MAX, createSession, isAbort, postTurn } from "@/lib/voice/api";
 import { DEFAULT_VAD } from "@/lib/voice/config";
 import { explainError } from "@/lib/voice/errors";
 import { connectGemini } from "@/lib/voice/gemini";
@@ -398,6 +398,7 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
                   }
                 }}
                 aria-label="답변"
+                maxLength={TRANSCRIPT_MAX}
                 placeholder="답변을 입력하세요 (Enter 보내기, Shift+Enter 줄바꿈)"
                 rows={4}
                 disabled={busy}
