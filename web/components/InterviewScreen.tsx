@@ -8,6 +8,7 @@ import { DEFAULT_VAD } from "@/lib/voice/config";
 import { explainError } from "@/lib/voice/errors";
 import { connectGemini } from "@/lib/voice/gemini";
 import { type AudioLevels, type SessionUi, type VoiceSession, startVoiceSession } from "@/lib/voice/session";
+import { USER_SILENCE_MS } from "@/lib/voice/meter";
 import styles from "./interview.module.css";
 import Waveform from "./Waveform";
 
@@ -40,6 +41,11 @@ const STAGE_LABEL: Record<Stage, string> = {
 
 /** 말 끝 판정 침묵 (초). 안내 문구에 씁니다 */
 const SILENCE_SEC = DEFAULT_VAD.silenceMs / 1000;
+/**
+ * 측정기가 "말이 멈췄다"고 본 뒤 이만큼 더 조용하면 "답변을 살펴보고 있어요"로 바꿉니다.
+ * 측정기는 0.5초 침묵에서 멈춤으로 보고, 음성 AI는 2초 침묵에서 답변이 끝났다고 봅니다. 그 차이만큼 기다립니다.
+ */
+const THINKING_AFTER_MS = Math.max(0, DEFAULT_VAD.silenceMs - USER_SILENCE_MS);
 
 const ACTION_LABEL: Record<Action, string> = {
   ASK: "질문",
@@ -72,6 +78,7 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
   const [thinking, setThinking] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
   const [levels, setLevels] = useState<AudioLevels | null>(null);
+  const thinkingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** 실패한 턴. 같은 내용을 다시 보낼 때만 같은 turn_id를 씁니다 (고친 답변이 중복으로 버려지지 않게). */
   const pendingTurn = useRef<{ id: string; transcript: string } | null>(null);
@@ -92,7 +99,18 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
   };
 
   // 페이지를 떠나면 마이크와 음성 연결을 닫습니다. 서버 세션은 그대로 둡니다.
-  useEffect(() => () => voiceAbort.current?.abort(), []);
+  useEffect(
+    () => () => {
+      voiceAbort.current?.abort();
+      clearThinkingTimer();
+    },
+    [],
+  );
+
+  function clearThinkingTimer() {
+    if (thinkingTimer.current) clearTimeout(thinkingTimer.current);
+    thinkingTimer.current = null;
+  }
 
   // ── 텍스트 ──
 
@@ -193,14 +211,24 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
         if (r === replyRef.current) return;
         push({ who: "interviewer", text: r.utterance });
         showReply(r);
-        setThinking(false);
+        // "답변을 살펴보고 있어요"는 AI가 실제로 말하기 시작할 때 끕니다 (speaking).
         setLastAnswer(null);
       },
       speaking: (who, on) => {
-        if (who !== "ai") return;
-        setAiSpeaking(on);
-        // 서버 응답 실패 때는 reply 없이 다시 말해 달라는 문장만 나옵니다. AI가 말하면 기다림은 끝난 것입니다.
-        if (on) setThinking(false);
+        clearThinkingTimer();
+        if (who === "ai") {
+          setAiSpeaking(on);
+          // AI가 말하기 시작하면 기다림은 끝난 것입니다 (서버 응답 실패 때 나오는 다시 말해 달라는 문장 포함).
+          if (on) setThinking(false);
+          return;
+        }
+        if (on) {
+          // 다시 말하기 시작했으면 아직 답변 중입니다.
+          setThinking(false);
+          return;
+        }
+        // 말을 멈췄습니다. 음성 AI가 답변 끝으로 볼 만큼 조용하면 기다리는 중으로 표시합니다.
+        thinkingTimer.current = setTimeout(() => setThinking(true), THINKING_AFTER_MS);
       },
       audio: setLevels,
       ended: (reason) => {
@@ -259,6 +287,7 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
   }
 
   function resetVoiceView() {
+    clearThinkingTimer();
     setLevels(null);
     setThinking(false);
     setAiSpeaking(false);
