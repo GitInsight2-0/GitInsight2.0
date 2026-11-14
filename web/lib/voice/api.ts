@@ -13,8 +13,16 @@ export class ApiError extends Error {
 
 /** 세션 생성, 토큰 요청의 제한 시간 */
 export const SETUP_TIMEOUT_MS = 10_000;
-/** 턴 한 번의 제한 시간 (판단 지연 흉내는 따로 더함) */
-const TURN_TIMEOUT_MS = 8000;
+/**
+ * 턴 하나를 기다리는 전체 시간 (재시도 포함, 판단 지연 흉내는 따로 더함).
+ * 런북의 "10초 넘게 반응이 없으면 다음 대비책" 규칙 안에 들어오게 둡니다.
+ * 서버는 판단 LLM을 2.5초 안에 끝내고 대비책으로 넘어가므로 보통 3~4초 안에 답합니다.
+ */
+const TURN_BUDGET_MS = 9000;
+/** 첫 시도의 제한 시간. 남은 시간은 같은 turn_id로 한 번 더 보내는 데 씁니다 */
+const TURN_FIRST_TRY_MS = 6000;
+/** 계약 TurnRequest.transcript의 최대 길이 */
+export const TRANSCRIPT_MAX = 4000;
 
 /**
  * 바깥 신호(사용자 종료)와 제한 시간을 함께 따르는 AbortSignal을 만듭니다.
@@ -80,14 +88,22 @@ export async function postTurn(
 ): Promise<BrainReply> {
   const q = opts.labDelayMs ? `?lab_delay_ms=${opts.labDelayMs}` : "";
   const url = `/api/sessions/${sessionId}/turns${q}`;
+  // 길이 상한을 넘으면 서버가 422로 거절하므로 미리 자릅니다.
+  if (body.transcript.length > TRANSCRIPT_MAX) body = { ...body, transcript: body.transcript.slice(0, TRANSCRIPT_MAX) };
+  const lab = opts.labDelayMs ?? 0;
+  const started = performance.now();
   for (let attempt = 0; ; attempt++) {
-    const s = linkedSignal(opts.signal, TURN_TIMEOUT_MS + (opts.labDelayMs ?? 0));
+    const left = TURN_BUDGET_MS - (performance.now() - started);
+    const limit = attempt === 0 ? TURN_FIRST_TRY_MS : left;
+    const s = linkedSignal(opts.signal, limit + lab);
     try {
       return await postJson<BrainReply>(url, body, s.signal);
     } catch (e) {
       if (opts.signal?.aborted) throw e;
       const retryable = !(e instanceof ApiError) || e.status >= 500;
-      if (attempt >= 1 || !retryable) throw e;
+      // 남은 시간이 너무 짧으면 다시 보내도 받을 수 없으니 바로 실패로 넘깁니다.
+      const left = TURN_BUDGET_MS - (performance.now() - started);
+      if (attempt >= 1 || !retryable || left < 1000) throw e;
     } finally {
       s.done();
     }
