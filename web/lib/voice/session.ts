@@ -18,7 +18,7 @@ import { ApiError, createSession, fetchVoiceToken, isAbort, postMetric, postTurn
 import { DELEGATION_TOOL, type VadSettings, sayMessage } from "./config";
 import { Meter, epochMs } from "./meter";
 import { similarity } from "./similarity";
-import type { AdapterHandle, Connect, Provider, TurnKey } from "./types";
+import { type AdapterHandle, type Connect, PROVIDER, type TurnKey } from "./types";
 
 export type LogWho = "user" | "ai" | "system" | "error";
 
@@ -79,7 +79,7 @@ const EMPTY_UTTERANCE = "잘 못 들었어요. 한 번만 더 말씀해 주시�
 /** 서버가 이미 끝난 세션이라고 답했을 때 (409) */
 const ENDED_UTTERANCE = "면접이 끝났습니다. 수고하셨습니다.";
 
-/** 도구 호출이 받아쓰기보다 먼저 오면 이만큼 기다립니다 (OpenAI는 받아쓰기가 늦게 오는 경우가 많음). */
+/** 도구 호출이 받아쓰기보다 먼저 오면 이만큼 기다립니다 (받아쓰기가 도구 호출보다 늦게 오는 경우가 있음). */
 const ASR_WAIT_MS = 1500;
 /** 마지막 발화(done)를 말한 뒤 소리가 끝나지 않아도 이 시간이 지나면 정리합니다. */
 const END_GRACE_MS = 20_000;
@@ -87,7 +87,6 @@ const END_GRACE_MS = 20_000;
 const END_QUIET_MS = 1500;
 
 export async function startVoiceSession(
-  provider: Provider,
   connect: Connect,
   ui: SessionUi,
   opts: SessionOptions,
@@ -132,10 +131,10 @@ export async function startVoiceSession(
     ui.log("system", `세션 ${sessionId.slice(0, 8)}`);
 
     const metric = (name: MetricName, extra: Partial<MetricEvent> = {}) =>
-      postMetric({ name, session_id: sessionId, at_ms: Date.now(), provider, scenario: opts.scenario(), ...extra });
+      postMetric({ name, session_id: sessionId, at_ms: Date.now(), provider: PROVIDER, scenario: opts.scenario(), ...extra });
 
     ui.status("임시 토큰 받는 중");
-    const token = await fetchVoiceToken(provider, opts.vad, opts.filler, life.signal);
+    const token = await fetchVoiceToken(opts.vad, opts.filler, life.signal);
     ensureOpen();
     ui.log("system", `모델 ${token.model}`);
 
@@ -336,7 +335,7 @@ export async function startVoiceSession(
       }
     }
 
-    ui.status(`${provider} 연결 중`);
+    ui.status("음성 연결 중");
     // 연결에 실패하거나 도중에 멈추면 어댑터가 마이크와 오디오 자원을 정리한 뒤 예외를 던집니다.
     const h = await connect(
       token,
