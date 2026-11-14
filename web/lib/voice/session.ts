@@ -47,6 +47,16 @@ export interface SessionUi {
    * 연결에 실패해도 화면은 이 세션으로 텍스트 면접을 이어 갈 수 있습니다.
    */
   started?(sessionId: string, current: BrainReply): void;
+  /** 누가 소리를 내기 시작하거나 멈췄습니다 (측정기 기준). 화면의 듣는 중, 말하는 중 표시에 씁니다. */
+  speaking?(who: "user" | "ai", on: boolean): void;
+  /** 음성 연결이 열렸습니다. 화면이 소리 크기를 그릴 수 있게 측정용 노드를 넘깁니다. */
+  audio?(levels: AudioLevels): void;
+}
+
+/** 측정용 소리 노드. 연결 중에는 null일 수 있어 그때그때 꺼내 씁니다. */
+export interface AudioLevels {
+  user(): AnalyserNode | null;
+  ai(): AnalyserNode | null;
 }
 
 export interface SessionOptions {
@@ -162,12 +172,17 @@ export async function startVoiceSession(
     let endAfterSpeech = false;
 
     const m = new Meter({
-      userStart: (at) => metric("vad_start", { at_ms: at }),
+      userStart: (at) => {
+        ui.speaking?.("user", true);
+        metric("vad_start", { at_ms: at });
+      },
       userEnd: (at) => {
+        ui.speaking?.("user", false);
         metric("vad_end", { at_ms: at });
         fillerArmed = true;
       },
       aiStart: (at) => {
+        ui.speaking?.("ai", true);
         if (endQuietTimer) {
           clearTimeout(endQuietTimer);
           endQuietTimer = null;
@@ -188,6 +203,7 @@ export async function startVoiceSession(
         }
       },
       aiEnd: () => {
+        ui.speaking?.("ai", false);
         // 마지막 발화의 소리가 끝나고 한동안 조용하면 면접을 정리합니다.
         if (!endAfterSpeech || replyPending) return;
         if (endQuietTimer) clearTimeout(endQuietTimer);
@@ -367,6 +383,7 @@ export async function startVoiceSession(
       () => h.userAnalyser(),
       () => h.aiAnalyser(),
     );
+    ui.audio?.({ user: () => h.userAnalyser(), ai: () => h.aiAnalyser() });
     ui.status("연결됨");
     h.say(sayMessage(created.first.utterance));
   } catch (e) {

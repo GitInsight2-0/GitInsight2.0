@@ -1,0 +1,72 @@
+/*
+ * 화면 공용 디자인 값 (#42).
+ * 면접 화면은 무대형 시안(C)을 따릅니다.
+ * 리포트 화면(#20) 등 다른 화면도 이 값을 쓰면 모양이 맞습니다.
+ * 색을 바꿀 때는 글자 대비 4.5:1(큰 글자 3:1)을 지킵니다.
+ */
+
+:root {
+  /* 바탕과 선 */
+  --gi-bg: #ffffff;
+  --gi-surface: #f4f4f1;
+  --gi-line: #e4e4de;
+
+  /* 글자 */
+  --gi-ink: #111214;
+  --gi-muted: #5e636b;
+
+  /* 강조. --gi-accent는 도형과 큰 글자에, --gi-accent-text는 작은 글자에 씁니다 */
+  --gi-accent: #f06418;
+  --gi-accent-text: #c2410c;
+  --gi-accent-soft: #fff4ec;
+  --gi-accent-softer: #fff8f3;
+  --gi-accent-softest: #fffbf8;
+
+  /* 안내와 오류 */
+  --gi-notice-bg: #fff6d5;
+  --gi-notice-ink: #5c4500;
+  --gi-error: #b42318;
+
+  /* 코드 강조 줄 */
+  --gi-code-hit: #ffefe4;
+  --gi-code-gutter: #6e7781;
+  --gi-code-ink: #1f2328;
+
+  --gi-font-sans: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --gi-font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --gi-radius: 12px;
+  --gi-radius-pill: 999px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--gi-bg);
+  color: var(--gi-ink);
+  font-family: var(--gi-font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+:focus-visible {
+  outline: 2px solid var(--gi-accent-text);
+  outline-offset: 2px;
+}
