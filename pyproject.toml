@@ -59,7 +59,7 @@ typeCheckingMode = "standard"
 
 [tool.pytest.ini_options]
 testpaths = ["contracts/tests", "api/tests", "worker/tests"]
-addopts = "--import-mode=importlib -m \"not network and not live_llm\""
+addopts = "--import-mode=importlib -m \"not network and not live_llm and not postgres\""
 pythonpath = ["api/tests", "worker/tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
@@ -70,4 +70,5 @@ filterwarnings = [
 markers = [
     "network: 외부 네트워크가 필요한 테스트 (수동 실행: uv run pytest -m network)",
     "live_llm: 실제 LLM API 키가 필요한 테스트 (수동 실행)",
+    "postgres: 실제 Postgres가 필요한 테스트 (TEST_DATABASE_URL 필요, CI에서는 Postgres 서비스로 실행)",
 ]
