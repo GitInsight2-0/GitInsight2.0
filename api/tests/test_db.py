@@ -1,7 +1,9 @@
 """DB 연결 설정과 마이그레이션 테스트. 실제 DB 없이 돕니다."""
 
+import asyncio
 import io
 import logging
+import sys
 from pathlib import Path
 from uuid import uuid4
 
@@ -10,6 +12,7 @@ from alembic import command
 from alembic.config import Config
 from pydantic import SecretStr
 
+from gitinsight_api import event_loop
 from gitinsight_api.db import DRIVER, DatabaseUrlError, normalize_url
 from gitinsight_api.main import create_app
 from gitinsight_api.metrics_store import (
@@ -18,11 +21,11 @@ from gitinsight_api.metrics_store import (
     PostgresMetricsStore,
 )
 from gitinsight_api.settings import Settings
+from gitinsight_api.tables import metric_events
 from gitinsight_contracts.metrics import MetricEvent, MetricName
 
-from api_test_support import ClientFactory
+from api_test_support import ALEMBIC_INI, ClientFactory
 
-ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
 # 아무도 듣지 않는 포트라 연결이 바로 거부됩니다.
 UNREACHABLE = "postgresql://gi:s3cret-pw@127.0.0.1:1/gitinsight"
 
@@ -70,6 +73,12 @@ def test_app_uses_postgres_with_database_url(metrics_path: Path) -> None:
     assert app.state.db_engine is not None
 
 
+def test_metric_event_fields_match_table_columns() -> None:
+    # 계약에 필드가 늘면 insert가 깨져 /api/metrics가 계속 503이 됩니다. alembic check로는 잡히지 않습니다.
+    columns = {c.name for c in metric_events.columns} - {"id", "received_at"}
+    assert set(MetricEvent.model_fields) == columns
+
+
 def event() -> MetricEvent:
     return MetricEvent(name=MetricName.FIRST_AUDIO, session_id=uuid4(), at_ms=1, value_ms=320.5)
 
@@ -81,22 +90,30 @@ async def test_unreachable_database_raises_without_url(
     with caplog.at_level(logging.WARNING), pytest.raises(MetricsStoreUnavailableError) as error:
         await app.state.metrics_store.append(event())
     await app.state.db_engine.dispose()
-    assert "s3cret-pw" not in str(error.value)
+    # 연결 거부(OperationalError)여야 합니다. Windows Proactor 루프 문제(InterfaceError)로 통과하지 않게 확인합니다.
+    assert str(error.value) == "OperationalError"
     assert "s3cret-pw" not in caplog.text
     # DB 장애를 JSONL로 대신 받지 않습니다.
     assert not metrics_path.exists()
 
 
 async def test_metrics_route_returns_503_when_store_fails(
-    client_for: ClientFactory, metrics_path: Path
+    client_for: ClientFactory, metrics_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     app = create_app(Settings(metrics_path=metrics_path, database_url=SecretStr(UNREACHABLE)))
-    async with client_for(app) as client:
-        response = await client.post(
-            "/api/metrics", json={"name": "first_audio", "at_ms": 1, "value_ms": 320.5}
-        )
+    with caplog.at_level(logging.WARNING):
+        async with client_for(app) as client:
+            response = await client.post(
+                "/api/metrics", json={"name": "first_audio", "at_ms": 1, "value_ms": 320.5}
+            )
     await app.state.db_engine.dispose()
     assert response.status_code == 503
+    assert "metrics_store_failed error=OperationalError" in caplog.text
+
+
+def test_alembic_ini_is_ascii() -> None:
+    # configparser는 OS 기본 인코딩으로 읽습니다. 한국어 Windows(cp949)에서 깨지지 않게 ASCII만 둡니다.
+    assert ALEMBIC_INI.read_bytes().isascii()
 
 
 def test_migrations_render_offline_without_database() -> None:
@@ -107,3 +124,25 @@ def test_migrations_render_offline_without_database() -> None:
     sql = buffer.getvalue()
     assert "CREATE TABLE metric_events" in sql
     assert "UPDATE alembic_version SET" in sql or "INSERT INTO alembic_version" in sql
+
+
+def test_server_loop_factory_uses_selector_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(event_loop.sys, "platform", "win32")
+    loop = event_loop.server_loop_factory()
+    try:
+        assert isinstance(loop, asyncio.SelectorEventLoop)
+    finally:
+        loop.close()
+
+
+def test_server_loop_factory_runs_coroutines() -> None:
+    loop = event_loop.server_loop_factory()
+    try:
+        assert loop.run_until_complete(asyncio.sleep(0, result="ok")) == "ok"
+    finally:
+        loop.close()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows 전용")
+async def test_tests_run_on_selector_loop_on_windows() -> None:
+    assert isinstance(asyncio.get_running_loop(), asyncio.SelectorEventLoop)

@@ -74,7 +74,7 @@ uv run alembic -c api/alembic.ini revision --rev-id 0002 -m "설명"  # 새 마�
 uv run alembic -c api/alembic.ini check                            # tables.py와 마이그레이션이 일치하는지 확인 (DB 필요)
 pnpm contracts:gen                         # 계약 → JSON Schema → TS 타입 생성
 pnpm contracts:check                       # 생성 파일이 커밋된 내용과 같은지 검사
-uv run uvicorn --factory gitinsight_api.main:app_factory --reload   # API 서버 (기본 8000번)
+uv run uvicorn --factory gitinsight_api.main:app_factory --loop gitinsight_api.event_loop:server_loop_factory --reload   # API 서버 (기본 8000번)
 uv run python -m gitinsight_contracts.fixtures show                # 샘플 분석 결과 요약
 uv run python -m gitinsight_api.brain.cli [--real-llm]             # 터미널 텍스트 면접
 uv run python scripts/llm_latency.py --n 20                        # 판단 LLM 지연 측정 (수동, 비용 발생)
@@ -94,4 +94,6 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 
 `DATABASE_URL`이 있으면 서버는 Postgres를 쓰고(`/api/metrics` → `metric_events` 테이블), 없으면 DB 없이 돌며 측정 이벤트를 `METRICS_PATH`(JSONL)에 쌓습니다.
 DB 연결과 테이블 정의는 `api/src/gitinsight_api/db.py`, `tables.py`, 마이그레이션은 `api/migrations/versions/`에 있습니다. 새 테이블은 두 곳을 같이 바꾸고 `alembic check`로 맞는지 확인합니다.
-기본 `pytest`는 DB 없이 돕니다(`api/tests/conftest.py`가 `DATABASE_URL`을 비웁니다). 실제 Postgres 테스트는 `postgres` 표시로 따로 돌립니다.
+기본 `pytest`는 DB 없이 돕니다(`api/tests/conftest.py`가 `DATABASE_URL`을 비웁니다). 실제 Postgres 테스트는 `postgres` 표시로 따로 돌립니다. 공용 픽스처 `test_database_url`, `pg_engine`(마이그레이션 적용 후 모든 테이블을 비움)도 `conftest.py`에 있습니다.
+서버는 `--loop gitinsight_api.event_loop:server_loop_factory`로 띄웁니다. psycopg 3 비동기 연결이 Windows 기본 루프(Proactor)를 지원하지 않아 Windows에서는 Selector 루프를 씁니다(다른 OS는 uvicorn 기본값). 테스트는 `conftest.py`가 같은 루프를 씁니다. 이 옵션 없이 Windows에서 `DATABASE_URL`을 넣으면 `/api/metrics`가 계속 503입니다.
+`api/alembic.ini`는 ASCII만 씁니다. 한국어 Windows에서는 configparser가 cp949로 읽기 때문입니다.

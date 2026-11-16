@@ -2,11 +2,23 @@
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from pathlib import Path
 
 import httpx
+from alembic.config import Config
 from fastapi import FastAPI
 
 ClientFactory = Callable[[FastAPI], AbstractAsyncContextManager[httpx.AsyncClient]]
+
+ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
+
+
+def alembic_config(database_url: str | None = None) -> Config:
+    """api/alembic.ini 설정입니다. database_url을 주면 DATABASE_URL 대신 그 DB를 씁니다."""
+    config = Config(str(ALEMBIC_INI))
+    if database_url:
+        config.attributes["database_url"] = database_url
+    return config
 
 
 @asynccontextmanager
