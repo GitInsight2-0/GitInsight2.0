@@ -46,6 +46,12 @@ const SILENCE_SEC = DEFAULT_VAD.silenceMs / 1000;
  * 측정기는 0.5초 침묵에서 멈춤으로 보고, 음성 AI는 2초 침묵에서 답변이 끝났다고 봅니다. 그 차이만큼 기다립니다.
  */
 const THINKING_AFTER_MS = Math.max(0, DEFAULT_VAD.silenceMs - USER_SILENCE_MS);
+/**
+ * 생각 중으로 바꾼 뒤 이 시간 안에 턴이 서버로 가지 않으면 듣는 중으로 되돌립니다.
+ * 기침 같은 짧은 잡음은 턴이 되지 않아서, 되돌리지 않으면 생각 중에 멈춰 보입니다.
+ * 음성 AI는 보통 침묵 판정 뒤 1~2초 안에 턴을 넘깁니다.
+ */
+const THINKING_GIVE_UP_MS = 4000;
 
 const ACTION_LABEL: Record<Action, string> = {
   ASK: "질문",
@@ -228,7 +234,10 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
           return;
         }
         // 말을 멈췄습니다. 음성 AI가 답변 끝으로 볼 만큼 조용하면 기다리는 중으로 표시합니다.
-        thinkingTimer.current = setTimeout(() => setThinking(true), THINKING_AFTER_MS);
+        thinkingTimer.current = setTimeout(() => {
+          setThinking(true);
+          thinkingTimer.current = setTimeout(() => setThinking(false), THINKING_GIVE_UP_MS);
+        }, THINKING_AFTER_MS);
       },
       audio: setLevels,
       ended: (reason) => {
@@ -248,7 +257,11 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
       bargeStop: noop,
       transcriptSimilarity: noop,
       delegationMissed: noop,
-      turnSent: () => setThinking(true),
+      turnSent: () => {
+        // 턴이 실제로 서버로 갔습니다. AI가 말을 시작할 때까지 생각 중을 유지합니다.
+        clearThinkingTimer();
+        setThinking(true);
+      },
     };
 
     try {

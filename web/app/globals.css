@@ -32,8 +32,9 @@
   --gi-code-gutter: #6e7781;
   --gi-code-ink: #1f2328;
 
-  --gi-font-sans: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
-  --gi-font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  /* --gi-font-plex, --gi-font-jetbrains는 app/layout.tsx의 next/font가 정합니다 */
+  --gi-font-sans: var(--gi-font-plex, "IBM Plex Sans KR"), "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --gi-font-mono: var(--gi-font-jetbrains, "JetBrains Mono"), ui-monospace, Menlo, monospace;
 
   --gi-radius: 12px;
   --gi-radius-pill: 999px;
