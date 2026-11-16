@@ -6,11 +6,11 @@ LLM은 답변이 기대 포인트를 다뤘는지와 꼬리질문 후보만 냅�
 
 import json
 import logging
-import re
 import time
 from dataclasses import dataclass
 
 from gitinsight_api.brain.quotes import EXACT, QuoteMatcher
+from gitinsight_api.brain.utterance import LINE_NUMBER
 from gitinsight_api.llm import (
     LLMClient,
     LLMError,
@@ -31,9 +31,6 @@ JUDGE_PURPOSE = "judge"
 MAX_FOLLOWUP_CHARS = 150
 # 남은 시간이 이보다 적으면 재시도하지 않습니다.
 MIN_RETRY_SEC = 0.3
-
-# 꼬리질문에 줄 번호가 들어가면 안 됩니다. 코드 위치는 분석 결과에서만 가져옵니다.
-_LINE_NUMBER = re.compile(r"\d+\s*(번째\s*)?(줄|행|라인)|\bline\s*\d+|\bL\d+\b", re.IGNORECASE)
 
 JUDGE_SYSTEM_PROMPT = f"""당신은 한국어 기술 면접에서 지원자 답변을 판단하는 평가 보조자입니다.
 다음 행동이나 점수는 서버가 정합니다. 당신은 아래 세 가지만 판단합니다.
@@ -133,7 +130,7 @@ def validate_judgment(
             raise JudgmentInvalidError(
                 f"꼬리질문은 {MAX_FOLLOWUP_CHARS}자 이내 한 문장이어야 합니다"
             )
-        if _LINE_NUMBER.search(question):
+        if LINE_NUMBER.search(question):
             raise JudgmentInvalidError("꼬리질문에 줄 번호를 쓰면 안 됩니다")
         if followup.symbol_id is not None and followup.symbol_id not in topic.allowed_symbol_ids():
             raise JudgmentInvalidError("허용 심볼 목록에 없는 symbol_id를 썼습니다")
