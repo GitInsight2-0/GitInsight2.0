@@ -5,12 +5,14 @@ description = "GitInsight 2.0 분석 워커"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "gitinsight-contracts",
+    "gitinsight-api",
     "tree-sitter>=0.26.1",
     "tree-sitter-python>=0.25.0",
 ]
 
 [tool.uv.sources]
 gitinsight-contracts = { workspace = true }
+gitinsight-api = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
