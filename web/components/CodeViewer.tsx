@@ -52,14 +52,14 @@ export default function CodeViewer({ repo, target }: { repo: string | null; targ
 
   if (!target) {
     return (
-      <Panel target={null}>
+      <Panel target={null} status="강조할 코드가 없습니다">
         <p className={styles.codeMessage}>이 질문에는 강조할 코드가 없습니다.</p>
       </Panel>
     );
   }
   if (!repo || state.kind === "error") {
     return (
-      <Panel target={target}>
+      <Panel target={target} status="코드를 불러오지 못해 위치만 보여 줍니다">
         <p className={styles.codeMessage}>
           코드를 불러오지 못해 위치만 보여 줍니다{state.kind === "error" ? ` (${state.message})` : ""}.
         </p>
@@ -68,7 +68,7 @@ export default function CodeViewer({ repo, target }: { repo: string | null; targ
   }
   if (state.kind !== "ok" || state.key !== key) {
     return (
-      <Panel target={target}>
+      <Panel target={target} status="코드를 불러오는 중">
         <p className={styles.codeMessage}>코드를 불러오는 중…</p>
       </Panel>
     );
@@ -83,7 +83,7 @@ export default function CodeViewer({ repo, target }: { repo: string | null; targ
   const outOfRange = target.end_line > state.lines.length;
 
   return (
-    <Panel target={target}>
+    <Panel target={target} status={`${target.path} ${target.start_line}–${target.end_line}줄 코드를 불러왔습니다`}>
       {outOfRange && (
         <p className={styles.codeWarn}>
           파일이 {state.lines.length}줄이라 강조 범위({target.start_line}-{target.end_line})와 맞지 않습니다. 분석 커밋을 확인하세요.
@@ -105,7 +105,7 @@ export default function CodeViewer({ repo, target }: { repo: string | null; targ
   );
 }
 
-function Panel({ target, children }: { target: SymbolRef | null; children: React.ReactNode }) {
+function Panel({ target, status, children }: { target: SymbolRef | null; status: string; children: React.ReactNode }) {
   return (
     <aside aria-label="질문이 가리키는 코드" className={styles.code}>
       <div className={styles.codeHead}>
@@ -120,10 +120,11 @@ function Panel({ target, children }: { target: SymbolRef | null; children: React
           </div>
         )}
       </div>
-      {/* 불러오는 중, 실패 안내를 화면 낭독기가 읽도록 알림 영역으로 둡니다. */}
-      <div aria-live="polite" className={styles.codeBody}>
-        {children}
-      </div>
+      {/* 알림 영역에는 짧은 상태 문장만 둡니다. 코드 본문까지 넣으면 화면 낭독기가 코드를 다 읽습니다. */}
+      <span role="status" aria-live="polite" className={styles.srOnly}>
+        {status}
+      </span>
+      <div className={styles.codeBody}>{children}</div>
     </aside>
   );
 }

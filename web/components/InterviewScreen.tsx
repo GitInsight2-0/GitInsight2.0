@@ -83,6 +83,8 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
   /** 음성 턴을 서버로 보내고 답을 기다리는 중 */
   const [thinking, setThinking] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
+  /** 타이머 안에서 AI가 말하는 중인지 보려고 상태와 같이 둡니다 */
+  const aiSpeakingRef = useRef(false);
   const [levels, setLevels] = useState<AudioLevels | null>(null);
   const thinkingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -188,18 +190,21 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
     const ac = new AbortController();
     voiceAbort.current = ac;
     voiceStoppedByUser.current = false;
+    // 실패했던 텍스트 턴의 turn_id를 음성 뒤에 다시 쓰면, 서버가 몇 턴 전 응답을 돌려줄 수 있습니다.
+    pendingTurn.current = null;
+    /** 이 시도의 콜백인지. 끄고 바로 다시 켜면 이전 시도의 늦은 콜백이 새 시도의 상태를 덮지 않게 합니다 */
+    const current = () => voiceAbort.current === ac;
     setError(null);
     setNotice(null);
     setMode("voice");
     setVoiceState("connecting");
 
     const ui: SessionUi = {
-      log: (who, text) => {
-        // 사용자 받아쓰기만 대화 기록에 남깁니다. 면접관 발화는 서버가 정한 문장(reply)으로 남깁니다.
-        if (who === "user") {
-          push({ who: "me", text });
-          setLastAnswer(text);
-        }
+      // 대화 기록에는 서버로 실제로 보낸 답변(turnSent)과 서버가 정한 문장(reply)만 남깁니다.
+      log: noop,
+      answer: (text) => {
+        // 한 답변이 여러 조각으로 올 수 있어 이어 붙입니다. 이미 보낸 턴의 늦은 조각은 진행기가 걸러 줍니다.
+        if (current()) setLastAnswer((prev) => (prev ? `${prev} ${text}` : text));
       },
       status: (s) => {
         if (s === "연결됨") setVoiceState("live");
@@ -221,8 +226,10 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
         setLastAnswer(null);
       },
       speaking: (who, on) => {
+        if (!current()) return;
         clearThinkingTimer();
         if (who === "ai") {
+          aiSpeakingRef.current = on;
           setAiSpeaking(on);
           // AI가 말하기 시작하면 기다림은 끝난 것입니다 (서버 응답 실패 때 나오는 다시 말해 달라는 문장 포함).
           if (on) setThinking(false);
@@ -235,16 +242,27 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
         }
         // 말을 멈췄습니다. 음성 AI가 답변 끝으로 볼 만큼 조용하면 기다리는 중으로 표시합니다.
         thinkingTimer.current = setTimeout(() => {
+          // AI가 말하는 중이면 사용자 소리는 맞장구나 반향입니다. 생각 중으로 바꾸지 않습니다.
+          if (aiSpeakingRef.current) return;
           setThinking(true);
           thinkingTimer.current = setTimeout(() => setThinking(false), THINKING_GIVE_UP_MS);
         }, THINKING_AFTER_MS);
       },
-      audio: setLevels,
-      ended: (reason) => {
+      audio: (levels) => {
+        if (current()) setLevels(levels);
+      },
+      ended: (reason, kind) => {
+        if (!current()) return;
         voice.current = null;
         resetVoiceView();
         setVoiceState("idle");
         setMode("text");
+        if (kind === "done") {
+          // 서버가 409(이미 끝난 세션)로 답하면 done인 reply가 오지 않습니다. 화면도 종료로 맞춥니다.
+          const r = replyRef.current;
+          if (r && !r.done) showReply({ ...r, done: true });
+          return;
+        }
         if (replyRef.current?.done) return;
         if (!voiceStoppedByUser.current && sessionRef.current) {
           setNotice(`음성 연결이 끊겨 텍스트로 이어 갑니다. 다시 시도하려면 위의 "음성"을 누르세요. (${reason})`);
@@ -257,7 +275,9 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
       bargeStop: noop,
       transcriptSimilarity: noop,
       delegationMissed: noop,
-      turnSent: () => {
+      turnSent: (transcript) => {
+        if (!current()) return;
+        push({ who: "me", text: transcript });
         // 턴이 실제로 서버로 갔습니다. AI가 말을 시작할 때까지 생각 중을 유지합니다.
         clearThinkingTimer();
         setThinking(true);
@@ -276,6 +296,7 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
       });
     } catch (e) {
       // 진행기가 이미 ended로 텍스트 모드 전환을 처리했습니다. 세션을 못 만든 경우만 여기서 알립니다.
+      if (!current()) return;
       voice.current = null;
       resetVoiceView();
       setVoiceState("idle");
@@ -303,6 +324,7 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
     clearThinkingTimer();
     setLevels(null);
     setThinking(false);
+    aiSpeakingRef.current = false;
     setAiSpeaking(false);
     setLastAnswer(null);
   }
@@ -374,7 +396,7 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
         <div className={styles.controls}>
           {reply && !done && (
             <span className={styles.time}>
-              남은 시간 <b>약 {Math.max(1, Math.ceil(reply.remaining_sec / 60))}분</b>
+              남은 시간 <b>{remainingLabel(reply.remaining_sec)}</b>
             </span>
           )}
           <div role="group" aria-label="답변 방식" className={styles.toggle}>
@@ -475,6 +497,13 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
       </main>
     </div>
   );
+}
+
+/** 서버가 준 남은 시간(초)을 대략적인 말로 바꿉니다. 화면은 초를 세지 않아서 분 단위로만 보여 줍니다 */
+function remainingLabel(sec: number): string {
+  if (sec <= 0) return "없음";
+  if (sec < 60) return "1분 미만";
+  return `약 ${Math.ceil(sec / 60)}분`;
 }
 
 function MicIcon() {
