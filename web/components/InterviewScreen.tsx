@@ -4,6 +4,7 @@ import type { Action, BrainReply } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import CodeViewer from "@/components/CodeViewer";
 import { ApiError, TRANSCRIPT_MAX, createSession, endSession, isAbort, postTurn } from "@/lib/voice/api";
+import { reportHref } from "@/lib/reports";
 import { DEFAULT_VAD } from "@/lib/voice/config";
 import { explainError, isLoginError } from "@/lib/voice/errors";
 import { connectGemini } from "@/lib/voice/gemini";
@@ -79,12 +80,9 @@ const noop = () => undefined;
 export default function InterviewScreen({
   analysisId,
   repo,
-  reportHref,
 }: {
   analysisId: string;
   repo: string | null;
-  /** 리포트 화면 주소. 리포트 화면(#20)이 생기기 전에는 주지 않습니다 */
-  reportHref?: (reportId: string) => string;
 }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [reply, setReply] = useState<BrainReply | null>(null);
@@ -649,7 +647,8 @@ function ReportStatus({
   onRetry,
 }: {
   report: ReportState;
-  href?: (reportId: string) => string;
+  /** 리포트 화면 주소 (/reports/{id}) */
+  href: (reportId: string) => string;
   onRetry: () => void;
 }) {
   return (
@@ -658,14 +657,11 @@ function ReportStatus({
       {(report.kind === "idle" || report.kind === "making") && (
         <p className={styles.reportNote}>리포트를 만들고 있어요. 30초쯤 걸릴 수 있어요.</p>
       )}
-      {report.kind === "ready" &&
-        (href ? (
-          <a className={styles.primary} href={href(report.reportId)}>
-            리포트 보기
-          </a>
-        ) : (
-          <p className={styles.reportNote}>리포트가 준비됐어요. 리포트 화면이 연결되면 여기서 열 수 있어요.</p>
-        ))}
+      {report.kind === "ready" && (
+        <a className={styles.primary} href={href(report.reportId)}>
+          리포트 보기
+        </a>
+      )}
       {report.kind === "unavailable" && (
         <p className={styles.reportNote}>실험용 서버(LAB_ENABLED)에서는 리포트를 만들지 않아요.</p>
       )}
