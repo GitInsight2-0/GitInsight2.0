@@ -27,10 +27,12 @@ export default function Waveform({ levels, active }: { levels: AudioLevels | nul
         const el = bars.current[i];
         if (el) el.style.height = `${h}px`;
       });
-    if (!levels || !active || matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (!levels || !active) {
       paint(IDLE);
       return;
     }
+    // 동작 줄이기 설정은 도중에 바뀔 수 있어 프레임마다 확인합니다.
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)");
     const history = [...IDLE];
     let buf: Float32Array<ArrayBuffer> | null = null;
     let raf = 0;
@@ -40,6 +42,10 @@ export default function Waveform({ levels, active }: { levels: AudioLevels | nul
       // 30fps면 충분합니다.
       if (now - last < 33) return;
       last = now;
+      if (reduced.matches) {
+        paint(IDLE);
+        return;
+      }
       const level = Math.max(rms(levels.user(), buf), rms(levels.ai(), buf));
       const h = MIN_H + Math.round(Math.min(1, Math.sqrt(level / FULL_RMS)) * (MAX_H - MIN_H));
       history.shift();

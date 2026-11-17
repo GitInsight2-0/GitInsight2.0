@@ -189,6 +189,11 @@
   .orbThinking {
     animation: none;
   }
+
+  .orb,
+  .bar {
+    transition: none;
+  }
 }
 
 .wave {
@@ -440,6 +445,17 @@
   font-family: var(--gi-font-mono);
   font-size: 13px;
   color: var(--gi-muted);
+}
+
+/* 화면에는 보이지 않고 화면 낭독기만 읽는 글 */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .codeBody {
