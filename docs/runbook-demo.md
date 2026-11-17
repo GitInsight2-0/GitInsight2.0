@@ -2,7 +2,7 @@
 
 > 해커톤(11/20~21) 데모 중 외부 서비스가 막혔을 때 이 문서대로 전환합니다.
 > "상태" 열이 `준비됨`이 아닌 항목은 아직 쓸 수 없습니다. 담당자가 구현하면 상태를 고칩니다.
-> 마지막 갱신: 2026-11-11 (B)
+> 마지막 갱신: 2026-11-17 (B)
 
 ## 판단 기준
 
@@ -14,8 +14,8 @@
 
 | 실패 지점 | 증상 | 1차 | 2차 | 최후 | 담당 | 상태 |
 |---|---|---|---|---|---|---|
-| 판단 LLM | 꼬리질문이 미리 만든 질문으로만 나옴, 로그에 `fallback=timeout/error` | `LLM_PROVIDER` 전환 (아래 A) | `BRAIN_FORCE_PREPARED=true` (아래 B) | 텍스트 모드 + 미리 만든 질문 | B | 1차·2차 준비됨 (서버 API에도 적용), 화면 연결은 로그인(#18) 후 |
-| 리포트 LLM | 종료 후 리포트가 판단 표(`kind=turn_table`)로 나옴 | 그대로 진행 (판단 표가 대비책) | `LLM_PROVIDER` 전환 후 다음 세션 | | B·D | 판단 표 생성 준비됨, 화면은 D |
+| 판단 LLM | 꼬리질문이 미리 만든 질문으로만 나옴, 로그에 `fallback=timeout/error` | 판단 모델 바꾸기 (아래 A) | `BRAIN_FORCE_PREPARED=true` (아래 B) | 텍스트 모드 + 미리 만든 질문 | B | 1차·2차 준비됨 (서버 API에도 적용), 화면 연결은 로그인(#18) 후. 판단·리포트 LLM은 Gemini만 쓰기로 해서 다른 제공사 대비책은 없음 (#63) |
+| 리포트 LLM | 종료 후 리포트가 판단 표(`kind=turn_table`)로 나옴 | 그대로 진행 (판단 표가 대비책) | 리포트 모델을 바꾼 뒤 다음 세션 (아래 A) | | B·D | 판단 표 생성 준비됨, 화면은 D |
 | 음성 제공사 (Gemini Live) | 연결 실패, 소리 없음, 자막 멈춤 | 텍스트 모드 | 녹화 영상 | - | C | 1차 구현 (#30): 면접 화면에서 음성 연결이 끊기거나 실패하면 같은 세션으로 텍스트 모드 자동 전환, "텍스트로 바꾸기"로 직접 전환. 소리 없음·자막 멈춤은 자동 감지하지 않으므로 발표자가 직접 전환. 음성 AI는 Gemini만 쓰기로 해서 다른 제공사 대비책은 없음 |
 | 분석 | 분석이 끝나지 않음, 실패 | `(레포, SHA)` 캐시 | DB에 넣어 둔 데모 분석 스냅샷 | | A | 저장소·스냅샷 준비됨 (#12): `(레포, SHA, 요청자)` 기록 재사용, `scripts/seed_demo_analysis.py`로 스냅샷 넣기. 분석 요청 API(`POST /api/analyses`)와 레포 선택 화면 연결됨 |
 | GitHub App·비공개 레포 | 로그인 실패, 레포 목록 비어 있음 | 같은 앱으로 공개 데모 레포 | 스냅샷 | | D | 준비됨 (#18): 로그인, `/api/repos`, 요청자 토큰으로 분석(#65), `/api/code`. App에 레포를 설치하지 않았으면 목록이 비고 첫 화면에서 데모 레포로 시작 |
@@ -26,16 +26,23 @@
 
 환경 변수는 Railway API 서비스의 Variables에서 바꾸고 재배포합니다. 재배포는 약 1~2분 걸리므로, 기다리는 동안 텍스트 모드로 이어 갑니다.
 
-### A. 판단·리포트 LLM 제공사 전환
+### A. 판단·리포트 LLM 모델 바꾸기
+
+판단·분석·리포트 LLM은 Gemini만 씁니다 (`LLM_PROVIDER` 기본값 `gemini`, #63). 다른 제공사로 넘기는 대비책은 없습니다.
+기본 모델은 판단 `gemini/gemini-3.6-flash`(추론량 `low`, 제한 4초), 분석·리포트 `gemini/gemini-3.8-flash`입니다.
+한 모델이 과부하(503)나 한도 초과(429)로 막히면 같은 키로 다른 Gemini 모델을 씁니다.
 
 ```text
-LLM_PROVIDER=gemini        # 되돌릴 때는 openai
+LLM_JUDGE_MODEL=gemini/gemini-3.8-flash     # 판단 모델이 막혔을 때
+LLM_REPORT_MODEL=gemini/gemini-3.6-flash    # 리포트 모델이 막혔을 때
 ```
 
-- 모델 이름 변수(`LLM_JUDGE_MODEL` 등)를 따로 넣어 두었다면 그 값이 우선합니다. 데모 전에는 비워 둡니다.
-- 두 제공사의 키(`OPENAI_API_KEY`, `GEMINI_API_KEY`)가 모두 등록되어 있어야 합니다.
-- 전환 전에 로컬에서 확인합니다: `$env:LLM_PROVIDER="gemini"; uv run python scripts/demo_check.py --real-llm`
-- [미확인] Gemini 판단 모델의 지연과 구조화 출력 동작은 아직 측정하지 않았습니다. 리허설 전에 `scripts/llm_latency.py --model gemini/gemini-3.8-flash`로 측정합니다.
+- 되돌릴 때는 변수를 비웁니다. 비우면 기본 모델을 씁니다.
+- 바꾸기 전에 로컬에서 확인합니다: `$env:LLM_JUDGE_MODEL="gemini/gemini-3.8-flash"; uv run python scripts/demo_check.py --real-llm`
+- 판단을 3.8 Flash로 바꾸면 느려집니다 (추론량 `low`에서 중앙값 3.8초, 제한 4초에 거의 닿음). 대체 사유 `timeout`이 많으면 B로 갑니다.
+- 키 자체가 막혔거나(인증 오류, 결제 한도) Gemini 전체 장애면 모델을 바꿔도 소용없습니다. 바로 B로 갑니다.
+- 무료 등급 키로는 판단 호출이 거의 다 실패했습니다 (429, 503). 배포에는 결제를 등록한 키를 넣습니다.
+- 지연 측정 기록은 `docs/evals/latency.md`에 있습니다 (2026-11-17, 모델과 추론량별 10회).
 
 ### B. LLM 없이 진행
 
@@ -62,9 +69,9 @@ uv run python scripts/demo_check.py --real-llm    # 실제 LLM으로 완주 (비
 
 세 명령 모두 마지막 줄까지 `[통과]`여야 합니다. `--real-llm`에서 대체 사유가 `timeout`으로 많이 나오면 `JUDGE_TIMEOUT_S`나 `LLM_JUDGE_REASONING_EFFORT`를 조정합니다.
 
-- [ ] Railway 환경 변수: `LAB_ENABLED=false`, `BRAIN_FORCE_PREPARED=false`, `LLM_PROVIDER=openai`, 모델 이름 변수 비움
+- [ ] Railway 환경 변수: `LAB_ENABLED=false`, `BRAIN_FORCE_PREPARED=false`, `LLM_PROVIDER`와 모델 이름 변수 비움 (기본값 Gemini)
 - [ ] Railway 시작 명령이 `uvicorn --factory gitinsight_worker.server:app_factory`인지 확인 (`gitinsight_api.main:app_factory`이면 분석 요청이 503)
-- [ ] 두 제공사 API 키 등록, 결제 한도 확인 (예산 상한 $100)
+- [ ] `GEMINI_API_KEY`를 Railway(판단·분석·리포트)와 Vercel(음성 토큰)에 등록, 결제 한도 확인 (예산 상한 $100)
 - [ ] 데모 레포 분석 스냅샷을 운영 DB에 넣고(`seed_demo_analysis.py --user-id <데모 계정 id> --fixture gitinsight_agent_live --analysis-id demo-gitinsight-agent`), `demo_check.py --from-db --user-id <데모 계정 id>`로 확인 (A)
   - `--analysis-id demo-gitinsight-agent`는 웹 첫 화면의 "데모 레포로 바로 시작"(`web/lib/demo.ts`)과 같은 id입니다. 빼면 이 버튼이 404입니다
   - `--user-id`는 데모에 로그인할 계정의 GitHub 숫자 id입니다 (`gh api users/<login> -q .id`). 로그인 이름이 아닙니다

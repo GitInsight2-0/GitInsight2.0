@@ -55,7 +55,7 @@ class InterviewBrain:
         repository: SessionRepository,
         llm: LLMClient,
         config: InterviewConfig | None = None,
-        judge_timeout_s: float = 2.5,
+        judge_timeout_s: float = 4.0,
         plan_timeout_s: float = 8.0,
         judge_model: str | None = None,
         plan_model: str | None = None,
