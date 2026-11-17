@@ -1,5 +1,5 @@
 /**
- * 음성 PoC용 임시 토큰 발급 (LAB_ENABLED=true일 때만).
+ * 음성 PoC용 Gemini Live 임시 토큰 발급 (LAB_ENABLED=true일 때만).
  *
  * 계약(VoiceToken)상 최종 위치는 FastAPI의 POST /api/sessions/{id}/voice-token입니다.
  * 그 엔드포인트가 생기기 전까지 같은 응답 형식으로 여기서 발급합니다.
@@ -7,67 +7,24 @@
  */
 import type { VoiceToken } from "@gitinsight/contracts";
 import { EndSensitivity, GoogleGenAI, Modality, Type } from "@google/genai";
-import { DELEGATION_TOOL, TOOL_DESCRIPTION, TOOL_PARAMETERS, type VadSettings, buildInstructions, parseVad } from "@/lib/voice/config";
-
-type Provider = VoiceToken["provider"];
+import { DELEGATION_TOOL, TOOL_DESCRIPTION, TRANSCRIPT_DESCRIPTION, type VadSettings, buildInstructions, parseVad } from "@/lib/voice/config";
 
 export async function POST(req: Request) {
   if (process.env.LAB_ENABLED !== "true") {
     return Response.json({ detail: "LAB_ENABLED=true일 때만 쓸 수 있습니다" }, { status: 404 });
   }
-  const body = (await req.json().catch(() => null)) as { provider?: unknown; vad?: unknown; filler?: unknown } | null;
-  const provider = body?.provider;
-  if (provider !== "openai" && provider !== "gemini") {
-    return Response.json({ detail: "provider는 openai 또는 gemini입니다" }, { status: 400 });
-  }
+  const body = (await req.json().catch(() => null)) as { vad?: unknown; filler?: unknown } | null;
   try {
     const vad = parseVad(body?.vad);
     const instructions = buildInstructions({ filler: body?.filler === true });
-    const token = provider === "openai" ? await openaiToken(vad, instructions) : await geminiToken(vad, instructions);
+    const token = await geminiToken(vad, instructions);
     return Response.json(token satisfies VoiceToken);
   } catch (e) {
-    // 제공사 오류 본문에 키가 들어가지는 않지만, 길이를 줄여 돌려줍니다.
-    return Response.json({ detail: `${provider} 토큰 발급 실패: ${String(e).slice(0, 500)}` }, { status: 502 });
+    // 제공사 오류 원문은 브라우저로 보내지 않고 서버 터미널에만 남깁니다.
+    console.error("[voice-token] Gemini 토큰 발급 실패", e);
+    const detail = e instanceof MissingEnvError ? e.message : "음성 연결 토큰을 받지 못했습니다. 잠시 뒤 다시 시도하거나 텍스트로 진행하세요.";
+    return Response.json({ detail }, { status: 502 });
   }
-}
-
-const openaiTools = [{ type: "function", name: DELEGATION_TOOL, description: TOOL_DESCRIPTION, parameters: TOOL_PARAMETERS }];
-
-async function openaiToken(vad: VadSettings, instructions: string): Promise<VoiceToken> {
-  const apiKey = requireEnv("OPENAI_API_KEY");
-  const model = process.env.OPENAI_REALTIME_MODEL || "gpt-realtime-2.1";
-  // https://developers.openai.com/api/docs/guides/realtime-webrtc
-  const r = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      session: {
-        type: "realtime",
-        model,
-        instructions,
-        audio: {
-          input: {
-            transcription: { model: process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-transcribe", language: "ko" },
-            // 면접 답변은 생각하느라 멈추는 일이 많습니다. 테스트 화면에서 바꿔 보며 기록합니다.
-            turn_detection: { type: "server_vad", silence_duration_ms: vad.silenceMs },
-          },
-          output: { voice: process.env.OPENAI_VOICE || "marin" },
-        },
-        tools: openaiTools,
-        tool_choice: "auto",
-      },
-    }),
-  });
-  const data = (await r.json()) as { value?: string; expires_at?: number; error?: unknown };
-  if (!r.ok || !data.value) throw new Error(JSON.stringify(data.error ?? data));
-  return {
-    provider: "openai",
-    client_secret: data.value,
-    expires_at: new Date((data.expires_at ?? Date.now() / 1000 + 60) * 1000).toISOString(),
-    model,
-    instructions,
-    tools: openaiTools,
-  };
 }
 
 async function geminiToken(vad: VadSettings, instructions: string): Promise<VoiceToken> {
@@ -84,7 +41,7 @@ async function geminiToken(vad: VadSettings, instructions: string): Promise<Voic
       description: TOOL_DESCRIPTION,
       parameters: {
         type: Type.OBJECT,
-        properties: { transcript: { type: Type.STRING, description: TOOL_PARAMETERS.properties.transcript.description } },
+        properties: { transcript: { type: Type.STRING, description: TRANSCRIPT_DESCRIPTION } },
         required: ["transcript"],
       },
     },
@@ -136,8 +93,11 @@ async function geminiToken(vad: VadSettings, instructions: string): Promise<Voic
   };
 }
 
+/** 키가 없는 설정 오류. 개발자가 바로 고칠 수 있게 이 문구는 그대로 보여 줍니다 (값은 들어가지 않음) */
+class MissingEnvError extends Error {}
+
 function requireEnv(name: string): string {
   const v = process.env[name];
-  if (!v) throw new Error(`${name}가 없습니다 (web/.env.local)`);
+  if (!v) throw new MissingEnvError(`${name}가 없습니다 (web/.env.local)`);
   return v;
 }

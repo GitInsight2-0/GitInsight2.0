@@ -3,12 +3,12 @@
 import type { BrainReply } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import { isAbort } from "@/lib/voice/api";
+import { explainError } from "@/lib/voice/errors";
 import { DEFAULT_VAD, TEST_SCRIPT, VAD_LIMITS, type VadSettings } from "@/lib/voice/config";
 import { connectGemini } from "@/lib/voice/gemini";
-import { connectOpenAI } from "@/lib/voice/openai";
 import { type LogWho, type VoiceSession, startVoiceSession } from "@/lib/voice/session";
 import { summarize } from "@/lib/voice/stats";
-import type { Provider } from "@/lib/voice/types";
+import { PROVIDER } from "@/lib/voice/types";
 
 interface LogLine {
   sec: number;
@@ -16,24 +16,10 @@ interface LogLine {
   text: string;
 }
 
-const CONNECT = { openai: connectOpenAI, gemini: connectGemini } as const;
-const NAMES: Record<Provider, string> = { openai: "OpenAI Realtime (WebRTC)", gemini: "Gemini Live (WebSocket)" };
-
-/** 브라우저 오류를 사람이 바로 이해할 수 있는 문구로 바꿉니다. */
-function explainError(e: unknown): string {
-  const name = (e as { name?: unknown } | null)?.name;
-  if (name === "NotAllowedError") {
-    return "마이크 권한이 막혀 있습니다. Chrome에서 이 페이지를 열고 주소창 왼쪽 아이콘에서 마이크를 허용하세요. (Claude 앱 안의 브라우저는 마이크를 쓸 수 없습니다)";
-  }
-  if (name === "NotFoundError") return "마이크를 찾을 수 없습니다. 이어폰이나 마이크 연결을 확인하세요.";
-  return String(e);
-}
-
 /** G1 기준: 끊으면 이 시간 안에 AI가 멈춰야 합니다 */
 const BARGE_STOP_TARGET_MS = 500;
 
 export default function VoiceLab({ analysisId }: { analysisId: string }) {
-  const [provider, setProvider] = useState<Provider>("gemini");
   const [labDelayMs, setLabDelayMs] = useState(800);
   const [status, setStatus] = useState("대기");
   const [running, setRunning] = useState(false);
@@ -81,8 +67,7 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
     abort.current = ac;
     try {
       session.current = await startVoiceSession(
-        provider,
-        CONNECT[provider],
+        connectGemini,
         {
           log: add,
           status: setStatus,
@@ -164,7 +149,7 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
   const errors = log.filter((l) => l.who === "error");
   // 자막 원문은 빼고 수치와 오류만 복사합니다 (docs/evals/voice-g1.md에 붙여 넣는 용도).
   const result = {
-    provider,
+    provider: PROVIDER,
     lab_delay_ms: labDelayMs,
     vad,
     filler,
@@ -186,19 +171,12 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
 
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: 1100, margin: "24px auto", padding: "0 16px" }}>
-      <h1 style={{ fontSize: 22, marginBottom: 4 }}>G1 음성 비교 PoC</h1>
+      <h1 style={{ fontSize: 22, marginBottom: 4 }}>음성 측정 (Gemini Live)</h1>
       <p style={{ color: "#666", marginTop: 0 }}>
         이어폰을 끼고 테스트합니다. 면접 두뇌는 FastAPI의 대본 두뇌(LAB_ENABLED)입니다. 상태: <b>{status}</b>
       </p>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-        <select value={provider} onChange={(e) => setProvider(e.target.value as Provider)} disabled={running}>
-          {(Object.keys(NAMES) as Provider[]).map((p) => (
-            <option key={p} value={p}>
-              {NAMES[p]}
-            </option>
-          ))}
-        </select>
         <label>
           판단 지연 흉내{" "}
           <input
