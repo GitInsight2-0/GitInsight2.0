@@ -1,18 +1,16 @@
 """1단계 분석: 레포 구조, 언어 통계, 심볼 목록, 심볼별 기여 근거.
 
-결과에는 원본 코드가 들어가지 않습니다. 내려받은 레포는 분석이 끝나거나 실패하면 지웁니다.
+결과에는 원본 코드가 들어가지 않습니다. 내려받기, 2단계 연결, 레포 삭제는 pipeline.run_analysis가 맡습니다.
 주제(Topic)를 만드는 2단계는 이 결과를 입력으로 받습니다.
 내려받은 레포가 2단계 전에 지워지므로, 기여 근거(blame)는 내보내는 모든 심볼에 대해 여기서 미리 구합니다.
 
 진행률(AnalysisState.progress)은 분석 전체 기준입니다. 1단계는 앞쪽 절반(0~0.5)입니다.
 """
 
-import asyncio
 import logging
 import os
 import shutil
 import stat
-import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -20,7 +18,7 @@ from pathlib import Path
 from typing import Protocol
 
 from gitinsight_contracts.analysis import LanguageStat
-from gitinsight_contracts.api import AnalysisState, AnalysisStatus
+from gitinsight_contracts.api import AnalysisState
 from gitinsight_contracts.common import SymbolRef
 from gitinsight_worker.contribution import (
     BLAME_BUDGET_S,
@@ -33,7 +31,6 @@ from gitinsight_worker.contribution import (
     blame_file,
     summarize,
 )
-from gitinsight_worker.git import Cloner
 from gitinsight_worker.languages import PYTHON, count_languages, language_of
 from gitinsight_worker.symbols import extract_python
 
@@ -138,44 +135,3 @@ def _make_writable_and_retry(func: Callable[[str], object], path: str, _error: o
 
 def remove_tree(path: Path) -> None:
     shutil.rmtree(path, onexc=_make_writable_and_retry)
-
-
-def _state(status: AnalysisStatus, progress: float, commit_sha: str) -> AnalysisState:
-    return AnalysisState(status=status, progress=progress, commit_sha=commit_sha)
-
-
-async def run_stage1(
-    clone: Cloner,
-    commit_sha: str,
-    reporter: StatusReporter,
-    *,
-    requester: Requester | None = None,
-    work_dir: Path | None = None,
-) -> Stage1Result:
-    """레포를 내려받아 분석하고 상태를 보고합니다. 끝나면 성공과 실패 모두 내려받은 레포를 지웁니다.
-
-    실패하면 `failed` 상태를 보고한 뒤 예외를 그대로 올립니다. 보고하는 오류에는 예외 종류만 넣습니다.
-    작업이 취소되면 failed로 보고하지 않고 정리만 한 뒤 취소를 그대로 올립니다.
-    `requester`가 없으면 기여 라벨은 모두 "확인 불가"이고, 최근 커밋은 그대로 구합니다.
-    """
-    checkout = Path(tempfile.mkdtemp(prefix="gitinsight-", dir=work_dir))
-    try:
-        await reporter.report(_state(AnalysisStatus.STAGE1, PROGRESS_STARTED, commit_sha))
-        await asyncio.to_thread(clone, checkout)
-        await reporter.report(_state(AnalysisStatus.STAGE1, PROGRESS_CLONED, commit_sha))
-        result = await asyncio.to_thread(analyze_tree, checkout, commit_sha, requester)
-        await reporter.report(_state(AnalysisStatus.STAGE1, PROGRESS_STAGE1_DONE, commit_sha))
-        return result
-    except Exception as error:
-        logger.info("stage1_failed error=%s", type(error).__name__)
-        await reporter.report(
-            AnalysisState(
-                status=AnalysisStatus.FAILED,
-                progress=PROGRESS_STARTED,
-                commit_sha=commit_sha,
-                error=type(error).__name__,
-            )
-        )
-        raise
-    finally:
-        await asyncio.to_thread(remove_tree, checkout)

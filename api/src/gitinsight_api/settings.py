@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     brain_force_prepared: bool = False
     # 판단 모델의 reasoning_effort입니다. 비우면 모델 기본값을 씁니다. 지연 측정 결과로 정합니다.
     llm_judge_reasoning_effort: str | None = None
+    # 분석(2단계 주제 생성) 모델의 reasoning_effort입니다. 비우면 모델 기본값을 씁니다.
+    # 기본값 low 근거: Gemini 3.8 Flash에서 호출당 44~57초가 7~9초로 줄고 품질 차이는 없었습니다
+    # (docs/evals/stage2-2026-11-12.md, PR #36).
+    llm_analysis_reasoning_effort: str | None = "low"
     # 답변 판단 LLM 호출 제한 시간(초)입니다. 넘으면 미리 만든 질문으로 진행합니다. PoC 결과로 조정합니다.
     judge_timeout_s: float = 2.5
     # 면접 계획(JD 반영) LLM 호출 제한 시간(초)입니다.
@@ -104,6 +108,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "llm_judge_reasoning_effort",
+        "llm_analysis_reasoning_effort",
         "database_url",
         "github_client_id",
         "github_client_secret",

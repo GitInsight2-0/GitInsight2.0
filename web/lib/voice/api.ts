@@ -1,5 +1,5 @@
 /** FastAPI 면접 API 호출. 경로와 형식은 contracts의 계약을 따릅니다. */
-import type { BrainReply, MetricEvent, SessionCreate, SessionCreated, TurnRequest, VoiceToken } from "@gitinsight/contracts";
+import type { BrainReply, MetricEvent, SessionCreate, SessionCreated, SessionEnded, TurnRequest, VoiceToken } from "@gitinsight/contracts";
 import type { VadSettings } from "./config";
 
 export class ApiError extends Error {
@@ -109,6 +109,25 @@ export async function postTurn(
     } finally {
       s.done();
     }
+  }
+}
+
+/**
+ * 리포트 만들기를 기다리는 시간.
+ * 서버는 리포트 LLM을 30초(report_timeout_s), 꼬리 판단 다시 하기를 10초(rejudge_timeout_s) 안에 끊고 대비책 리포트를 냅니다.
+ */
+const END_TIMEOUT_MS = 45_000;
+
+/**
+ * 세션을 끝내고 리포트 id를 받습니다.
+ * 서버는 여러 번 불러도 같은 report_id를 돌려주므로, 실패하면 그대로 다시 불러도 됩니다.
+ */
+export async function endSession(sessionId: string, outer?: AbortSignal): Promise<SessionEnded> {
+  const s = linkedSignal(outer, END_TIMEOUT_MS);
+  try {
+    return await postJson(`/api/sessions/${sessionId}/end`, {}, s.signal);
+  } finally {
+    s.done();
   }
 }
 

@@ -13,10 +13,14 @@ from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from gitinsight_api.analyses.postgres import SNAPSHOT_REPLACED_ERROR, PostgresAnalysisStore
+from gitinsight_api.analyses.store import AnalysisKey
 from gitinsight_api.main import create_app
 from gitinsight_api.metrics_store import PostgresMetricsStore
 from gitinsight_api.settings import Settings
 from gitinsight_api.tables import metric_events
+from gitinsight_contracts.api import AnalysisStatus
+from gitinsight_contracts.fixtures import load_analysis
 from gitinsight_contracts.metrics import MetricEvent, MetricName
 
 from api_test_support import ClientFactory, alembic_config
@@ -72,3 +76,46 @@ async def test_metrics_route_writes_to_postgres(
         names = (await conn.execute(select(metric_events.c.name))).scalars().all()
     assert names == ["barge_in"]
     assert not (tmp_path / "m.jsonl").exists()
+
+
+async def test_analysis_store_uses_database_clock(pg_engine: AsyncEngine) -> None:
+    # 운영 경로입니다. 시계를 넘기지 않으면 updated_at과 오래됨 판단에 DB now()를 씁니다.
+    # 규칙 자체는 test_analysis_store.py의 계약 테스트가 가짜 시계로 확인합니다.
+    sample = load_analysis()
+    store = PostgresAnalysisStore(pg_engine)
+    key = AnalysisKey(sample.repo_full_name, sample.commit_sha, "u1")
+
+    record, created = await store.get_or_create(key)
+    again, created_again = await store.get_or_create(key)
+    await store.save_result(
+        record.analysis_id, sample.model_copy(update={"analysis_id": record.analysis_id})
+    )
+
+    assert created and not created_again
+    assert again.analysis_id == record.analysis_id
+    saved = await store.get_record(record.analysis_id)
+    assert saved is not None and saved.state.status is AnalysisStatus.DONE
+    assert saved.updated_at >= record.updated_at
+    result = await store.get(record.analysis_id)
+    assert result is not None and result.analysis_id == record.analysis_id
+
+
+async def test_demo_snapshot_is_idempotent_and_reused(pg_engine: AsyncEngine) -> None:
+    sample = load_analysis()
+    store = PostgresAnalysisStore(pg_engine)
+    key = AnalysisKey(sample.repo_full_name, sample.commit_sha, "demo")
+    # 같은 키로 진행 중이던 기록이 있어도 스냅샷이 이깁니다.
+    running, _ = await store.get_or_create(key)
+
+    first = await store.save_snapshot(sample, "demo")
+    second = await store.save_snapshot(sample, "demo")
+
+    assert first.analysis_id == second.analysis_id == sample.analysis_id
+    assert second.key == key and second.state.status is AnalysisStatus.DONE
+    assert await store.get(sample.analysis_id) == sample
+    old = await store.get_record(running.analysis_id)
+    assert old is not None
+    assert (old.state.status, old.state.error) == (AnalysisStatus.FAILED, SNAPSHOT_REPLACED_ERROR)
+    # 같은 키를 다시 요청하면 새로 분석하지 않고 스냅샷을 재사용합니다.
+    reused, created = await store.get_or_create(key)
+    assert (reused.analysis_id, created) == (sample.analysis_id, False)

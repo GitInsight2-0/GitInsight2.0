@@ -3,7 +3,7 @@
 - 기록 하나는 분석 요청 하나입니다. 상태(AnalysisState)와, 끝나면 결과(AnalysisResult JSON)를 가집니다.
 - 같은 키(레포, 커밋, 요청자)로 동시에 요청해도 기록은 하나만 만듭니다.
   메모리 구현은 asyncio.Lock으로 이를 보장합니다.
-  Postgres 구현(#17 이후)은 failed가 아닌 기록에 거는 키 부분 UNIQUE 인덱스와
+  Postgres 구현(postgres.py)은 failed가 아닌 기록에 거는 키 부분 UNIQUE 인덱스와
   INSERT … ON CONFLICT DO NOTHING으로 같은 보장을 합니다.
 - 진행 중인 기록이 오래 갱신되지 않으면 워커가 죽은 것으로 보고, 그 기록을 failed(StaleAnalysis)로 닫은 뒤 새 기록을 만듭니다.
   닫힌 기록에 늦게 온 진행률은 무시되고 결과 저장은 거부되므로, 느렸던 옛 워커가 결과를 덮어쓰지 못합니다.
@@ -34,7 +34,7 @@ UNKNOWN_ERROR = "Error"
 # 오래되어 교체된 기록의 오류 이름입니다.
 STALE_ERROR = "StaleAnalysis"
 
-_IN_PROGRESS = frozenset({AnalysisStatus.QUEUED, AnalysisStatus.STAGE1, AnalysisStatus.STAGE2})
+IN_PROGRESS = frozenset({AnalysisStatus.QUEUED, AnalysisStatus.STAGE1, AnalysisStatus.STAGE2})
 
 
 def utc_now() -> datetime:
@@ -59,7 +59,7 @@ class AnalysisRecord:
 
     @property
     def in_progress(self) -> bool:
-        return self.state.status in _IN_PROGRESS
+        return self.state.status in IN_PROGRESS
 
 
 class AnalysisRecordNotFoundError(Exception):
@@ -86,6 +86,14 @@ class AnalysisStore(Protocol):
         """결과를 저장하고 done으로 바꿉니다. 진행 중인 기록에만 저장할 수 있습니다."""
         ...
 
+    async def fail_in_progress(self, error: str) -> int:
+        """진행 중인 기록을 모두 failed(error)로 닫고 닫은 수를 돌려줍니다.
+
+        분석을 서버 프로세스 안에서 돌리는 동안, 서버가 다시 시작되면 그 작업은 사라집니다.
+        시작할 때 이 메서드로 정리하면 화면이 오래됨 판단(STALE_AFTER)까지 기다리지 않고 실패를 알 수 있습니다.
+        """
+        ...
+
     async def get(self, analysis_id: str) -> AnalysisResult | None:
         """완료된 결과를 돌려줍니다. 면접 두뇌의 AnalysisSource로 씁니다.
 
@@ -94,6 +102,11 @@ class AnalysisStore(Protocol):
         결과에는 비공개 레포의 심볼 경로, 요약, 질문이 들어 있습니다.
         """
         ...
+
+
+def clean_error(error: str) -> str:
+    """예외 종류 이름 형식이 아니면 일반 이름으로 바꿉니다."""
+    return error if _ERROR_KIND.fullmatch(error) else UNKNOWN_ERROR
 
 
 def sanitized(state: AnalysisState) -> AnalysisState:
@@ -188,6 +201,21 @@ class InMemoryAnalysisStore:
                 status=AnalysisStatus.DONE, progress=1.0, commit_sha=record.key.commit_sha
             )
             self._records[analysis_id] = replace(record, state=done, updated_at=self._clock())
+
+    async def fail_in_progress(self, error: str) -> int:
+        async with self._lock:
+            closed = 0
+            for analysis_id, record in list(self._records.items()):
+                if not record.in_progress:
+                    continue
+                failed = record.state.model_copy(
+                    update={"status": AnalysisStatus.FAILED, "error": error}
+                )
+                self._records[analysis_id] = replace(
+                    record, state=sanitized(failed), updated_at=self._clock()
+                )
+                closed += 1
+            return closed
 
     async def get(self, analysis_id: str) -> AnalysisResult | None:
         stored = self._results.get(analysis_id)

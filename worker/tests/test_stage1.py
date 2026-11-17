@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 
+from gitinsight_api.llm.fake import FakeLLM
 from gitinsight_contracts.api import AnalysisState, AnalysisStatus
 from gitinsight_worker.git import CloneError, Cloner, git_cloner
-from gitinsight_worker.stage1 import analyze_tree, iter_repo_files, run_stage1
+from gitinsight_worker.pipeline import run_analysis
+from gitinsight_worker.stage1 import analyze_tree, iter_repo_files
 
 from worker_test_support import Recorder
 
@@ -77,21 +79,11 @@ def test_symlink_is_not_followed(tmp_path: Path) -> None:
     assert {s.name for s in analyze_tree(repo, SHA).symbols} == {"a"}
 
 
-async def test_run_stage1_reports_progress_and_removes_checkout(tmp_path: Path) -> None:
-    clone = FakeClone()
-    recorder = Recorder()
-
-    result = await run_stage1(clone, SHA, recorder, work_dir=tmp_path)
-
-    assert result.symbol_count == 3
-    assert [(s.status, s.progress) for s in recorder.states] == [
-        (AnalysisStatus.STAGE1, 0.0),
-        (AnalysisStatus.STAGE1, 0.2),
-        (AnalysisStatus.STAGE1, 0.5),
-    ]
-    assert {s.commit_sha for s in recorder.states} == {SHA}
-    assert clone.dest is not None and not clone.dest.exists()
-    assert list(tmp_path.iterdir()) == []
+def run(clone: Cloner, recorder: Recorder, work_dir: Path, sha: str = SHA):
+    # 2단계까지 가지 않는 실패와 취소만 보므로 LLM은 대본 없는 가짜를 씁니다.
+    return run_analysis(
+        clone, sha, recorder, FakeLLM(), analysis_id="a1", repo_full_name="o/r", work_dir=work_dir
+    )
 
 
 async def test_clone_failure_reports_failed_without_message_and_removes_checkout(
@@ -101,12 +93,13 @@ async def test_clone_failure_reports_failed_without_message_and_removes_checkout
     recorder = Recorder()
 
     with pytest.raises(CloneError, match="git 명령이 실패했습니다"):
-        await run_stage1(clone, SHA, recorder, work_dir=tmp_path)
+        await run(clone, recorder, tmp_path)
 
     last = recorder.states[-1]
     assert last.status is AnalysisStatus.FAILED
     # 오류에는 예외 종류만 남기고 메시지(레포 내용이 섞일 수 있음)는 넣지 않습니다.
     assert last.error == "CloneError"
+    assert last.progress == 0.0
     assert clone.dest is not None and not clone.dest.exists()
 
 
@@ -127,7 +120,7 @@ async def test_cancellation_is_not_reported_as_failure_and_cleans_up(tmp_path: P
         write_tree(dest)
 
     recorder = SlowRecorder()
-    task = asyncio.create_task(run_stage1(clone, SHA, recorder, work_dir=tmp_path))
+    task = asyncio.create_task(run(clone, recorder, tmp_path))
     await started.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -164,29 +157,31 @@ def make_origin(path: Path) -> tuple[str, str]:
     return first, git("rev-parse", "HEAD", cwd=path)
 
 
-async def test_git_cloner_checks_out_the_pinned_commit(tmp_path: Path) -> None:
+def test_git_cloner_checks_out_the_pinned_commit(tmp_path: Path) -> None:
     origin = tmp_path / "origin"
     first, _ = make_origin(origin)
-    cloner = git_cloner(str(origin), first, allowed_protocols="file")
+    dest = tmp_path / "dest"
 
-    result = await run_stage1(cloner, first, Recorder(), work_dir=tmp_path)
+    git_cloner(str(origin), first, allowed_protocols="file")(dest)
+    result = analyze_tree(dest, first)
 
     # 최신 커밋이 아니라 고정한 첫 커밋 기준으로 분석합니다.
     assert [s.name for s in result.symbols] == ["first"]
     assert {s.commit_sha for s in result.symbols} == {first}
-    assert [p.name for p in tmp_path.iterdir()] == ["origin"]
 
 
 async def test_git_cloner_failure_cleans_up_and_hides_git_output(tmp_path: Path) -> None:
     cloner: Cloner = git_cloner(str(tmp_path / "missing"), SHA, allowed_protocols="file")
+    work = tmp_path / "work"
+    work.mkdir()
     recorder = Recorder()
 
     with pytest.raises(CloneError) as info:
-        await run_stage1(cloner, SHA, recorder, work_dir=tmp_path)
+        await run(cloner, recorder, work)
 
     assert "missing" not in str(info.value)
     assert recorder.states[-1].status is AnalysisStatus.FAILED
-    assert list(tmp_path.iterdir()) == []
+    assert list(work.iterdir()) == []
 
 
 def test_default_protocol_rejects_local_and_command_transports(tmp_path: Path) -> None:
