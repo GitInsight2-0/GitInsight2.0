@@ -15,7 +15,7 @@
  */
 import type { BrainReply, MetricEvent, MetricName } from "@gitinsight/contracts";
 import { ApiError, createSession, fetchVoiceToken, isAbort, postMetric, postTurn } from "./api";
-import { DELEGATION_TOOL, type VadSettings, sayMessage } from "./config";
+import { DELEGATION_TOOL, SAY_MARKER, type VadSettings, sayMessage } from "./config";
 import { Meter, epochMs } from "./meter";
 import { similarity } from "./similarity";
 import { type AdapterHandle, type Connect, PROVIDER, type TurnKey } from "./types";
@@ -111,6 +111,13 @@ const ASR_WAIT_MS = 1500;
 const END_GRACE_MS = 20_000;
 /** 마지막 발화 뒤 이만큼 조용하면 정리합니다. 문장 사이 쉼(측정기 기준 0.4초)에서 끊기지 않게 길게 둡니다. */
 const END_QUIET_MS = 1500;
+/**
+ * 도구 결과를 보낸 뒤 이만큼 AI 소리가 없으면 같은 발화를 say로 한 번 더 보냅니다 (#86).
+ * Gemini Live가 도구 결과를 받고도 말하지 않는 세션이 있습니다. 평소 첫소리는 1초 안쪽입니다.
+ */
+const SPEAK_FALLBACK_MS = 3000;
+/** 도구 인자가 다시 보낸 발화와 이만큼 비슷하면 사용자 답변이 아니라 그 발화를 넘긴 것으로 봅니다 */
+const ECHO_SIMILARITY = 0.6;
 
 export async function startVoiceSession(
   connect: Connect,
@@ -125,6 +132,17 @@ export async function startVoiceSession(
   let endTimer: ReturnType<typeof setTimeout> | null = null;
   let endQuietTimer: ReturnType<typeof setTimeout> | null = null;
   let asrWaiter: (() => void) | null = null;
+  /** 도구 결과를 말하지 않을 때 다시 보내는 타이머 (#86) */
+  let speakFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 다시 보내기로 say한 발화. 음성 AI가 이걸 답변처럼 도구로 넘기면 걸러 냅니다 */
+  let resentUtterance: string | null = null;
+  /** 걸어 둔 다시 보내기를 기다리지 않고 바로 실행합니다. 걸어 둔 것이 없으면 null */
+  let speakFallbackNow: (() => void) | null = null;
+  const clearSpeakFallback = () => {
+    if (speakFallbackTimer) clearTimeout(speakFallbackTimer);
+    speakFallbackTimer = null;
+    speakFallbackNow = null;
+  };
 
   function shutdown(reason: string, kind: EndKind) {
     if (closed) return;
@@ -132,6 +150,7 @@ export async function startVoiceSession(
     life.abort(new DOMException(reason, "AbortError"));
     if (endTimer) clearTimeout(endTimer);
     if (endQuietTimer) clearTimeout(endQuietTimer);
+    clearSpeakFallback();
     asrWaiter?.();
     meter?.stop();
     handle?.stop();
@@ -195,6 +214,8 @@ export async function startVoiceSession(
 
     const m = new Meter({
       userStart: (at) => {
+        // 사용자가 먼저 말을 시작했으면 질문을 다시 들이밀지 않습니다.
+        clearSpeakFallback();
         ui.speaking?.("user", true);
         metric("vad_start", { at_ms: at });
       },
@@ -204,6 +225,7 @@ export async function startVoiceSession(
         fillerArmed = true;
       },
       aiStart: (at) => {
+        clearSpeakFallback();
         ui.speaking?.("ai", true);
         if (endQuietTimer) {
           clearTimeout(endQuietTimer);
@@ -305,11 +327,36 @@ export async function startVoiceSession(
       return text;
     }
 
+    /**
+     * 도구 결과를 보낸 뒤 AI 소리가 안 나면, 같은 발화를 첫 질문과 같은 방식(say)으로 한 번 더 보냅니다 (#86).
+     * 그 사이 AI가 말을 시작하거나 사용자가 말을 시작하면 측정기 콜백이 타이머를 지웁니다.
+     */
+    function armSpeakFallback(h: AdapterHandle, utterance: string) {
+      clearSpeakFallback();
+      const fire = () => {
+        clearSpeakFallback();
+        if (closed || m.aiSpeaking || m.userSpeaking) return;
+        ui.log("system", "음성 AI가 도구 결과를 말하지 않아 같은 문장을 다시 보냅니다");
+        metric("error", { error_code: "tool_reply_silent" });
+        resentUtterance = utterance;
+        h.say(sayMessage(utterance));
+      };
+      speakFallbackNow = fire;
+      speakFallbackTimer = setTimeout(fire, SPEAK_FALLBACK_MS);
+    }
+
+    /** 다시 보낸 발화(say)를 음성 AI가 사용자 답변처럼 도구로 넘긴 것인지 */
+    function isResentEcho(fromModel: string): boolean {
+      if (resentUtterance === null || !fromModel) return false;
+      return fromModel.includes(SAY_MARKER) || similarity(fromModel, resentUtterance) >= ECHO_SIMILARITY;
+    }
+
     async function delegate(callId: string, name: string, args: Record<string, unknown>, key: TurnKey | null) {
       userSpokeSinceTool = false;
       // 이 턴의 질문 측정 기준: 도구 호출을 받은 시점의 마지막 사용자 말 끝
       const baseEnd = m.lastUserEnd;
-      const respond = (utterance: string, isDone: boolean, end?: { reason: string; kind: EndKind }) => {
+      /** fallback이 false면 이 발화에는 다시 보내기를 걸지 않습니다 (같은 일이 되풀이되지 않게) */
+      const respond = (utterance: string, isDone: boolean, end?: { reason: string; kind: EndKind }, fallback = true) => {
         if (closed) return;
         replyPending = true;
         replyBaseEnd = baseEnd;
@@ -319,7 +366,9 @@ export async function startVoiceSession(
           endTimer = setTimeout(() => shutdown(endAs.reason, endAs.kind), END_GRACE_MS);
         }
         void handleReady.then((h) => {
-          if (!closed) h.respondTool(callId, name, { utterance, done: isDone });
+          if (closed) return;
+          h.respondTool(callId, name, { utterance, done: isDone });
+          if (fallback) armSpeakFallback(h, utterance);
         });
       };
 
@@ -340,6 +389,17 @@ export async function startVoiceSession(
       const asr = await takeAsr(key);
       if (closed) return;
       const fromModel = typeof args.transcript === "string" ? args.transcript.trim() : "";
+      // 사용자는 말하지 않았는데, 다시 보낸 질문을 음성 AI가 답변처럼 넘겼습니다 (#86).
+      // 서버로 보내면 답하지 않은 질문이 넘어가므로, 보내지 않고 같은 질문을 말하게 합니다.
+      if (!asr && isResentEcho(fromModel)) {
+        const again = resentUtterance ?? "";
+        resentUtterance = null;
+        ui.log("system", "음성 AI가 다시 보낸 질문을 답변으로 넘겨서 서버로 보내지 않습니다");
+        metric("error", { error_code: "tool_reply_echo" });
+        respond(again, false, undefined, false);
+        return;
+      }
+      resentUtterance = null;
       const transcript = asr || fromModel;
       if (asr && fromModel) ui.transcriptSimilarity(similarity(asr, fromModel));
       if (!asr && fromModel) ui.log("system", "받아쓰기가 없어 음성 AI의 도구 인자를 보냅니다");
@@ -412,6 +472,8 @@ export async function startVoiceSession(
           if (textSoFar.trim()) showAnswer(textSoFar);
         },
         onAiTranscript,
+        // 음성 AI가 도구 결과를 소리 없이 넘겼습니다. 3초를 기다리지 않고 바로 다시 보냅니다.
+        onToolReplyEmpty: () => speakFallbackNow?.(),
         onError: (code, message) => {
           ui.log("error", message);
           metric("error", { error_code: code });
@@ -433,6 +495,8 @@ export async function startVoiceSession(
     );
     ui.audio?.({ user: () => h.userAnalyser(), ai: () => h.aiAnalyser() });
     ui.status("연결됨");
+    // 첫 발화도 say로 보내므로, 음성 AI가 이걸 답변처럼 넘기면 같은 방법으로 걸러 냅니다.
+    resentUtterance = created.first.utterance;
     h.say(sayMessage(created.first.utterance));
   } catch (e) {
     // 시작 도중 실패하거나 멈추면, 열린 것을 모두 닫고 호출한 쪽에 알립니다.
