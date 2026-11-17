@@ -25,7 +25,7 @@ from gitinsight_api.db import create_engine
 from gitinsight_api.metrics_store import JsonlMetricsStore, MetricsStore, PostgresMetricsStore
 from gitinsight_api.report.service import ReportService
 from gitinsight_api.routes import analyses as analyses_routes
-from gitinsight_api.routes import auth, metrics, reports, sessions
+from gitinsight_api.routes import auth, github, metrics, reports, sessions
 from gitinsight_api.settings import Settings
 from gitinsight_contracts.fixtures import load_analysis
 
@@ -173,6 +173,7 @@ def create_app(
 
     auth.install_access_log_redaction()
     app.include_router(auth.router)
+    app.include_router(github.router)
     app.include_router(sessions.router)
     app.include_router(analyses_routes.router)
     app.include_router(reports.router)

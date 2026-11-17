@@ -95,6 +95,7 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 로그인은 GitHub App 사용자 인증(state + PKCE)입니다. `GET /api/auth/github/login` → GitHub → `GET /api/auth/github/callback` → 웹 첫 화면 순서이고, 실패하면 `/?login_error=denied|invalid_state|github`로 돌아갑니다. `POST /api/auth/logout`, `GET /api/me`도 있습니다.
 로그인 정보는 DB 없이 암호화한 쿠키(`gi_session`, 최대 8시간)에 담습니다 (`api/src/gitinsight_api/login_cookie.py`). 필요한 환경 변수는 `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`, `WEB_ORIGIN`이며 `.env.example`에 설명이 있습니다. GitHub 사용자 토큰은 로그와 DB에 남기지 않습니다.
 테스트는 `app.dependency_overrides`로 `get_current_user`를 바꿔 로그인 사용자를 넣습니다. 로그인 흐름 자체는 `api/tests/test_auth.py`가 가짜 GitHub(`httpx.MockTransport`)로 확인합니다.
+로그인 쿠키의 사용자 토큰을 쓰는 라우트는 `GET /api/repos`(App을 설치한 레포 중 사용자가 읽을 수 있는 것, 계약 `Repo` 배열)와 `GET /api/code?analysis_id=&path=`(본인 분석의 주제 심볼 파일만, `text/plain`)입니다 (`routes/github.py`, GitHub 호출은 `github_api.py`). 실험 모드에서는 둘 다 404입니다.
 
 `DATABASE_URL`이 있으면 서버는 Postgres를 쓰고(`/api/metrics` → `metric_events` 테이블), 없으면 DB 없이 돌며 측정 이벤트를 `METRICS_PATH`(JSONL)에 쌓습니다.
 분석 기록과 결과는 `analyses` 테이블에 둡니다(`gitinsight_api.analyses.postgres.PostgresAnalysisStore`, 규칙은 `analyses/store.py`의 `AnalysisStore`).
