@@ -11,8 +11,11 @@ from gitinsight_api.brain.quotes import QuoteMatcher, QuoteMatchMode
 
 LLMProvider = Literal["openai", "gemini"]
 
-# 제공사별 기본 모델입니다. 판단은 빠른 모델, 분석·리포트는 품질이 높은 모델을 씁니다.
-# Gemini 판단 모델은 지연 측정(scripts/llm_latency.py) 전이라 분석·리포트와 같은 Flash를 씁니다.
+# 제공사별 기본 모델입니다. 기본 제공사는 Gemini입니다 (2026-11-17 결정, #63).
+# Gemini 판단 모델은 지연 측정(docs/evals/latency.md, 2026-11-17)에서 가장 빨랐던 3.6 Flash를 씁니다.
+# 분석·리포트는 2단계 평가(docs/evals/stage2-*.md)를 해 온 3.8 Flash를 그대로 씁니다.
+# openai는 키가 생기면 LLM_PROVIDER=openai만으로 쓸 수 있게 남겨 둡니다. 지금은 키가 없고 측정한 적도 없습니다.
+DEFAULT_PROVIDER = "gemini"
 PROVIDER_MODELS: dict[str, dict[str, str]] = {
     "openai": {
         "llm_judge_model": "openai/gpt-6.1-terra",
@@ -20,7 +23,7 @@ PROVIDER_MODELS: dict[str, dict[str, str]] = {
         "llm_report_model": "openai/gpt-6.1-sol",
     },
     "gemini": {
-        "llm_judge_model": "gemini/gemini-3.8-flash",
+        "llm_judge_model": "gemini/gemini-3.6-flash",
         "llm_analysis_model": "gemini/gemini-3.8-flash",
         "llm_report_model": "gemini/gemini-3.8-flash",
     },
@@ -57,23 +60,26 @@ class Settings(BaseSettings):
     # 면접 재료로 쓸 샘플 분석 파일 이름입니다 (fixtures/analysis/<이름>.json).
     fixture_analysis: str = "gitinsight_agent"
 
-    # 판단·분석·리포트 LLM 제공사입니다. 장애 시 이 값 하나로 기본 모델을 모두 바꿉니다.
-    # 제공사 API 키는 LiteLLM 규칙대로 OPENAI_API_KEY, GEMINI_API_KEY 환경 변수로 받습니다.
-    llm_provider: LLMProvider = "openai"
+    # 판단·분석·리포트 LLM 제공사입니다. 이 값 하나로 기본 모델을 모두 바꿉니다.
+    # 제공사 API 키는 LiteLLM 규칙대로 GEMINI_API_KEY(openai면 OPENAI_API_KEY) 환경 변수로 받습니다.
+    llm_provider: LLMProvider = DEFAULT_PROVIDER
     # LiteLLM 모델 이름입니다. 비워 두면 llm_provider의 기본값(PROVIDER_MODELS)을 씁니다.
-    llm_judge_model: str = PROVIDER_MODELS["openai"]["llm_judge_model"]
-    llm_analysis_model: str = PROVIDER_MODELS["openai"]["llm_analysis_model"]
-    llm_report_model: str = PROVIDER_MODELS["openai"]["llm_report_model"]
+    llm_judge_model: str = PROVIDER_MODELS[DEFAULT_PROVIDER]["llm_judge_model"]
+    llm_analysis_model: str = PROVIDER_MODELS[DEFAULT_PROVIDER]["llm_analysis_model"]
+    llm_report_model: str = PROVIDER_MODELS[DEFAULT_PROVIDER]["llm_report_model"]
     # true면 판단·계획·리포트에서 LLM을 부르지 않고 미리 만든 질문과 턴별 판단 표로 진행합니다.
     brain_force_prepared: bool = False
-    # 판단 모델의 reasoning_effort입니다. 비우면 모델 기본값을 씁니다. 지연 측정 결과로 정합니다.
-    llm_judge_reasoning_effort: str | None = None
+    # 판단 모델의 reasoning_effort입니다. 비우면 모델 기본값을 씁니다.
+    # 기본값 low 근거: Gemini 3.6 Flash 판단 호출의 중앙값이 4.6초에서 2.3초로 줄었습니다 (docs/evals/latency.md).
+    llm_judge_reasoning_effort: str | None = "low"
     # 분석(2단계 주제 생성) 모델의 reasoning_effort입니다. 비우면 모델 기본값을 씁니다.
     # 기본값 low 근거: Gemini 3.8 Flash에서 호출당 44~57초가 7~9초로 줄고 품질 차이는 없었습니다
     # (docs/evals/stage2-2026-11-12.md, PR #36).
     llm_analysis_reasoning_effort: str | None = "low"
-    # 답변 판단 LLM 호출 제한 시간(초)입니다. 넘으면 미리 만든 질문으로 진행합니다. PoC 결과로 조정합니다.
-    judge_timeout_s: float = 2.5
+    # 답변 판단 LLM 호출 제한 시간(초)입니다. 넘으면 미리 만든 질문으로 진행합니다.
+    # 4초 근거: Gemini 3.6 Flash(low)가 10번 중 4번 2.5초를 넘었고 최대 3.8초였습니다 (docs/evals/latency.md).
+    # 웹은 턴 첫 시도를 6초까지 기다립니다 (web/lib/voice/api.ts).
+    judge_timeout_s: float = 4.0
     # 면접 계획(JD 반영) LLM 호출 제한 시간(초)입니다.
     plan_timeout_s: float = 8.0
     # 리포트 생성 LLM 호출 제한 시간(초)입니다. 넘으면 턴별 판단 표를 돌려줍니다.
@@ -95,7 +101,7 @@ class Settings(BaseSettings):
         if not isinstance(data, dict):
             return data
         values: dict[str, Any] = dict(data)
-        provider = str(values.get("llm_provider") or "openai").strip().lower()
+        provider = str(values.get("llm_provider") or DEFAULT_PROVIDER).strip().lower()
         profile = PROVIDER_MODELS.get(provider)
         if profile is None:
             return values

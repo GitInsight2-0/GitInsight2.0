@@ -1,8 +1,8 @@
 """실제 LLM 연동 테스트 (수동 실행, API 키 필요).
 
 사용:
-  $env:LLM_PROVIDER="gemini"; uv run pytest -m live_llm -v
-  $env:LLM_PROVIDER="openai"; uv run pytest -m live_llm -v
+  uv run pytest -m live_llm -v                                 # 기본 제공사(Gemini)
+  $env:LLM_PROVIDER="openai"; uv run pytest -m live_llm -v     # OPENAI_API_KEY가 있을 때만
 
 무료 등급 한도를 아끼려고 판단·계획·리포트를 각 1회만 호출합니다.
 품질이나 지연이 아니라 "실제 제공사가 우리 구조화 출력 스키마를 받아 주는가"만 확인합니다.

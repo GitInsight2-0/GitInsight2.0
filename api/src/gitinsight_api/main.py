@@ -1,18 +1,19 @@
 """FastAPI 앱 팩토리."""
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import InterfaceError, OperationalError
+from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from gitinsight_api.analyses.postgres import PostgresAnalysisStore
+from gitinsight_api.analyses.service import AnalysisService, ManagedLauncher
 from gitinsight_api.analyses.source import AnalysisUnavailableError, StoredAnalysisSource
 from gitinsight_api.analyses.store import AnalysisStore
 from gitinsight_api.brain.factory import build_server_services
@@ -23,11 +24,15 @@ from gitinsight_api.brain.scripted import ScriptedBrain
 from gitinsight_api.db import create_engine
 from gitinsight_api.metrics_store import JsonlMetricsStore, MetricsStore, PostgresMetricsStore
 from gitinsight_api.report.service import ReportService
-from gitinsight_api.routes import auth, metrics, reports, sessions
+from gitinsight_api.routes import analyses as analyses_routes
+from gitinsight_api.routes import auth, github, metrics, reports, sessions
 from gitinsight_api.settings import Settings
 from gitinsight_contracts.fixtures import load_analysis
 
 logger = logging.getLogger(__name__)
+
+# 분석 기록 저장소를 받아 분석 실행기를 만듭니다. 실행기는 워커 패키지에 있어 gitinsight_worker.server가 넘깁니다.
+LauncherFactory = Callable[[AnalysisStore], ManagedLauncher]
 
 
 def default_services(
@@ -54,6 +59,7 @@ def create_app(
     metrics_store: MetricsStore | None = None,
     analysis_store: AnalysisStore | None = None,
     github_http: httpx.AsyncClient | None = None,
+    launcher_factory: LauncherFactory | None = None,
 ) -> FastAPI:
     """brain을 넣으면 report_service도 넣은 그대로 씁니다. 테스트가 가짜 LLM 서비스를 넣을 때 씁니다.
 
@@ -63,6 +69,8 @@ def create_app(
     analysis_store는 테스트가 메모리 저장소를 넣을 때 씁니다.
     github_http는 GitHub 로그인 호출용 HTTP 클라이언트입니다. 테스트는 가짜 응답 클라이언트를 넣고,
     넣지 않으면 새로 만들어 서버를 끌 때 닫습니다.
+    launcher_factory를 주면 분석 요청 API(/api/analyses)를 엽니다. 분석 기록 저장소(DB)가 있고 실험 모드가 아닐 때만 씁니다.
+    실행기는 서버를 시작할 때 지난 프로세스의 진행 중 기록을 닫고(recover), 끌 때 돌던 분석을 멈춥니다(aclose).
     """
     settings = settings or Settings()
     engine: AsyncEngine | None = None
@@ -90,6 +98,12 @@ def create_app(
             else JsonlMetricsStore(settings.metrics_path)
         )
 
+    launcher: ManagedLauncher | None = None
+    analysis_service: AnalysisService | None = None
+    if launcher_factory is not None and analysis_store is not None and not settings.lab_enabled:
+        launcher = launcher_factory(analysis_store)
+        analysis_service = AnalysisService(analysis_store, launcher)
+
     owns_github_http = github_http is None
     if github_http is None:
         # 리다이렉트를 따라가지 않아, 토큰이 실린 요청이 다른 곳으로 넘어가지 않게 합니다.
@@ -97,7 +111,15 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        if launcher is not None:
+            try:
+                await launcher.recover()
+            except SQLAlchemyError as error:
+                # DB가 아직 준비되지 않았어도 서버는 뜨게 둡니다. 남은 기록은 오래됨 판단(10분)이 닫습니다.
+                logger.warning("analysis_recover_failed error=%s", type(error).__name__)
         yield
+        if launcher is not None:
+            await launcher.aclose()
         if engine is not None:
             await engine.dispose()
         if owns_github_http:
@@ -107,6 +129,7 @@ def create_app(
     app.state.settings = settings
     app.state.db_engine = engine
     app.state.analyses = analyses
+    app.state.analysis_service = analysis_service
     app.state.brain = brain
     app.state.report_service = report_service
     app.state.metrics_store = metrics_store
@@ -150,12 +173,17 @@ def create_app(
 
     auth.install_access_log_redaction()
     app.include_router(auth.router)
+    app.include_router(github.router)
     app.include_router(sessions.router)
+    app.include_router(analyses_routes.router)
     app.include_router(reports.router)
     app.include_router(metrics.router)
     return app
 
 
 def app_factory() -> FastAPI:
-    """uvicorn --factory 진입점입니다."""
+    """분석 실행기 없는 uvicorn --factory 진입점입니다. 분석 요청 API는 503입니다.
+
+    배포와 데모는 분석까지 여는 gitinsight_worker.server:app_factory를 씁니다.
+    """
     return create_app()

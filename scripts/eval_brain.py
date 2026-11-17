@@ -2,7 +2,7 @@
 
 사용:
   uv run python scripts/eval_brain.py
-  uv run python scripts/eval_brain.py --timeout 10 --model openai/gpt-6.1-terra
+  uv run python scripts/eval_brain.py --timeout 10 --model gemini/gemini-3.6-flash
 
 골든 대화의 기대 판단(intent, covered 포인트)과 기대 행동을 실제 결과와 비교해
 docs/evals/brain-<날짜>.md에 씁니다. 주입 문구가 든 턴은 어떤 포인트도 covered가 되면 안 됩니다.
