@@ -81,7 +81,7 @@ uv run python scripts/llm_latency.py --n 20                        # 판단 LLM 
 uv run python scripts/eval_brain.py                                # 골든 대화 실제 LLM 평가 (수동, 비용 발생)
 uv run python scripts/eval_stage2.py                               # 샘플 레포 2단계 분석 실제 LLM 평가 (수동, 비용 발생)
                                    # --requester-email <커밋 이메일> --save-json <경로>: 그 사람 기준 기여 라벨로 분석하고 스냅샷용 JSON 저장
-uv run python scripts/demo_check.py [--block-llm | --real-llm] [--from-db]   # 데모 완주 점검 (docs/runbook-demo.md). --from-db는 DB의 데모 스냅샷 사용
+uv run python scripts/demo_check.py [--block-llm | --real-llm] [--from-db --user-id <id>]   # 데모 완주 점검 (docs/runbook-demo.md). --from-db는 DB의 데모 스냅샷을 그 주인으로 사용
 uv run python scripts/seed_demo_analysis.py --user-id <id> [--fixture gitinsight_agent_live | --file <json>]   # 분석 결과를 DATABASE_URL의 DB에 완료 기록으로 넣기 (데모 스냅샷)
 pnpm --filter @gitinsight/web dev                                  # 웹 (기본 3000번, /api/*는 API_ORIGIN으로 넘김)
 pnpm --filter @gitinsight/web typecheck                            # 웹 타입 검사
@@ -91,11 +91,16 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 웹의 음성 측정 화면(`/lab/voice`)도 `web/.env.local`의 `LAB_ENABLED=true`일 때만 열립니다. 방법과 기록은 `docs/evals/voice-g1.md`에 있습니다.
 
 `LAB_ENABLED=false`(기본)이면 서버는 진짜 면접 두뇌와 리포트 API(`POST /api/sessions/{id}/end`, `GET /api/reports/{id}`)를 씁니다.
-로그인(#18)이 붙기 전까지 이 모드의 요청은 401을 돌려줍니다.
-테스트는 `app.dependency_overrides`로 `get_current_user`를 바꿔 로그인 사용자를 넣습니다.
+이 모드의 요청은 GitHub 로그인(#18) 쿠키가 있어야 하고, 없으면 401입니다.
+로그인은 GitHub App 사용자 인증(state + PKCE)입니다. `GET /api/auth/github/login` → GitHub → `GET /api/auth/github/callback` → 웹 첫 화면 순서이고, 실패하면 `/?login_error=denied|invalid_state|github`로 돌아갑니다. `POST /api/auth/logout`, `GET /api/me`도 있습니다.
+로그인 정보는 DB 없이 암호화한 쿠키(`gi_session`, 최대 8시간)에 담습니다 (`api/src/gitinsight_api/login_cookie.py`). 필요한 환경 변수는 `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`, `WEB_ORIGIN`이며 `.env.example`에 설명이 있습니다. GitHub 사용자 토큰은 로그와 DB에 남기지 않습니다.
+테스트는 `app.dependency_overrides`로 `get_current_user`를 바꿔 로그인 사용자를 넣습니다. 로그인 흐름 자체는 `api/tests/test_auth.py`가 가짜 GitHub(`httpx.MockTransport`)로 확인합니다.
 
 `DATABASE_URL`이 있으면 서버는 Postgres를 쓰고(`/api/metrics` → `metric_events` 테이블), 없으면 DB 없이 돌며 측정 이벤트를 `METRICS_PATH`(JSONL)에 쌓습니다.
 분석 기록과 결과는 `analyses` 테이블에 둡니다(`gitinsight_api.analyses.postgres.PostgresAnalysisStore`, 규칙은 `analyses/store.py`의 `AnalysisStore`).
+`DATABASE_URL`이 있고 `LAB_ENABLED=false`이면 면접 두뇌와 리포트도 샘플 파일 대신 이 테이블의 분석 결과를 읽습니다(`analyses/source.py`의 `StoredAnalysisSource`).
+이때 `POST /api/sessions`는 분석을 요청한 본인만 쓸 수 있고, 다른 사람의 분석과 없는 분석은 같은 404입니다. 샘플 분석도 `scripts/seed_demo_analysis.py`로 넣은 계정만 씁니다.
+분석 결과를 읽다가 DB 오류가 나면 503을 돌려줍니다.
 DB 연결과 테이블 정의는 `api/src/gitinsight_api/db.py`, `tables.py`, 마이그레이션은 `api/migrations/versions/`에 있습니다. 새 테이블은 두 곳을 같이 바꾸고 `alembic check`로 맞는지 확인합니다.
 기본 `pytest`는 DB 없이 돕니다(`api/tests/conftest.py`가 `DATABASE_URL`을 비웁니다). 실제 Postgres 테스트는 `postgres` 표시로 따로 돌립니다. 공용 픽스처 `test_database_url`, `pg_engine`(마이그레이션 적용 후 모든 테이블을 비움)도 `conftest.py`에 있습니다.
 서버는 `--loop gitinsight_api.event_loop:server_loop_factory`로 띄웁니다. psycopg 3 비동기 연결이 Windows 기본 루프(Proactor)를 지원하지 않아 Windows에서는 Selector 루프를 씁니다(다른 OS는 uvicorn 기본값). 테스트는 `conftest.py`가 같은 루프를 씁니다. 이 옵션 없이 Windows에서 `DATABASE_URL`을 넣으면 `/api/metrics`가 계속 503입니다.
