@@ -47,6 +47,7 @@ class Case:
     has_next_topic: bool = True
     prepared_left: int = 2
     probe_point: str | None = None
+    coverage_unknown: bool = False
     extra: dict[str, object] = field(default_factory=dict)
 
 
@@ -60,6 +61,14 @@ CASES = [
     ),
     Case("시간 초과는 판단이 없어도 마무리", None, Action.WRAP_UP, "time_over", remaining_sec=0),
     Case("판단 없음 → 미리 만든 꼬리질문", None, Action.FOLLOW_UP, "no_judgment"),
+    Case(
+        "판단 없이 지나간 답변이 있으면 빠진 포인트를 다시 묻지 않고 꼬리질문",
+        judgment(covered=("p1",)),
+        Action.FOLLOW_UP,
+        "follow_up_llm",
+        extra={"use_llm_followup": True},
+        coverage_unknown=True,
+    ),
     Case(
         "판단 없음, 꼬리질문 소진 → 다음 주제",
         None,
@@ -227,6 +236,7 @@ def build_input(case: Case) -> RuleInput:
         has_next_topic=case.has_next_topic,
         judgment=case.judgment,
         prepared_followups_left=case.prepared_left,
+        coverage_unknown=case.coverage_unknown,
     )
 
 
