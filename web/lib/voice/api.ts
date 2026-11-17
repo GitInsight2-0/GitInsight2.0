@@ -129,7 +129,8 @@ const END_RETRY_DELAY_MS = 2000;
 /**
  * 세션을 끝내고 리포트 id를 받습니다.
  * 서버는 여러 번 불러도 같은 report_id를 돌려주므로, 5xx나 연결 실패면 같은 요청을 다시 보냅니다.
- * 503은 리포트를 만들지 않는 서버라 다시 보내지 않습니다. 바깥 신호로 멈추면 다시 보내지 않습니다.
+ * 리포트를 만들지 않는 서버(isReportUnavailable)면 다시 보내지 않습니다. 바깥 신호로 멈추면 다시 보내지 않습니다.
+ * DB 연결 실패나 분석 결과 읽기 실패로 난 503은 잠깐의 장애일 수 있어 다른 5xx처럼 다시 보냅니다.
  */
 export async function endSession(sessionId: string, outer?: AbortSignal): Promise<SessionEnded> {
   for (let attempt = 1; ; attempt++) {
@@ -138,13 +139,28 @@ export async function endSession(sessionId: string, outer?: AbortSignal): Promis
       return await postJson<SessionEnded>(`/api/sessions/${sessionId}/end`, {}, s.signal);
     } catch (e) {
       if (outer?.aborted) throw e;
-      const retryable = !(e instanceof ApiError) || (e.status >= 500 && e.status !== 503);
+      const retryable = !(e instanceof ApiError) || (e.status >= 500 && !isReportUnavailable(e));
       if (attempt >= END_ATTEMPTS || !retryable) throw e;
     } finally {
       s.done();
     }
     await wait(END_RETRY_DELAY_MS, outer);
   }
+}
+
+/**
+ * 서버에 리포트 서비스가 없을 때의 503 문구입니다 (api/src/gitinsight_api/routes/deps.py의 get_report_service).
+ * 실험용 서버(LAB_ENABLED)가 여기에 해당합니다. 서버 문구를 바꾸면 여기도 같이 바꿉니다.
+ */
+const REPORT_UNAVAILABLE_DETAIL = "리포트 서비스가 설정되지 않았습니다";
+
+/**
+ * 리포트를 만들지 않는 서버라서 난 오류인지.
+ * /end의 503은 세 가지입니다: 리포트 서비스 없음, DB 연결 실패·풀 대기 시간 초과, 분석 결과 읽기 실패.
+ * 뒤의 둘은 다시 보내면 될 수 있으므로, 상태 코드가 아니라 문구로 가릅니다.
+ */
+export function isReportUnavailable(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 503 && e.detail === REPORT_UNAVAILABLE_DETAIL;
 }
 
 /** ms만큼 기다립니다. 바깥 신호로 멈추면 그 이유로 바로 실패합니다 */

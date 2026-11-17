@@ -3,7 +3,15 @@
 import type { Action, BrainReply } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import CodeViewer from "@/components/CodeViewer";
-import { ApiError, TRANSCRIPT_MAX, createSession, endSession, isAbort, postTurn } from "@/lib/voice/api";
+import {
+  ApiError,
+  TRANSCRIPT_MAX,
+  createSession,
+  endSession,
+  isAbort,
+  isReportUnavailable,
+  postTurn,
+} from "@/lib/voice/api";
 import { DEFAULT_VAD } from "@/lib/voice/config";
 import { explainError, isLoginError } from "@/lib/voice/errors";
 import { connectGemini } from "@/lib/voice/gemini";
@@ -169,7 +177,8 @@ export default function InterviewScreen({
       setReport({ kind: "ready", reportId: ended.report_id });
     } catch (e) {
       if (ac.signal.aborted) return;
-      if (e instanceof ApiError && e.status === 503) {
+      // 리포트를 만들지 않는 서버일 때만 안내하고 끝냅니다. DB 장애 같은 다른 503은 아래에서 "다시 시도"를 보여 줍니다.
+      if (isReportUnavailable(e)) {
         setReport({ kind: "unavailable" });
         return;
       }
