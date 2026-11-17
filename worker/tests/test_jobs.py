@@ -4,8 +4,14 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from pydantic import SecretStr
 
-from gitinsight_api.analyses.service import AnalysisService
+from gitinsight_api.analyses.service import (
+    NO_CONTEXT,
+    AnalysisLaunchError,
+    AnalysisService,
+    LaunchContext,
+)
 from gitinsight_api.analyses.store import AnalysisKey, AnalysisRecord, InMemoryAnalysisStore
 from gitinsight_api.brain.repository import InMemorySessionRepository
 from gitinsight_api.brain.service import InterviewBrain
@@ -14,13 +20,15 @@ from gitinsight_api.llm.fake import FakeLLM, FakeStep
 from gitinsight_contracts.analysis import AnalysisResult
 from gitinsight_contracts.api import AnalysisStatus
 from gitinsight_contracts.interview import InterviewMode, SessionCreate
+from gitinsight_worker.contribution import Requester
 from gitinsight_worker.git import Cloner, git_cloner
 from gitinsight_worker.jobs import (
     INTERRUPTED_ERROR,
     CloneFor,
     InProcessLauncher,
     execute,
-    public_cloner,
+    github_cloner,
+    requester_from_login,
 )
 
 from worker_test_support import make_origin, material
@@ -35,7 +43,7 @@ def origin(tmp_path: Path) -> tuple[Path, str]:
 
 
 def local_cloner(origin: Path) -> CloneFor:
-    def clone_for(record: AnalysisRecord) -> Cloner:
+    def clone_for(record: AnalysisRecord, _context: LaunchContext) -> Cloner:
         return git_cloner(str(origin), record.key.commit_sha, allowed_protocols="file")
 
     return clone_for
@@ -204,21 +212,60 @@ async def test_concurrent_analyses_are_limited(origin: tuple[Path, str], tmp_pat
 
 
 @pytest.mark.parametrize("repo", ["owner/repo/../x", "owner/repo.git?x=1", "owner", "a/b c"])
-async def test_public_cloner_rejects_bad_repo_names(repo: str) -> None:
+async def test_github_cloner_rejects_bad_repo_names(repo: str) -> None:
     store = InMemoryAnalysisStore()
     record, _ = await store.get_or_create(AnalysisKey(repo, "a" * 40, "u1"))
 
     with pytest.raises(ValueError, match="repo_full_name"):
-        public_cloner(record)
+        github_cloner(record, NO_CONTEXT)
 
 
 async def test_bad_repo_name_fails_the_request_without_starting(tmp_path: Path) -> None:
     store = InMemoryAnalysisStore()
     launcher = InProcessLauncher(store, ok_llm(), work_dir=tmp_path)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(AnalysisLaunchError, match="ValueError"):
         await AnalysisService(store, launcher).request("owner/../evil", "a" * 40, "u1")
 
     [record] = list(store._records.values())
     assert record.state.status is AnalysisStatus.FAILED
     assert record.state.error == "ValueError"
+
+
+async def test_launch_uses_requester_context_for_clone_and_labels(tmp_path: Path) -> None:
+    store = InMemoryAnalysisStore()
+    seen: list[tuple[str, LaunchContext]] = []
+
+    def clone_for(record: AnalysisRecord, context: LaunchContext) -> Cloner:
+        seen.append(("clone", context))
+        return lambda _dest: None
+
+    def requester_for(record: AnalysisRecord, context: LaunchContext) -> Requester | None:
+        seen.append(("requester", context))
+        return None
+
+    launcher = InProcessLauncher(
+        store, ok_llm(), clone_for=clone_for, requester_for=requester_for, work_dir=tmp_path
+    )
+    context = LaunchContext(github_token=SecretStr("ghu_secret"), login="octo")
+
+    await AnalysisService(store, launcher).request(REPO, "a" * 40, "4242", context)
+    await launcher.join()
+
+    assert seen == [("clone", context), ("requester", context)]
+
+
+async def test_requester_from_login_uses_noreply_addresses() -> None:
+    store = InMemoryAnalysisStore()
+    record, _ = await store.get_or_create(AnalysisKey(REPO, "a" * 40, "4242"))
+
+    requester = requester_from_login(record, LaunchContext(login="octo"))
+
+    assert requester is not None
+    assert requester.emails == {
+        "octo@users.noreply.github.com",
+        "4242+octo@users.noreply.github.com",
+    }
+    # 계정 이름을 모르면(요청자 정보 없이 시작한 분석) 본인 기여를 맞추지 않습니다.
+    lab, _ = await store.get_or_create(AnalysisKey(REPO, "a" * 40, "lab"))
+    assert requester_from_login(lab, NO_CONTEXT) is None

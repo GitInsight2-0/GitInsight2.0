@@ -1,8 +1,14 @@
 import asyncio
 
 import pytest
+from pydantic import SecretStr
 
-from gitinsight_api.analyses.service import AnalysisService
+from gitinsight_api.analyses.service import (
+    NO_CONTEXT,
+    AnalysisLaunchError,
+    AnalysisService,
+    LaunchContext,
+)
 from gitinsight_api.analyses.store import AnalysisRecord, InMemoryAnalysisStore
 from gitinsight_contracts.api import AnalysisStatus
 from gitinsight_contracts.fixtures import load_analysis
@@ -14,10 +20,12 @@ REPO, SHA = SAMPLE.repo_full_name, SAMPLE.commit_sha
 class RecordingLauncher:
     def __init__(self, error: Exception | None = None) -> None:
         self.launched: list[AnalysisRecord] = []
+        self.contexts: list[LaunchContext] = []
         self.error = error
 
-    async def launch(self, record: AnalysisRecord) -> None:
+    async def launch(self, record: AnalysisRecord, context: LaunchContext = NO_CONTEXT) -> None:
         self.launched.append(record)
+        self.contexts.append(context)
         # 실제 구현처럼 다른 요청이 끼어들 틈을 줍니다.
         await asyncio.sleep(0)
         if self.error is not None:
@@ -40,6 +48,18 @@ async def test_first_request_launches_once(store: InMemoryAnalysisStore) -> None
     # 진행 중이면 새로 시작하지 않고 같은 분석을 돌려줍니다.
     assert (again.analysis_id, again.cached) == (created.analysis_id, False)
     assert len(launcher.launched) == 1
+
+
+async def test_context_is_passed_only_when_launching(store: InMemoryAnalysisStore) -> None:
+    launcher = RecordingLauncher()
+    service = AnalysisService(store, launcher)
+    context = LaunchContext(github_token=SecretStr("ghu_secret"), login="octo")
+
+    await service.request(REPO, SHA, "u1", context)
+    await service.request(REPO, SHA, "u1", LaunchContext(login="other"))
+
+    # 진행 중인 분석에 다시 붙는 요청은 새 작업을 만들지 않으므로 그 정보도 넘기지 않습니다.
+    assert launcher.contexts == [context]
 
 
 async def test_concurrent_requests_launch_once(store: InMemoryAnalysisStore) -> None:
@@ -75,7 +95,7 @@ async def test_launch_failure_marks_failed_so_retry_can_start(
 ) -> None:
     service = AnalysisService(store, RecordingLauncher(error=ConnectionError("queue down")))
 
-    with pytest.raises(ConnectionError):
+    with pytest.raises(AnalysisLaunchError, match="ConnectionError"):
         await service.request(REPO, SHA, "u1")
     [record] = list(store._records.values())
     assert record.state.status is AnalysisStatus.FAILED

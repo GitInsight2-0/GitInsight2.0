@@ -6,9 +6,11 @@
   uv run python scripts/seed_demo_analysis.py --user-id <데모 계정 id>
   uv run python scripts/seed_demo_analysis.py --user-id <id> --fixture gitinsight_agent
   uv run python scripts/seed_demo_analysis.py --user-id <id> --file .data/analysis.json   # 실제 분석 결과
+  uv run python scripts/seed_demo_analysis.py --user-id <id> --fixture gitinsight_agent_live --analysis-id demo-gitinsight-agent
+      # 실제 워커 결과를 웹 "데모 레포로 바로 시작"(web/lib/demo.ts)과 같은 id로 넣습니다
 
 - 마이그레이션을 먼저 적용합니다 (uv run alembic -c api/alembic.ini upgrade head).
-- 기록의 analysis_id는 샘플 파일의 값 그대로라서, 여러 번 실행해도 기록 하나만 남습니다.
+- 기록의 analysis_id는 샘플 파일의 값(또는 --analysis-id) 그대로라서, 여러 번 실행해도 기록 하나만 남습니다.
 - 같은 (레포, 커밋, 요청자)의 다른 기록은 failed(ReplacedBySnapshot)로 닫아, 그 키를 다시 요청하면 스냅샷을 재사용합니다.
 - 기여 라벨은 요청자마다 다르므로 데모에 로그인할 계정 id를 --user-id로 줍니다.
 """
@@ -54,6 +56,11 @@ def main() -> int:
         default=None,
         help="AnalysisResult JSON 파일 (예: eval_stage2.py --save-json으로 만든 실제 분석 결과)",
     )
+    parser.add_argument(
+        "--analysis-id",
+        default=None,
+        help="넣을 기록의 analysis_id (기본: 파일의 값). 웹의 데모 id에 맞출 때 씁니다",
+    )
     args = parser.parse_args()
     if settings.database_url is None:
         print("DATABASE_URL이 없습니다", file=sys.stderr)
@@ -63,6 +70,8 @@ def main() -> int:
         if args.file
         else load_analysis(args.fixture)
     )
+    if args.analysis_id:
+        result = result.model_copy(update={"analysis_id": args.analysis_id})
     # psycopg 3 비동기 연결은 Windows 기본 루프를 지원하지 않아 서버와 같은 루프를 씁니다.
     asyncio.run(
         seed(settings.database_url.get_secret_value(), result, args.user_id),
