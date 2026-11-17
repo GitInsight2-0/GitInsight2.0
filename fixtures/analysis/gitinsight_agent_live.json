@@ -1,0 +1,431 @@
+{
+  "analysis_id": "demo-gitinsight-agent-live",
+  "repo_full_name": "tttae210-sys/gitinsight_agent",
+  "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f",
+  "languages": [
+    {
+      "language": "Python",
+      "file_count": 32
+    },
+    {
+      "language": "JSON",
+      "file_count": 1
+    },
+    {
+      "language": "Markdown",
+      "file_count": 1
+    },
+    {
+      "language": "Shell",
+      "file_count": 1
+    },
+    {
+      "language": "TOML",
+      "file_count": 1
+    },
+    {
+      "language": "YAML",
+      "file_count": 1
+    }
+  ],
+  "symbol_count": 75,
+  "topics": [
+    {
+      "topic_id": "build-github-repo",
+      "title": "레포지토리 수집 및 캐싱",
+      "symbol": {
+        "symbol_id": "app/agents/builder.py::build_github_repo",
+        "name": "build_github_repo",
+        "kind": "function",
+        "path": "app/agents/builder.py",
+        "start_line": 86,
+        "end_line": 252,
+        "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+      },
+      "related_symbols": [
+        {
+          "symbol_id": "app/agents/builder.py::extract_active_db_resources",
+          "name": "extract_active_db_resources",
+          "kind": "function",
+          "path": "app/agents/builder.py",
+          "start_line": 35,
+          "end_line": 80,
+          "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+        }
+      ],
+      "contribution_label": "verified",
+      "difficulty": 1,
+      "summary": "GitHub API를 호출하여 최신 커밋 해시와 트리 구조를 조회하고 기술 스택을 추출합니다. 동일한 커밋 해시 기반의 ChromaDB 컬렉션이 이미 존재하면 캐시를 사용하고, 없으면 소스코드를 새로 가져와 벡터 DB에 임베딩하여 저장합니다.",
+      "base_question": "build_github_repo 함수가 레포지토리 정보를 수집하고 캐싱하는 전체 흐름을 설명해 주세요.",
+      "question_intent": "GitHub API 조회부터 ChromaDB 캐시 확인 및 신규 코드 임베딩까지의 처리 순서를 설명해 달라는 뜻입니다.",
+      "expected_points": [
+        {
+          "point_id": "p1",
+          "text": "repo_url을 파싱하여 소유자와 저장소명을 추출한 뒤 GitHub 커밋 API로 최신 커밋 해시를 조회합니다.",
+          "probe_question": "최신 커밋 정보를 가져오는 과정은 어떻게 진행되나요?"
+        },
+        {
+          "point_id": "p2",
+          "text": "소유자명, 레포명, 커밋 해시를 조합해 컬렉션 이름을 만들고 ChromaDB에 이미 존재하는지 캐시 여부를 확인합니다.",
+          "probe_question": "ChromaDB 컬렉션 이름을 어떻게 정하고 캐시 여부를 판단하나요?"
+        },
+        {
+          "point_id": "p3",
+          "text": "캐시 히트 시 기존 컬렉션의 문서와 메타데이터에서 청크와 기술 스택을 복원해 반환합니다.",
+          "probe_question": "캐시가 존재할 때는 어떤 방식으로 결과를 반환하나요?"
+        },
+        {
+          "point_id": "p4",
+          "text": "캐시 미스 시 트리 API로 파일 목록을 탐색하고 특정 확장자의 코드를 최대 3개까지 가져와 ChromaDB 컬렉션에 새로 저장합니다.",
+          "probe_question": "캐시가 없을 때 파일 탐색과 코드 저장은 어떤 순서로 이루어지나요?"
+        }
+      ],
+      "prepared_followups": [
+        {
+          "question": "extract_active_db_resources 함수 호출 실패 시 ChromaDB 클라이언트를 어떻게 준비하나요?",
+          "symbol_id": "app/agents/builder.py::extract_active_db_resources"
+        },
+        {
+          "question": "코드 수집 대상 파일 수를 최대 3개로 제한하고 파일당 800자만 자른 이유는 무엇인가요?",
+          "symbol_id": null
+        }
+      ],
+      "hint": "build_github_repo 함수 내의 주석 1번부터 4번까지 처리되는 순서를 살펴보세요.",
+      "commits": [
+        "78ec03522be065f231c9fee838e3c9cb30818a7e",
+        "29b7748b3e4ab466b4c35b0d4c69787cb6ba7d47",
+        "585907ab63f92f109c04d0cefa9bb625f753e5a5"
+      ]
+    },
+    {
+      "topic_id": "vectorservice",
+      "title": "코드 청크 색인 및 검색 설계",
+      "symbol": {
+        "symbol_id": "app/service/vector_service.py::VectorService",
+        "name": "VectorService",
+        "kind": "class",
+        "path": "app/service/vector_service.py",
+        "start_line": 21,
+        "end_line": 120,
+        "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+      },
+      "related_symbols": [
+        {
+          "symbol_id": "app/service/vector_service.py::VectorService.index_documents",
+          "name": "index_documents",
+          "kind": "method",
+          "path": "app/service/vector_service.py",
+          "start_line": 30,
+          "end_line": 65,
+          "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+        },
+        {
+          "symbol_id": "app/service/vector_service.py::VectorService.search",
+          "name": "search",
+          "kind": "method",
+          "path": "app/service/vector_service.py",
+          "start_line": 79,
+          "end_line": 120,
+          "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+        },
+        {
+          "symbol_id": "app/service/vector_service.py::VectorService.has_documents",
+          "name": "has_documents",
+          "kind": "method",
+          "path": "app/service/vector_service.py",
+          "start_line": 67,
+          "end_line": 77,
+          "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+        }
+      ],
+      "contribution_label": "verified",
+      "difficulty": 2,
+      "summary": "ChromaDB 컬렉션을 초기화하고 코드 청크를 임베딩 문서로 변환하여 색인합니다. 또한 메타데이터 필터를 이용해 적재 여부를 확인하고 자연어 질의 기반으로 유사한 청크를 검색합니다.",
+      "base_question": "문서를 색인할 때 파일 경로와 코드를 결합해 텍스트로 구성하신 이유는 무엇인가요?",
+      "question_intent": "임베딩 대상 텍스트를 구성할 때 특정 형식으로 결합하여 저장하도록 설계한 배경을 묻는 질문입니다.",
+      "expected_points": [
+        {
+          "point_id": "p1",
+          "text": "코드 내용뿐만 아니라 파일 경로 정보까지 임베딩 텍스트에 포함하여 검색 시 맥락과 의미 정보를 보강하기 위함이다.",
+          "probe_question": "파일 경로를 별도 메타데이터에 넣는 것 외에 텍스트 본문에도 포함시키면 검색 시 어떤 이점이 있나요?"
+        },
+        {
+          "point_id": "p2",
+          "text": "메타데이터에는 파일 경로와 설명을 분리 저장하여 필터링 및 원본 정보 조회가 가능하도록 구조화했다.",
+          "probe_question": "색인 시 메타데이터 딕셔너리에는 어떤 정보를 보관하고 계신가요?"
+        },
+        {
+          "point_id": "p3",
+          "text": "각 청크마다 UUID 기반의 고유 ID를 부여하여 개별 벡터 레코드를 구분하고 저장한다.",
+          "probe_question": "ChromaDB 컬렉션에 추가할 때 고유 식별자는 어떻게 생성해 지정하셨나요?"
+        }
+      ],
+      "prepared_followups": [
+        {
+          "question": "index_documents에서 중복 색인을 방지하거나 갱신해야 할 때는 현재 구조에서 어떻게 대응할 수 있나요?",
+          "symbol_id": "app/service/vector_service.py::VectorService.index_documents"
+        },
+        {
+          "question": "search 메서드에서 예외가 발생했을 때 빈 리스트를 반환하도록 처리하신 이유는 무엇인가요?",
+          "symbol_id": "app/service/vector_service.py::VectorService.search"
+        }
+      ],
+      "hint": "VectorService의 index_documents 메서드 내 document_text 변수가 조합되는 부분을 확인해 보세요.",
+      "commits": [
+        "cc1dd1a0b74148b74c40ce996bd853fd2eb494a9"
+      ]
+    },
+    {
+      "topic_id": "chat-stream",
+      "title": "SSE 스트리밍 예외 처리",
+      "symbol": {
+        "symbol_id": "app/api.py::chat_stream",
+        "name": "chat_stream",
+        "kind": "function",
+        "path": "app/api.py",
+        "start_line": 142,
+        "end_line": 219,
+        "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+      },
+      "related_symbols": [
+        {
+          "symbol_id": "app/api.py::chat_sync",
+          "name": "chat_sync",
+          "kind": "function",
+          "path": "app/api.py",
+          "start_line": 51,
+          "end_line": 135,
+          "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+        }
+      ],
+      "contribution_label": "verified",
+      "difficulty": 3,
+      "summary": "chat_stream 함수는 사용자 입력을 바탕으로 LangGraph 워크플로우를 비동기로 실행하고 그 상태를 SSE로 클라이언트에 실시간 중계합니다. 그래프 노드의 상태 전이 이벤트를 지속적으로 yield하며 완료 후에는 최종 평가 결과를 전송합니다. 실행 도중 예외가 발생하면 로깅을 수행하고 에러 이벤트를 담은 SSE 메시지를 반환합니다.",
+      "base_question": "스트리밍 중 예외가 발생했을 때 클라이언트에는 어떻게 전달되나요?",
+      "question_intent": "비동기 스트리밍 도중 오류가 발생했을 때의 예외 처리와 응답 전달 방식을 묻는 질문입니다.",
+      "expected_points": [
+        {
+          "point_id": "p1",
+          "text": "try-except 블록으로 event_generator 내부의 전체 로직을 감싸고 있습니다.",
+          "probe_question": "오류 처리를 위해 함수 내부에서 어떤 예외 포착 구조를 사용하셨나요?"
+        },
+        {
+          "point_id": "p2",
+          "text": "예외 발생 시 logging.error로 에러 내용을 기록합니다.",
+          "probe_question": "발생한 예외는 서버 로그에 어떻게 기록되나요?"
+        },
+        {
+          "point_id": "p3",
+          "text": "에러 발생 시 HTTP 오류 코드가 아닌 error 이벤트 형태의 SSE 메시지를 yield합니다.",
+          "probe_question": "클라이언트는 스트리밍 도중 오류가 났음을 어떤 형태의 이벤트로 수신하게 되나요?"
+        }
+      ],
+      "prepared_followups": [
+        {
+          "question": "스트리밍 도중 에러가 발생해도 HTTP 200으로 시작된 연결은 어떻게 종료되나요?",
+          "symbol_id": null
+        },
+        {
+          "question": "동기식 응답을 주는 chat_sync 함수와 비교했을 때 예외 전파 방식은 어떻게 다른가요?",
+          "symbol_id": "app/api.py::chat_sync"
+        }
+      ],
+      "hint": "event_generator 내부의 try-except 블록과 except 처리부를 확인해 보세요.",
+      "commits": [
+        "0829d686fb043a842f400b88d3338a8c6b1cd010",
+        "de3729d72496d114b4f184b24c6ac9984547297d",
+        "29b7748b3e4ab466b4c35b0d4c69787cb6ba7d47"
+      ]
+    },
+    {
+      "topic_id": "extract-active-db-resources",
+      "title": "DB 자원 추출 동작 과정",
+      "symbol": {
+        "symbol_id": "app/agents/builder.py::extract_active_db_resources",
+        "name": "extract_active_db_resources",
+        "kind": "function",
+        "path": "app/agents/builder.py",
+        "start_line": 35,
+        "end_line": 80,
+        "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+      },
+      "related_symbols": [
+        {
+          "symbol_id": "app/agents/builder.py::LangChainEmbeddingAdapter",
+          "name": "LangChainEmbeddingAdapter",
+          "kind": "class",
+          "path": "app/agents/builder.py",
+          "start_line": 20,
+          "end_line": 29,
+          "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+        }
+      ],
+      "contribution_label": "verified",
+      "difficulty": 1,
+      "summary": "extract_active_db_resources 함수는 메모리에 활성화된 VectorService 인스턴스에서 Chroma 클라이언트와 임베딩 함수를 동적으로 추출합니다. Chroma 클라이언트는 사전 정의된 속성명이나 인스턴스 전체 속성을 탐색하여 클래스 이름을 기반으로 찾아냅니다. 임베딩 모델의 경우 embed_query와 embed_documents 메서드 존재 여부를 확인한 후 LangChainEmbeddingAdapter로 감싸서 반환합니다.",
+      "base_question": "extract_active_db_resources 함수가 DB 자원을 추출하는 순서를 설명해 주세요.",
+      "question_intent": "이 함수가 실행될 때 Chroma 클라이언트와 임베딩 함수를 어떤 절차와 조건으로 찾아내는지 알고 싶습니다.",
+      "expected_points": [
+        {
+          "point_id": "p1",
+          "text": "get_vector_service 함수 유효성을 먼저 확인하고 인스턴스를 가져온 뒤 예외 처리 블록 안에서 탐색을 진행함",
+          "probe_question": "VectorService 인스턴스를 얻어오기 전에 어떤 검사를 먼저 수행하나요?"
+        },
+        {
+          "point_id": "p2",
+          "text": "지정된 속성명 후보군을 먼저 확인하고, 없으면 dir()을 통해 인스턴스 속성을 순회하며 클래스 이름이 Client, PersistentClient 등과 일치하는 객체를 chroma_client로 탐색함",
+          "probe_question": "Chroma 클라이언트 객체는 어떤 방식으로 찾고 판별하나요?"
+        },
+        {
+          "point_id": "p3",
+          "text": "임베딩 관련 속성 후보군을 순회하며 embed_query와 embed_documents 메서드를 모두 가진 객체를 찾고 LangChainEmbeddingAdapter로 감싸서 반환함",
+          "probe_question": "임베딩 함수는 어떤 조건을 만족해야 추출되며, 추출 후 어떤 처리를 거치나요?"
+        }
+      ],
+      "prepared_followups": [
+        {
+          "question": "추출한 임베딩 모델을 LangChainEmbeddingAdapter로 감싸서 반환하는 이유는 무엇인가요?",
+          "symbol_id": "app/agents/builder.py::LangChainEmbeddingAdapter"
+        },
+        {
+          "question": "Chroma 클라이언트를 찾을 때 정해진 속성명 외에 dir()을 이용한 전체 속성 순회까지 둔 이유는 무엇인가요?",
+          "symbol_id": null
+        }
+      ],
+      "hint": "get_vector_service 호출 이후 Chroma 클라이언트와 임베딩 모델을 찾아내는 반복문과 조건문을 확인해 보세요.",
+      "commits": [
+        "29b7748b3e4ab466b4c35b0d4c69787cb6ba7d47",
+        "957bb5b7e6998e0b76005be78ae94375f5f2c845",
+        "d88300ea81ff45768be1d9e732aada0d92877ce5"
+      ]
+    },
+    {
+      "topic_id": "seedmanager",
+      "title": "SeedManager 설계 의도",
+      "symbol": {
+        "symbol_id": "app/core/seed.py::SeedManager",
+        "name": "SeedManager",
+        "kind": "class",
+        "path": "app/core/seed.py",
+        "start_line": 14,
+        "end_line": 33,
+        "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+      },
+      "related_symbols": [
+        {
+          "symbol_id": "app/core/seed.py::SeedManager.__init__",
+          "name": "__init__",
+          "kind": "method",
+          "path": "app/core/seed.py",
+          "start_line": 22,
+          "end_line": 25,
+          "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+        },
+        {
+          "symbol_id": "app/core/seed.py::SeedManager.run_if_empty",
+          "name": "run_if_empty",
+          "kind": "method",
+          "path": "app/core/seed.py",
+          "start_line": 27,
+          "end_line": 29,
+          "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+        },
+        {
+          "symbol_id": "app/core/seed.py::SeedManager.run_all",
+          "name": "run_all",
+          "kind": "method",
+          "path": "app/core/seed.py",
+          "start_line": 31,
+          "end_line": 33,
+          "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+        }
+      ],
+      "contribution_label": "verified",
+      "difficulty": 2,
+      "summary": "SeedManager는 ChromaDB의 초기 시드 데이터 구성을 관리하는 클래스입니다. 초기화 시 주입받은 VectorService 인스턴스를 보관하지만 현재 로직에서는 사용하지 않습니다. run_all 및 run_if_empty 호출 시 런타임 GitHub 코드 청크 사용을 이유로 기본 시드 작업을 건너뜁니다.",
+      "base_question": "SeedManager에서 기본 시드 작업을 건너뛰도록 구현하신 이유가 무엇인가요?",
+      "question_intent": "사전 시드 데이터를 적재하지 않고 작업을 건너뛰도록 비워둔 설계 배경을 묻는 질문입니다.",
+      "expected_points": [
+        {
+          "point_id": "p1",
+          "text": "런타임 시점에 GitHub 소스코드를 직접 청크하여 사용하므로 정적 기본 시드가 불필요함",
+          "probe_question": "로그에 안내된 런타임 데이터 처리 방식과 기본 시드가 어떤 관계가 있나요?"
+        },
+        {
+          "point_id": "p2",
+          "text": "현재는 직접 쓰이지 않는 vector_service를 주입받아 향후 코드 시드 확장성을 위해 보관함",
+          "probe_question": "생성자에서 vector_service를 주입받아 보관해 두신 목적은 무엇인가요?"
+        },
+        {
+          "point_id": "p3",
+          "text": "run_if_empty가 단순히 run_all을 호출하는 alias 형태로 설계되어 일관된 진입점을 제공함",
+          "probe_question": "run_if_empty와 run_all 메서드를 분리해 두신 이유는 무엇인가요?"
+        }
+      ],
+      "prepared_followups": [
+        {
+          "question": "생성자에서 vector_service를 바로 활용하지 않고 보관만 하도록 구성하신 배경은 무엇인가요?",
+          "symbol_id": "app/core/seed.py::SeedManager.__init__"
+        },
+        {
+          "question": "run_if_empty 메서드가 비어 있는지 검사하지 않고 run_all을 그대로 호출해도 문제가 없나요?",
+          "symbol_id": "app/core/seed.py::SeedManager.run_if_empty"
+        }
+      ],
+      "hint": "SeedManager의 생성자 주석과 run_all 메서드의 로그 메시지를 살펴보세요.",
+      "commits": [
+        "cc1dd1a0b74148b74c40ce996bd853fd2eb494a9"
+      ]
+    },
+    {
+      "topic_id": "extract-text-from-pdf",
+      "title": "PDF 텍스트 추출의 예외 처리",
+      "symbol": {
+        "symbol_id": "frontend/ui.py::extract_text_from_pdf",
+        "name": "extract_text_from_pdf",
+        "kind": "function",
+        "path": "frontend/ui.py",
+        "start_line": 21,
+        "end_line": 39,
+        "commit_sha": "6a3111ce7e36918a4332d63e25d59e471961879f"
+      },
+      "related_symbols": [],
+      "contribution_label": "verified",
+      "difficulty": 3,
+      "summary": "업로드된 PDF 파일의 바이트 데이터를 메모리 버퍼로 읽어 텍스트를 페이지별로 추출합니다. 라이브러리 설치 여부를 사전에 점검하고, 파일 파싱 중 오류가 발생하면 안내 문구를 반환합니다.",
+      "base_question": "PDF 파싱 중 에러가 발생했을 때 이 함수는 어떻게 대응하나요?",
+      "question_intent": "파싱 실패나 예외 상황에서 코드가 어떻게 동작하도록 처리되어 있는지 묻는 질문입니다.",
+      "expected_points": [
+        {
+          "point_id": "p1",
+          "text": "try-except 구문을 통해 파싱 중 발생하는 모든 Exception을 포괄적으로 잡도록 처리되어 있습니다.",
+          "probe_question": "파싱 중 에러를 감지하기 위해 어떤 예외 처리 구문이 사용되었나요?"
+        },
+        {
+          "point_id": "p2",
+          "text": "예외가 발생하면 에러를 다시 발생시키지 않고 예외 메시지를 포함한 안내 문자열을 반환합니다.",
+          "probe_question": "예외가 잡혔을 때 함수가 호출자에게 무엇을 반환하는지 설명해 주실 수 있나요?"
+        },
+        {
+          "point_id": "p3",
+          "text": "라이브러리(PYPDF_AVAILABLE)가 없을 때도 예외 대신 안내 문구 문자열을 반환하여 프로그램 중단을 방지합니다.",
+          "probe_question": "필수 라이브러리가 없는 상황에서는 어떤 방식으로 대응하고 있나요?"
+        }
+      ],
+      "prepared_followups": [
+        {
+          "question": "모든 Exception을 잡아서 문자열로 반환하면 호출하는 쪽에서는 정상 텍스트와 어떻게 구분할 수 있을까요?",
+          "symbol_id": null
+        },
+        {
+          "question": "대용량 PDF가 업로드되어 메모리 부족이 발생하는 경우 현재 구조에서는 어떤 문제가 생길 수 있나요?",
+          "symbol_id": null
+        }
+      ],
+      "hint": "extract_text_from_pdf 함수의 try-except 블록과 반환값을 살펴보세요.",
+      "commits": [
+        "29b7748b3e4ab466b4c35b0d4c69787cb6ba7d47"
+      ]
+    }
+  ]
+}

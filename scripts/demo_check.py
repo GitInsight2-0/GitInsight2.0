@@ -76,13 +76,16 @@ async def check(
 
     analysis = load_analysis(settings.fixture_analysis)
     if analyses is not None:
-        print(f"분석 결과: DB (analysis_id={analysis.analysis_id})")
-        if await analyses.get(analysis.analysis_id) is None:
+        analysis_id = args.analysis_id or analysis.analysis_id
+        print(f"분석 결과: DB (analysis_id={analysis_id})")
+        stored = await analyses.get(analysis_id)
+        if stored is None:
             print(
                 "[실패] DB에 데모 스냅샷이 없습니다. scripts/seed_demo_analysis.py로 먼저 넣습니다",
                 file=sys.stderr,
             )
             return 1
+        analysis = stored
     brain = build_fixture_brain(settings, llm=judge_llm, analyses=analyses)
     answers = cycle([t.transcript for c in load_conversations() for t in c.turns])
 
@@ -137,6 +140,11 @@ def main() -> int:
         "--from-db",
         action="store_true",
         help="샘플 파일 대신 DATABASE_URL의 DB에 넣은 데모 스냅샷을 면접 재료로 씁니다",
+    )
+    parser.add_argument(
+        "--analysis-id",
+        default=None,
+        help="--from-db에서 쓸 스냅샷의 analysis_id (기본: 샘플 파일의 값)",
     )
     parser.add_argument(
         "--max-turn-ms",

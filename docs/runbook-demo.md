@@ -64,7 +64,8 @@ uv run python scripts/demo_check.py --real-llm    # 실제 LLM으로 완주 (비
 
 - [ ] Railway 환경 변수: `LAB_ENABLED=false`, `BRAIN_FORCE_PREPARED=false`, `LLM_PROVIDER=openai`, 모델 이름 변수 비움
 - [ ] 두 제공사 API 키 등록, 결제 한도 확인 (예산 상한 $100)
-- [ ] 데모 레포 분석 스냅샷을 운영 DB에 넣고(`seed_demo_analysis.py --user-id <데모 계정 id>`), `demo_check.py --from-db`로 확인 (A)
+- [ ] 데모 레포 분석 스냅샷을 운영 DB에 넣고(`seed_demo_analysis.py --user-id <데모 계정 id> --fixture gitinsight_agent_live`), `demo_check.py --from-db --analysis-id demo-gitinsight-agent-live`로 확인 (A)
+  - `gitinsight_agent_live`는 레포 주인(D)이 요청했다고 보고 실제 워커로 만든 결과라 기여 라벨이 모두 본인 기여입니다. 다른 계정으로 시연하면 `eval_stage2.py --requester-email ... --save-json`으로 다시 만듭니다
 - [ ] 녹화 영상을 발표 노트북에 내려받아 둠 (C)
 - [ ] 모바일 핫스팟 연결 확인
 
