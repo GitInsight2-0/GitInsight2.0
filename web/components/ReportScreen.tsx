@@ -98,6 +98,7 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
   const scoredNames = new Set(scored.map((c) => c.name));
   const unscored = COMPETENCY_ORDER.filter((name) => !scoredNames.has(name));
   const previous = progress ? previousEntry(progress, report.session_id) : null;
+  const hinted = afterHintTurnIds(report.turns);
 
   return (
     <>
@@ -155,7 +156,7 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
           <h2 id="topics">주제별 내용</h2>
           <ul className={styles.stack}>
             {report.topics.map((t, i) => (
-              <TopicCard key={t.topic_id} topic={t} index={i + 1} />
+              <TopicCard key={t.topic_id} topic={t} index={i + 1} stuck={stuckQuestions(report.turns, t.topic_id)} />
             ))}
           </ul>
         </section>
@@ -166,7 +167,7 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
           <h2 id="turns">답변 기록</h2>
           <ol className={styles.stack}>
             {report.turns.map((t, i) => (
-              <TurnCard key={t.turn_id} turn={t} index={i + 1} />
+              <TurnCard key={t.turn_id} turn={t} index={i + 1} afterHint={hinted.has(t.turn_id)} />
             ))}
           </ol>
         </section>
@@ -263,15 +264,78 @@ function Bullets({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function TopicCard({ topic, index }: { topic: TopicReport; index: number }) {
+/** 모르겠다고 답한 질문 */
+interface StuckQuestion {
+  turnId: string;
+  /** 몇 번째 답변인지 (1부터) */
+  number: number;
+  question: string;
+  /** 힌트를 받고 같은 주제에서 다시 답했는지 */
+  retried: boolean;
+}
+
+/**
+ * 그 주제에서 모르겠다고 답한 질문입니다.
+ * "기대한 요점"은 주제의 첫 질문에 대한 것이라, 꼬리질문에 답하지 못한 것은 거기에 나오지 않습니다. 그래서 따로 보여 줍니다.
+ */
+function stuckQuestions(turns: TurnRow[], topicId: string): StuckQuestion[] {
+  const stuck: StuckQuestion[] = [];
+  turns.forEach((turn, i) => {
+    if (turn.topic_id !== topicId || turn.intent !== "DONT_KNOW") return;
+    const next = turns[i + 1];
+    const retried = turn.action === "HINT" && next?.topic_id === topicId && next.intent === "ANSWER";
+    stuck.push({ turnId: turn.turn_id, number: i + 1, question: turn.question, retried });
+  });
+  return stuck;
+}
+
+/** 힌트를 받은 뒤에 한 답변 (바로 앞 답변 뒤에 면접관이 같은 주제로 힌트를 준 경우) */
+function afterHintTurnIds(turns: TurnRow[]): Set<string> {
+  const ids = new Set<string>();
+  turns.forEach((turn, i) => {
+    const before = turns[i - 1];
+    if (before && before.action === "HINT" && before.topic_id === turn.topic_id) ids.add(turn.turn_id);
+  });
+  return ids;
+}
+
+function TopicCard({ topic, index, stuck }: { topic: TopicReport; index: number; stuck: StuckQuestion[] }) {
   return (
     <li className={styles.card}>
       <p className={styles.label}>주제 {index}</p>
       <h3>{topic.question}</h3>
       <div className={styles.points}>
-        <PointList title="답변에서 다룬 내용" items={topic.covered} tone="on" empty="다룬 내용으로 확인된 것이 없어요." />
-        <PointList title="다루지 않은 내용" items={topic.missing} tone="off" empty="빠진 내용이 없어요." />
+        <PointList
+          title="기대한 요점 중 답변에서 다룬 것"
+          items={topic.covered}
+          tone="on"
+          empty="다룬 것으로 확인된 요점이 없어요."
+        />
+        <PointList
+          title="기대한 요점 중 다루지 않은 것"
+          items={topic.missing}
+          tone="off"
+          empty="기대한 요점은 모두 다뤘어요."
+        />
       </div>
+      {stuck.length > 0 && (
+        <div>
+          <p className={styles.label}>모르겠다고 답한 질문</p>
+          <ul className={styles.stuck}>
+            {stuck.map((q) => (
+              <li key={q.turnId}>
+                <span>{q.question}</span>
+                <span className={styles.source}>
+                  <a href={`#turn-${q.turnId}`}>{q.number}번째 답변</a>
+                  <span className={styles.stuckNote}>
+                    {q.retried ? "힌트를 받고 다시 답했어요" : "답하지 못하고 넘어갔어요"}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {topic.model_answer && (
         <div className={styles.model}>
           <p className={styles.label}>모범 답변 예시</p>
@@ -318,13 +382,14 @@ function PointList({ title, items, tone, empty }: { title: string; items: string
   );
 }
 
-function TurnCard({ turn, index }: { turn: TurnRow; index: number }) {
+function TurnCard({ turn, index, afterHint }: { turn: TurnRow; index: number; afterHint: boolean }) {
   return (
     <li id={`turn-${turn.turn_id}`} className={styles.turn}>
       <p className={styles.label}>{index}번째 답변</p>
       <p className={styles.turnQuestion}>{turn.question}</p>
       <p className={styles.turnAnswer}>{turn.transcript || "(받아 적은 답변이 없어요)"}</p>
       <p className={styles.turnMeta}>
+        {afterHint && <span>힌트를 받은 뒤의 답변</span>}
         {turn.intent && <span>{INTENT_LABEL[turn.intent]}</span>}
         <span>다음: {ACTION_LABEL[turn.action]}</span>
         {turn.fallback_reason && <span>{FALLBACK_LABEL[turn.fallback_reason]}</span>}

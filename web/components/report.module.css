@@ -371,6 +371,37 @@
   text-underline-offset: 3px;
 }
 
+/* ── 모르겠다고 답한 질문 ── */
+
+.stuck {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14.5px;
+  line-height: 1.6;
+  word-break: keep-all;
+}
+
+.stuck li {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px;
+  border-radius: var(--gi-radius);
+  background: var(--gi-notice-bg);
+  color: var(--gi-notice-ink);
+}
+
+.stuck .source {
+  margin-top: 4px;
+}
+
+.stuckNote {
+  color: var(--gi-notice-ink);
+}
+
 /* ── 답변 기록 ── */
 
 .turn {
