@@ -28,7 +28,7 @@ README.md의 "전체 구조"를 따릅니다.
 | `web/` | Next.js 웹. 지금은 음성 PoC(`/lab/voice`), 임시 토큰 라우트(`/lab/voice-token`), 음성·텍스트 면접 화면(`/lab/interview`, 도중 전환과 음성 끊김 시 텍스트 자동 전환)이 있습니다 | C |
 | `fixtures/analysis/` | 데모 레포 분석 결과 샘플 | B |
 | `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |
-| `scripts/` | 계약 생성, 샘플 데이터 도구, 수동 LLM 평가 스크립트 | |
+| `scripts/` | 계약 생성, 샘플 데이터 도구, 데모 스냅샷 넣기, 수동 LLM 평가 스크립트 | |
 | `docs/` | 루브릭, 평가 기록(`docs/evals/`), 결정 기록 | |
 
 ## 설계 원칙
@@ -80,7 +80,8 @@ uv run python -m gitinsight_api.brain.cli [--real-llm]             # 터미널 �
 uv run python scripts/llm_latency.py --n 20                        # 판단 LLM 지연 측정 (수동, 비용 발생)
 uv run python scripts/eval_brain.py                                # 골든 대화 실제 LLM 평가 (수동, 비용 발생)
 uv run python scripts/eval_stage2.py                               # 샘플 레포 2단계 분석 실제 LLM 평가 (수동, 비용 발생)
-uv run python scripts/demo_check.py [--block-llm | --real-llm]     # 데모 완주 점검 (docs/runbook-demo.md)
+uv run python scripts/demo_check.py [--block-llm | --real-llm] [--from-db]   # 데모 완주 점검 (docs/runbook-demo.md). --from-db는 DB의 데모 스냅샷 사용
+uv run python scripts/seed_demo_analysis.py --user-id <id>         # 샘플 분석 결과를 DATABASE_URL의 DB에 완료 기록으로 넣기 (데모 스냅샷)
 pnpm --filter @gitinsight/web dev                                  # 웹 (기본 3000번, /api/*는 API_ORIGIN으로 넘김)
 pnpm --filter @gitinsight/web typecheck                            # 웹 타입 검사
 ```
@@ -93,6 +94,7 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 테스트는 `app.dependency_overrides`로 `get_current_user`를 바꿔 로그인 사용자를 넣습니다.
 
 `DATABASE_URL`이 있으면 서버는 Postgres를 쓰고(`/api/metrics` → `metric_events` 테이블), 없으면 DB 없이 돌며 측정 이벤트를 `METRICS_PATH`(JSONL)에 쌓습니다.
+분석 기록과 결과는 `analyses` 테이블에 둡니다(`gitinsight_api.analyses.postgres.PostgresAnalysisStore`, 규칙은 `analyses/store.py`의 `AnalysisStore`).
 DB 연결과 테이블 정의는 `api/src/gitinsight_api/db.py`, `tables.py`, 마이그레이션은 `api/migrations/versions/`에 있습니다. 새 테이블은 두 곳을 같이 바꾸고 `alembic check`로 맞는지 확인합니다.
 기본 `pytest`는 DB 없이 돕니다(`api/tests/conftest.py`가 `DATABASE_URL`을 비웁니다). 실제 Postgres 테스트는 `postgres` 표시로 따로 돌립니다. 공용 픽스처 `test_database_url`, `pg_engine`(마이그레이션 적용 후 모든 테이블을 비움)도 `conftest.py`에 있습니다.
 서버는 `--loop gitinsight_api.event_loop:server_loop_factory`로 띄웁니다. psycopg 3 비동기 연결이 Windows 기본 루프(Proactor)를 지원하지 않아 Windows에서는 Selector 루프를 씁니다(다른 OS는 uvicorn 기본값). 테스트는 `conftest.py`가 같은 루프를 씁니다. 이 옵션 없이 Windows에서 `DATABASE_URL`을 넣으면 `/api/metrics`가 계속 503입니다.

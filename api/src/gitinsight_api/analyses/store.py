@@ -3,7 +3,7 @@
 - 기록 하나는 분석 요청 하나입니다. 상태(AnalysisState)와, 끝나면 결과(AnalysisResult JSON)를 가집니다.
 - 같은 키(레포, 커밋, 요청자)로 동시에 요청해도 기록은 하나만 만듭니다.
   메모리 구현은 asyncio.Lock으로 이를 보장합니다.
-  Postgres 구현(#17 이후)은 failed가 아닌 기록에 거는 키 부분 UNIQUE 인덱스와
+  Postgres 구현(postgres.py)은 failed가 아닌 기록에 거는 키 부분 UNIQUE 인덱스와
   INSERT … ON CONFLICT DO NOTHING으로 같은 보장을 합니다.
 - 진행 중인 기록이 오래 갱신되지 않으면 워커가 죽은 것으로 보고, 그 기록을 failed(StaleAnalysis)로 닫은 뒤 새 기록을 만듭니다.
   닫힌 기록에 늦게 온 진행률은 무시되고 결과 저장은 거부되므로, 느렸던 옛 워커가 결과를 덮어쓰지 못합니다.
@@ -34,7 +34,7 @@ UNKNOWN_ERROR = "Error"
 # 오래되어 교체된 기록의 오류 이름입니다.
 STALE_ERROR = "StaleAnalysis"
 
-_IN_PROGRESS = frozenset({AnalysisStatus.QUEUED, AnalysisStatus.STAGE1, AnalysisStatus.STAGE2})
+IN_PROGRESS = frozenset({AnalysisStatus.QUEUED, AnalysisStatus.STAGE1, AnalysisStatus.STAGE2})
 
 
 def utc_now() -> datetime:
@@ -59,7 +59,7 @@ class AnalysisRecord:
 
     @property
     def in_progress(self) -> bool:
-        return self.state.status in _IN_PROGRESS
+        return self.state.status in IN_PROGRESS
 
 
 class AnalysisRecordNotFoundError(Exception):
@@ -102,6 +102,11 @@ class AnalysisStore(Protocol):
         결과에는 비공개 레포의 심볼 경로, 요약, 질문이 들어 있습니다.
         """
         ...
+
+
+def clean_error(error: str) -> str:
+    """예외 종류 이름 형식이 아니면 일반 이름으로 바꿉니다."""
+    return error if _ERROR_KIND.fullmatch(error) else UNKNOWN_ERROR
 
 
 def sanitized(state: AnalysisState) -> AnalysisState:
