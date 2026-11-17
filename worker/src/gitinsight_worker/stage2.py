@@ -18,6 +18,7 @@ from typing import Annotated
 
 from pydantic import Field, ValidationError
 
+from gitinsight_api.brain.utterance import LINE_NUMBER
 from gitinsight_api.llm import LLMClient, LLMError, LLMResult, LLMUnavailableError, Message
 from gitinsight_api.llm.untrusted import UNTRUSTED_NOTICE, untrusted_block
 from gitinsight_contracts.analysis import (
@@ -64,13 +65,6 @@ QUOTA_BREAKER_LIMIT = 2
 MAX_CODE_CHARS = 8_000
 MAX_README_CHARS = 3_000
 
-# 면접관이 줄 번호를 말하면 안 됩니다. 코드 위치는 분석 결과에서만 가져옵니다.
-# 단독 "L12" 표기는 "L2 캐시", "L7 로드밸런서" 같은 기술 용어와 구분할 수 없어서 잡지 않습니다(PR #36 리뷰).
-# 프롬프트가 줄 번호를 금지하므로 단독 표기는 드뭅니다. "행렬"도 줄 번호가 아닙니다.
-LINE_NUMBER = re.compile(
-    r"\d+\s*(번째\s*)?(줄|행(?!렬)|라인)"
-    r"|(?<![A-Za-z])[Ll][Ii][Nn][Ee]\s*\d+"
-)
 _SLUG_INVALID = re.compile(r"[^a-z0-9]+")
 
 TOPIC_SYSTEM_PROMPT = f"""당신은 한국어 기술 모의면접의 질문 재료를 만듭니다.

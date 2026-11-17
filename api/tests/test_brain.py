@@ -273,6 +273,57 @@ def test_validator_rejects(judgment: Judgment, message: str) -> None:
         validate_judgment(judgment, TOPIC, TRANSCRIPT)
 
 
+def _with_followup(question: str) -> Judgment:
+    return Judgment(
+        intent=Intent.ANSWER,
+        coverage=[],
+        followup=Followup(question=question, symbol_id=None),
+    )
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "L12를 보면 왜 그렇게 했나요?",
+        "L10-L20 구간은 왜 필요했나요?",
+        "L10~20에서는 무엇을 하나요?",
+        "#L12부터 무엇을 하나요?",
+        "line 12에서는 무엇을 하나요?",
+        "10행부터 무엇을 하나요?",
+        "L12에서 왜 그렇게 했나요?",
+        "L12의 조건문은 무엇인가요?",
+        "L12가 핵심인가요?",
+        "#L5에서는 무엇을 하나요?",
+        "L3-L5 구간은 왜 필요했나요?",
+    ],
+)
+def test_validator_rejects_line_number_forms(question: str) -> None:
+    # 한글 조사가 붙으면 단어 경계가 생기지 않아 예전 패턴을 빠져나갔습니다(#38).
+    with pytest.raises(JudgmentInvalidError, match="줄 번호"):
+        validate_judgment(_with_followup(question), TOPIC, TRANSCRIPT)
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "L2 캐시를 먼저 확인하는 이유는 무엇인가요?",
+        "L7 로드밸런서 대신 이 방식을 쓴 이유는요?",
+        "L1 정규화와 비교하면 어떤가요?",
+        "2행렬 곱셈은 어디에서 쓰이나요?",
+        "HTTP/2와 UTF-8 처리는 어떻게 하나요?",
+        "L4를 쓰는 이유는 무엇인가요?",
+        "L3를 거치는 요청은 어떻게 처리하나요?",
+        "L2에서 캐시 미스가 나면 어떻게 하나요?",
+    ],
+)
+def test_validator_accepts_technical_terms(question: str) -> None:
+    # 기술 용어를 줄 번호로 잡으면 LLM 꼬리질문 대신 미리 만든 꼬리질문으로 바뀝니다(PR #36 리뷰).
+    judgment = validate_judgment(_with_followup(question), TOPIC, TRANSCRIPT)
+
+    assert judgment.followup is not None
+    assert judgment.followup.question == question
+
+
 async def test_llm_followup_highlight_comes_from_analysis() -> None:
     related = TOPIC.related_symbols[0]
     fake = FakeLLM()
