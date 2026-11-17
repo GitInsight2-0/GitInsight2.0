@@ -16,6 +16,11 @@ export interface AdapterHooks {
   onToolCall(callId: string, name: string, args: Record<string, unknown>, turnKey: TurnKey | null): void;
   /** 사용자 발화 받아쓰기 (완성된 한 덩어리). turnKey는 이 말이 속한 사용자 턴입니다. */
   onUserTranscript(text: string, turnKey: TurnKey | null): void;
+  /**
+   * 사용자가 말하는 중에 지금 턴에서 모인 받아쓰기 (아직 덩어리로 넘기지 않은 부분).
+   * 화면에 실시간으로 보여 주는 데만 씁니다. 서버로 보낼 답변은 onUserTranscript로 받습니다.
+   */
+  onUserPartial?(textSoFar: string): void;
   /** 음성 AI 발화 자막 (완성된 한 덩어리) */
   onAiTranscript(text: string, interrupted: boolean): void;
   onError(code: string, message: string): void;

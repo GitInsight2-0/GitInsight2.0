@@ -282,9 +282,9 @@ export default function InterviewScreen({
     const ui: SessionUi = {
       // 대화 기록에는 서버로 실제로 보낸 답변(turnSent)과 서버가 정한 문장(reply)만 남깁니다.
       log: noop,
-      answer: (text) => {
-        // 한 답변이 여러 조각으로 올 수 있어 이어 붙입니다. 이미 보낸 턴의 늦은 조각은 진행기가 걸러 줍니다.
-        if (current()) setLastAnswer((prev) => (prev ? `${prev} ${text}` : text));
+      answer: (textSoFar) => {
+        // 진행기가 이번 턴 받아쓰기 전체를 말하는 동안 계속 보내 줍니다. 늦은 조각은 진행기가 걸러 줍니다.
+        if (current()) setLastAnswer(textSoFar);
       },
       status: (s) => {
         if (s === "연결됨") setVoiceState("live");
@@ -358,6 +358,8 @@ export default function InterviewScreen({
       turnSent: (transcript) => {
         if (!current()) return;
         push({ who: "me", text: transcript });
+        // 서버로 보낸 답변 전체를 다음 질문이 올 때까지 보여 줍니다.
+        setLastAnswer(transcript);
         // 턴이 실제로 서버로 갔습니다. AI가 말을 시작할 때까지 생각 중을 유지합니다.
         clearThinkingTimer();
         setThinking(true);
