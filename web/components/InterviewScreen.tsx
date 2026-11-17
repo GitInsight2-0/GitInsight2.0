@@ -656,7 +656,7 @@ function ReportStatus({
     <div role="status" aria-live="polite" className={styles.reportBox}>
       <p className={styles.done}>수고하셨습니다.</p>
       {(report.kind === "idle" || report.kind === "making") && (
-        <p className={styles.reportNote}>리포트를 만들고 있어요. 30초쯤 걸릴 수 있어요.</p>
+        <p className={styles.reportNote}>리포트를 만들고 있어요. 길면 1분쯤 걸릴 수 있어요.</p>
       )}
       {report.kind === "ready" &&
         (href ? (

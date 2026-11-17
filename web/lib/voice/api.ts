@@ -117,18 +117,53 @@ export async function postTurn(
  * 서버는 리포트 LLM을 30초(report_timeout_s), 꼬리 판단 다시 하기를 10초(rejudge_timeout_s) 안에 끊고 대비책 리포트를 냅니다.
  */
 const END_TIMEOUT_MS = 45_000;
+/**
+ * 리포트 요청을 보내는 최대 횟수.
+ * Next 중계(rewrites)는 30초에 끊고 본문 없는 500을 돌려주는데, 서버는 하던 리포트를 마저 만들어 저장합니다 (#78).
+ * 그래서 다시 부르면 만들어 둔 리포트를 받거나, 아직 만드는 중이면 끝날 때까지 기다렸다 받습니다.
+ */
+const END_ATTEMPTS = 3;
+/** 다시 부르기 전에 쉬는 시간 */
+const END_RETRY_DELAY_MS = 2000;
 
 /**
  * 세션을 끝내고 리포트 id를 받습니다.
- * 서버는 여러 번 불러도 같은 report_id를 돌려주므로, 실패하면 그대로 다시 불러도 됩니다.
+ * 서버는 여러 번 불러도 같은 report_id를 돌려주므로, 5xx나 연결 실패면 같은 요청을 다시 보냅니다.
+ * 503은 리포트를 만들지 않는 서버라 다시 보내지 않습니다. 바깥 신호로 멈추면 다시 보내지 않습니다.
  */
 export async function endSession(sessionId: string, outer?: AbortSignal): Promise<SessionEnded> {
-  const s = linkedSignal(outer, END_TIMEOUT_MS);
-  try {
-    return await postJson(`/api/sessions/${sessionId}/end`, {}, s.signal);
-  } finally {
-    s.done();
+  for (let attempt = 1; ; attempt++) {
+    const s = linkedSignal(outer, END_TIMEOUT_MS);
+    try {
+      return await postJson<SessionEnded>(`/api/sessions/${sessionId}/end`, {}, s.signal);
+    } catch (e) {
+      if (outer?.aborted) throw e;
+      const retryable = !(e instanceof ApiError) || (e.status >= 500 && e.status !== 503);
+      if (attempt >= END_ATTEMPTS || !retryable) throw e;
+    } finally {
+      s.done();
+    }
+    await wait(END_RETRY_DELAY_MS, outer);
   }
+}
+
+/** ms만큼 기다립니다. 바깥 신호로 멈추면 그 이유로 바로 실패합니다 */
+function wait(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export function postMetric(ev: MetricEvent): void {
