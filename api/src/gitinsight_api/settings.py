@@ -11,8 +11,10 @@ from gitinsight_api.brain.quotes import QuoteMatcher, QuoteMatchMode
 
 LLMProvider = Literal["openai", "gemini"]
 
-# 제공사별 기본 모델입니다. 판단은 빠른 모델, 분석·리포트는 품질이 높은 모델을 씁니다.
+# 제공사별 기본 모델입니다. 기본 제공사는 Gemini입니다 (2026-11-17 결정, #63).
 # Gemini 판단 모델은 지연 측정(scripts/llm_latency.py) 전이라 분석·리포트와 같은 Flash를 씁니다.
+# openai는 키가 생기면 LLM_PROVIDER=openai만으로 쓸 수 있게 남겨 둡니다. 지금은 키가 없고 측정한 적도 없습니다.
+DEFAULT_PROVIDER = "gemini"
 PROVIDER_MODELS: dict[str, dict[str, str]] = {
     "openai": {
         "llm_judge_model": "openai/gpt-6.1-terra",
@@ -57,13 +59,13 @@ class Settings(BaseSettings):
     # 면접 재료로 쓸 샘플 분석 파일 이름입니다 (fixtures/analysis/<이름>.json).
     fixture_analysis: str = "gitinsight_agent"
 
-    # 판단·분석·리포트 LLM 제공사입니다. 장애 시 이 값 하나로 기본 모델을 모두 바꿉니다.
-    # 제공사 API 키는 LiteLLM 규칙대로 OPENAI_API_KEY, GEMINI_API_KEY 환경 변수로 받습니다.
-    llm_provider: LLMProvider = "openai"
+    # 판단·분석·리포트 LLM 제공사입니다. 이 값 하나로 기본 모델을 모두 바꿉니다.
+    # 제공사 API 키는 LiteLLM 규칙대로 GEMINI_API_KEY(openai면 OPENAI_API_KEY) 환경 변수로 받습니다.
+    llm_provider: LLMProvider = DEFAULT_PROVIDER
     # LiteLLM 모델 이름입니다. 비워 두면 llm_provider의 기본값(PROVIDER_MODELS)을 씁니다.
-    llm_judge_model: str = PROVIDER_MODELS["openai"]["llm_judge_model"]
-    llm_analysis_model: str = PROVIDER_MODELS["openai"]["llm_analysis_model"]
-    llm_report_model: str = PROVIDER_MODELS["openai"]["llm_report_model"]
+    llm_judge_model: str = PROVIDER_MODELS[DEFAULT_PROVIDER]["llm_judge_model"]
+    llm_analysis_model: str = PROVIDER_MODELS[DEFAULT_PROVIDER]["llm_analysis_model"]
+    llm_report_model: str = PROVIDER_MODELS[DEFAULT_PROVIDER]["llm_report_model"]
     # true면 판단·계획·리포트에서 LLM을 부르지 않고 미리 만든 질문과 턴별 판단 표로 진행합니다.
     brain_force_prepared: bool = False
     # 판단 모델의 reasoning_effort입니다. 비우면 모델 기본값을 씁니다. 지연 측정 결과로 정합니다.
@@ -95,7 +97,7 @@ class Settings(BaseSettings):
         if not isinstance(data, dict):
             return data
         values: dict[str, Any] = dict(data)
-        provider = str(values.get("llm_provider") or "openai").strip().lower()
+        provider = str(values.get("llm_provider") or DEFAULT_PROVIDER).strip().lower()
         profile = PROVIDER_MODELS.get(provider)
         if profile is None:
             return values

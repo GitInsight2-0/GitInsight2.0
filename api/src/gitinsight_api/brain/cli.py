@@ -2,7 +2,7 @@
 
 사용:
   uv run python -m gitinsight_api.brain.cli                 # LLM 없이 미리 만든 질문만
-  uv run python -m gitinsight_api.brain.cli --real-llm      # 실제 판단 LLM (OPENAI_API_KEY 필요)
+  uv run python -m gitinsight_api.brain.cli --real-llm      # 실제 판단 LLM (GEMINI_API_KEY 필요)
   uv run python -m gitinsight_api.brain.cli --real-llm --jd jd.txt --duration 10
 답변 입력 중 /quit 를 입력하면 끝납니다.
 """

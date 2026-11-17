@@ -4,7 +4,7 @@
   uv run python scripts/demo_check.py                 # LLM 없이 (미리 만든 질문, 판단 표 리포트)
   uv run python scripts/demo_check.py --block-llm     # 판단 LLM이 오류만 내는 상황을 흉내 냄
   uv run python scripts/demo_check.py --real-llm      # 실제 LLM (API 키 필요, 비용 발생)
-  $env:LLM_PROVIDER="gemini"; uv run python scripts/demo_check.py --real-llm   # 제공사 전환 확인
+  $env:LLM_JUDGE_MODEL="gemini/gemini-3.6-flash"; uv run python scripts/demo_check.py --real-llm   # 판단 모델을 바꿔 확인
   uv run python scripts/demo_check.py --from-db --user-id <GitHub 숫자 id>
       # DATABASE_URL의 DB에 넣은 데모 스냅샷으로 진행 (먼저 scripts/seed_demo_analysis.py로 넣습니다).
       # 서버처럼 그 사용자가 스냅샷의 주인인지 먼저 확인하고, 아니면 실패로 끝납니다.

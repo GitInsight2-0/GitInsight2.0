@@ -2,7 +2,7 @@
 
 사용:
   uv run python scripts/llm_latency.py --n 20
-  uv run python scripts/llm_latency.py --n 20 --model openai/gpt-6.1-terra --reasoning-effort low
+  uv run python scripts/llm_latency.py --n 20 --model gemini/gemini-3.6-flash --reasoning-effort low
 
 실제 판단 프롬프트와 Judgment 스키마로 호출합니다.
 새 스키마의 첫 요청은 추가 지연이 있어 첫 호출(예열)은 통계에서 뺍니다.

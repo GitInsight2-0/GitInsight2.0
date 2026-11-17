@@ -2,7 +2,7 @@
 
 사용:
   uv run python scripts/eval_stage2.py
-  uv run python scripts/eval_stage2.py --model openai/gpt-6.1-sol
+  uv run python scripts/eval_stage2.py --model gemini/gemini-3.6-flash
   uv run python scripts/eval_stage2.py --reasoning-effort ""   # 모델 기본 추론량으로 비교
   uv run python scripts/eval_stage2.py --requester-login <GitHub 로그인> --save-json .data/analysis.json
       # 그 계정 기준 기여 라벨을 붙이고, 결과를 데모 스냅샷으로 넣을 수 있게 저장합니다

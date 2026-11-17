@@ -38,10 +38,22 @@ def settings() -> Settings:
     return Settings(_env_file=None)  # type: ignore[call-arg]
 
 
-def test_default_provider_is_openai() -> None:
+def test_default_provider_is_gemini() -> None:
+    # 판단·분석·리포트 LLM도 Gemini만 쓰기로 했습니다 (#63). OPENAI_API_KEY 없이 기본 설정으로 돌아야 합니다.
     s = settings()
+    assert s.llm_provider == "gemini"
+    assert s.llm_judge_model == PROVIDER_MODELS["gemini"]["llm_judge_model"]
+    assert s.llm_analysis_model == PROVIDER_MODELS["gemini"]["llm_analysis_model"]
+    assert s.llm_report_model == PROVIDER_MODELS["gemini"]["llm_report_model"]
+
+
+def test_openai_can_still_be_selected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    s = settings()
+
     assert s.llm_provider == "openai"
     assert s.llm_judge_model == PROVIDER_MODELS["openai"]["llm_judge_model"]
+    assert s.llm_report_model == PROVIDER_MODELS["openai"]["llm_report_model"]
 
 
 def test_provider_switch_changes_all_default_models(monkeypatch: pytest.MonkeyPatch) -> None:
