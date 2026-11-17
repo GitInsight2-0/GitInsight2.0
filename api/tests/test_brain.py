@@ -290,6 +290,11 @@ def _with_followup(question: str) -> Judgment:
         "#L12부터 무엇을 하나요?",
         "line 12에서는 무엇을 하나요?",
         "10행부터 무엇을 하나요?",
+        "L12에서 왜 그렇게 했나요?",
+        "L12의 조건문은 무엇인가요?",
+        "L12가 핵심인가요?",
+        "#L5에서는 무엇을 하나요?",
+        "L3-L5 구간은 왜 필요했나요?",
     ],
 )
 def test_validator_rejects_line_number_forms(question: str) -> None:
@@ -306,6 +311,9 @@ def test_validator_rejects_line_number_forms(question: str) -> None:
         "L1 정규화와 비교하면 어떤가요?",
         "2행렬 곱셈은 어디에서 쓰이나요?",
         "HTTP/2와 UTF-8 처리는 어떻게 하나요?",
+        "L4를 쓰는 이유는 무엇인가요?",
+        "L3를 거치는 요청은 어떻게 처리하나요?",
+        "L2에서 캐시 미스가 나면 어떻게 하나요?",
     ],
 )
 def test_validator_accepts_technical_terms(question: str) -> None:

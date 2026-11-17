@@ -85,6 +85,11 @@ def test_followup_symbol_is_added_to_related_symbols(tmp_path: Path) -> None:
         ({"hint": "L10-L20 구간을 보세요."}, "줄 번호"),
         ({"hint": "L10~20을 보세요."}, "줄 번호"),
         ({"hint": "#L12부터 보세요."}, "줄 번호"),
+        ({"hint": "L12에서 시작합니다."}, "줄 번호"),
+        ({"hint": "L12의 조건문을 보세요."}, "줄 번호"),
+        ({"hint": "L12가 핵심입니다."}, "줄 번호"),
+        ({"hint": "#L5에서 시작합니다."}, "줄 번호"),
+        ({"hint": "L3-L5 구간을 보세요."}, "줄 번호"),
         ({"base_question": "무엇을 하나요? 왜 그렇게 했나요?"}, "한 문장"),
         ({"question_intent": "  "}, "비어 있음"),
         ({"points": 2}, "3~5개"),
@@ -115,6 +120,9 @@ def test_invalid_material_is_rejected(tmp_path: Path, change: dict, problem: str
         "L1 정규화와 비교하면 어떤가요?",
         "2행렬 곱셈은 어디에서 쓰이나요?",
         "HTTP/2와 UTF-8 처리는 어떻게 하나요?",
+        "L4를 쓰는 이유는 무엇인가요?",
+        "L3를 거치는 요청은 어떻게 처리하나요?",
+        "L2에서 캐시 미스가 나면 어떻게 하나요?",
     ],
 )
 def test_technical_terms_are_not_line_numbers(tmp_path: Path, question: str) -> None:
