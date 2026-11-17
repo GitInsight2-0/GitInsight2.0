@@ -2,7 +2,16 @@
 
 import type { AnalysisState, Repo } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
-import { type ReposResult, STATUS_TEXT, fetchAnalysis, fetchRepos, interviewHref, startAnalysis } from "@/lib/analyses";
+import {
+  type ReposResult,
+  STATUS_TEXT,
+  SUPPORTED_LANGUAGE_NOTE,
+  fetchAnalysis,
+  fetchRepos,
+  interviewHref,
+  isUnsupportedCode,
+  startAnalysis,
+} from "@/lib/analyses";
 import { DEMO_ANALYSIS_ID, DEMO_REPO } from "@/lib/demo";
 import { explainError } from "@/lib/voice/errors";
 import styles from "./home.module.css";
@@ -104,6 +113,7 @@ export default function RepoPicker() {
     <div className={styles.picker}>
       <fieldset className={styles.repoList}>
         <legend className={styles.label}>면접 볼 레포를 고르세요</legend>
+        <p className={styles.muted}>{SUPPORTED_LANGUAGE_NOTE}</p>
         {repos.repos.length >= SEARCH_FROM && (
           <input
             type="search"
@@ -147,6 +157,8 @@ function JobView({ job, onRetry, onBack }: { job: Exclude<Job, { kind: "idle" }>
   const failed = job.kind === "error" || status === "failed";
   const message =
     job.kind === "error" ? job.message : job.kind === "running" && status === "failed" ? job.state?.error ?? "" : "";
+  // Python 코드가 없는 레포는 다시 분석해도 같은 결과라, 다른 레포를 고르게 먼저 안내합니다 (#71).
+  const unsupported = job.kind === "running" && status === "failed" && isUnsupportedCode(job.state?.error);
   return (
     <div className={styles.picker}>
       <div className={styles.repo}>
@@ -173,23 +185,38 @@ function JobView({ job, onRetry, onBack }: { job: Exclude<Job, { kind: "idle" }>
         </div>
       )}
 
-      {failed && (
-        <p role="alert" className={styles.error}>
-          분석하지 못했어요.{message ? ` (${message})` : ""}
-        </p>
-      )}
+      {failed &&
+        (unsupported ? (
+          <p role="alert" className={styles.error}>
+            이 레포에서 Python 코드를 찾지 못했어요. 다른 레포를 골라 주세요.
+          </p>
+        ) : (
+          <p role="alert" className={styles.error}>
+            분석하지 못했어요.{message ? ` (${message})` : ""}
+          </p>
+        ))}
 
       {job.kind === "running" && status === "done" && (
         <a className={styles.primary} href={interviewHref(job.analysisId, job.repo.full_name)}>
           면접 시작
         </a>
       )}
-      {failed && (
+      {unsupported && (
+        <>
+          <button type="button" className={styles.primary} onClick={onBack}>
+            다른 레포 고르기
+          </button>
+          <button type="button" className={styles.ghost} onClick={onRetry}>
+            다시 분석
+          </button>
+        </>
+      )}
+      {failed && !unsupported && (
         <button type="button" className={styles.primary} onClick={onRetry}>
           다시 분석
         </button>
       )}
-      {status !== "done" && (
+      {status !== "done" && !unsupported && (
         <button type="button" className={styles.ghost} onClick={onBack}>
           {failed ? "다른 레포 고르기" : "그만 기다리고 다른 레포 고르기"}
         </button>
