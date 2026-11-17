@@ -7,6 +7,7 @@
 import logging
 from typing import Protocol
 
+from gitinsight_api.analyses.access import RepoAccess
 from gitinsight_api.analyses.store import AnalysisKey, AnalysisRecord, AnalysisStore
 from gitinsight_contracts.api import AnalysisCreated, AnalysisState, AnalysisStatus
 
@@ -14,8 +15,11 @@ logger = logging.getLogger(__name__)
 
 
 class Launcher(Protocol):
-    async def launch(self, record: AnalysisRecord) -> None:
-        """분석 작업을 시작하거나 대기열에 넣습니다. 끝까지 기다리지 않고 바로 돌아옵니다."""
+    async def launch(self, record: AnalysisRecord, access: RepoAccess | None = None) -> None:
+        """분석 작업을 시작하거나 대기열에 넣습니다. 끝까지 기다리지 않고 바로 돌아옵니다.
+
+        access가 있으면 요청자 본인의 토큰으로 레포를 받고 요청자 기준으로 기여 라벨을 붙입니다 (#18).
+        """
         ...
 
 
@@ -24,16 +28,27 @@ class AnalysisService:
         self._store = store
         self._launcher = launcher
 
-    async def request(self, repo_full_name: str, commit_sha: str, user_id: str) -> AnalysisCreated:
+    async def request(
+        self,
+        repo_full_name: str,
+        commit_sha: str,
+        user_id: str,
+        access: RepoAccess | None = None,
+    ) -> AnalysisCreated:
         """분석을 요청합니다. 같은 키의 완료된 결과가 있으면 cached=True로 바로 돌려줍니다.
 
         같은 키로 진행 중인 분석이 있으면 새로 시작하지 않고 그 analysis_id를 돌려줍니다.
+        access(요청자 토큰과 이메일)는 새로 시작할 때만 Launcher로 넘기고 저장하지 않습니다.
         """
         key = AnalysisKey(repo_full_name=repo_full_name, commit_sha=commit_sha, user_id=user_id)
         record, created = await self._store.get_or_create(key)
         if created:
             try:
-                await self._launcher.launch(record)
+                # access가 없으면 예전처럼 record만 넘깁니다 (access를 받지 않는 Launcher도 그대로 동작).
+                if access is None:
+                    await self._launcher.launch(record)
+                else:
+                    await self._launcher.launch(record, access)
             except Exception as error:
                 # 작업을 넘기지 못한 기록이 진행 중으로 남으면 같은 키의 재요청이 막힙니다.
                 logger.warning("analysis_launch_failed error=%s", type(error).__name__)

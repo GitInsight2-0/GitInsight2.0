@@ -1,26 +1,34 @@
 """분석 요청 → 워커 실행 → 결과 저장 → 면접 시작까지 메모리 저장소로 이어서 확인합니다."""
 
 import asyncio
+import base64
+import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import SecretStr
 
+from gitinsight_api.analyses.access import RepoAccess
 from gitinsight_api.analyses.service import AnalysisService
 from gitinsight_api.analyses.store import AnalysisKey, AnalysisRecord, InMemoryAnalysisStore
 from gitinsight_api.brain.repository import InMemorySessionRepository
 from gitinsight_api.brain.service import InterviewBrain
 from gitinsight_api.llm import LLMTimeoutError
 from gitinsight_api.llm.fake import FakeLLM, FakeStep
-from gitinsight_contracts.analysis import AnalysisResult
-from gitinsight_contracts.api import AnalysisStatus
+from gitinsight_contracts.analysis import AnalysisResult, ContributionLabel
+from gitinsight_contracts.api import AnalysisState, AnalysisStatus
 from gitinsight_contracts.interview import InterviewMode, SessionCreate
-from gitinsight_worker.git import Cloner, git_cloner
+from gitinsight_worker import jobs
+from gitinsight_worker.git import Cloner, git_cloner, git_env
 from gitinsight_worker.jobs import (
     INTERRUPTED_ERROR,
     CloneFor,
     InProcessLauncher,
     execute,
     public_cloner,
+    requester_of,
+    user_token_cloner,
 )
 
 from worker_test_support import make_origin, material
@@ -222,3 +230,104 @@ async def test_bad_repo_name_fails_the_request_without_starting(tmp_path: Path) 
     [record] = list(store._records.values())
     assert record.state.status is AnalysisStatus.FAILED
     assert record.state.error == "ValueError"
+
+
+# ---- 요청자 토큰으로 내려받기 (#18 2단계) ----
+
+
+async def test_launch_with_access_uses_token_cloner_and_requester(
+    origin: tuple[Path, str], tmp_path: Path
+) -> None:
+    store = InMemoryAnalysisStore()
+    seen: list[RepoAccess] = []
+
+    def access_clone_for(record: AnalysisRecord, access: RepoAccess) -> Cloner:
+        seen.append(access)
+        return git_cloner(str(origin[0]), record.key.commit_sha, allowed_protocols="file")
+
+    def public_must_not_run(_record: AnalysisRecord) -> Cloner:
+        raise AssertionError("토큰이 있으면 공개 주소로 받지 않습니다")
+
+    work = tmp_path / "work"
+    work.mkdir()
+    launcher = InProcessLauncher(
+        store,
+        ok_llm(),
+        clone_for=public_must_not_run,
+        access_clone_for=access_clone_for,
+        work_dir=work,
+    )
+    access = RepoAccess(
+        token=SecretStr("ghu_secret"), github_id=7, login="dev", emails=("t@example.com",)
+    )
+    created = await AnalysisService(store, launcher).request(REPO, origin[1], "7", access)
+    await launcher.join()
+
+    assert seen == [access]
+    result = await store.get(created.analysis_id)
+    assert result is not None
+    # make_origin의 커밋 작성자(t@example.com)가 요청자의 인증 이메일이라 모두 본인 기여입니다.
+    assert result.topics
+    assert {t.contribution_label for t in result.topics} == {ContributionLabel.VERIFIED}
+
+
+def test_requester_of_access_includes_verified_and_noreply_emails() -> None:
+    access = RepoAccess(
+        token=SecretStr("ghu_secret"), github_id=7, login="Dev", emails=("Me@Example.com",)
+    )
+    requester = requester_of(access)
+    assert requester.matches("me@example.com")
+    assert requester.matches("dev@users.noreply.github.com")
+    assert requester.matches("7+dev@users.noreply.github.com")
+
+
+def test_user_token_cloner_only_for_github_https(monkeypatch: pytest.MonkeyPatch) -> None:
+    record = AnalysisRecord(
+        analysis_id="a",
+        key=AnalysisKey("owner/repo", "a" * 40, "7"),
+        state=AnalysisState(status=AnalysisStatus.QUEUED, progress=0, commit_sha=None),
+        updated_at=datetime.now(UTC),
+    )
+    access = RepoAccess(token=SecretStr("ghu_secret"), github_id=7, login="dev")
+    calls: list[tuple[str, str, SecretStr | None]] = []
+
+    def fake_git_cloner(url: str, sha: str, *, token: SecretStr | None = None) -> Cloner:
+        calls.append((url, sha, token))
+        return lambda _dest: None
+
+    monkeypatch.setattr(jobs, "git_cloner", fake_git_cloner)
+    user_token_cloner(record, access)
+    assert calls == [("https://github.com/owner/repo.git", "a" * 40, access.token)]
+    monkeypatch.undo()
+    with pytest.raises(ValueError):
+        git_cloner("https://evil.example/owner/repo.git", "a" * 40, token=SecretStr("ghu_x"))
+    bad = AnalysisRecord(
+        analysis_id="b",
+        key=AnalysisKey("../etc", "a" * 40, "7"),
+        state=record.state,
+        updated_at=record.updated_at,
+    )
+    with pytest.raises(ValueError):
+        user_token_cloner(bad, access)
+
+
+def test_git_env_sends_token_only_to_github(tmp_path: Path) -> None:
+    env = git_env("https", SecretStr("ghu_secret"))
+
+    # 토큰이 명령줄 인자로 나가지 않고, git이 github.com 주소에만 헤더를 붙이는지 git으로 확인합니다.
+    def header_for(url: str) -> str:
+        found = subprocess.run(
+            ["git", "config", "--get-urlmatch", "http.extraHeader", url],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+        )
+        return found.stdout.strip()
+
+    expected = "Basic " + base64.b64encode(b"x-access-token:ghu_secret").decode()
+    assert header_for("https://github.com/owner/repo.git") == f"Authorization: {expected}"
+    assert header_for("https://evil.example/owner/repo.git") == ""
+    assert env["GIT_CONFIG_KEY_1"] == "credential.helper"
+    assert env["GIT_CONFIG_VALUE_1"] == ""
+    assert "GIT_CONFIG_KEY_0" not in git_env("https")

@@ -1,7 +1,9 @@
 import asyncio
 
 import pytest
+from pydantic import SecretStr
 
+from gitinsight_api.analyses.access import RepoAccess
 from gitinsight_api.analyses.service import AnalysisService
 from gitinsight_api.analyses.store import AnalysisRecord, InMemoryAnalysisStore
 from gitinsight_contracts.api import AnalysisStatus
@@ -14,10 +16,12 @@ REPO, SHA = SAMPLE.repo_full_name, SAMPLE.commit_sha
 class RecordingLauncher:
     def __init__(self, error: Exception | None = None) -> None:
         self.launched: list[AnalysisRecord] = []
+        self.access: list[RepoAccess | None] = []
         self.error = error
 
-    async def launch(self, record: AnalysisRecord) -> None:
+    async def launch(self, record: AnalysisRecord, access: RepoAccess | None = None) -> None:
         self.launched.append(record)
+        self.access.append(access)
         # 실제 구현처럼 다른 요청이 끼어들 틈을 줍니다.
         await asyncio.sleep(0)
         if self.error is not None:
@@ -96,3 +100,13 @@ async def test_state_is_visible_only_to_requester(store: InMemoryAnalysisStore) 
     assert mine is not None and mine.status is AnalysisStatus.QUEUED
     assert await service.state(created.analysis_id, "u2") is None
     assert await service.state("missing", "u1") is None
+
+
+async def test_access_goes_to_launcher_only_for_new_analysis(store: InMemoryAnalysisStore) -> None:
+    launcher = RecordingLauncher()
+    service = AnalysisService(store, launcher)
+    access = RepoAccess(token=SecretStr("ghu_secret"), github_id=1, login="octo")
+    await service.request(REPO, SHA, "u1", access)
+    await service.request(REPO, SHA, "u1", access)
+    assert launcher.access == [access]
+    assert "ghu_secret" not in repr(access)
