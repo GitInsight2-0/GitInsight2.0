@@ -89,12 +89,13 @@ export async function postTurn(
   const q = opts.labDelayMs ? `?lab_delay_ms=${opts.labDelayMs}` : "";
   const url = `/api/sessions/${sessionId}/turns${q}`;
   // 길이 상한을 넘으면 서버가 422로 거절하므로 미리 자릅니다.
-  if (body.transcript.length > TRANSCRIPT_MAX) body = { ...body, transcript: body.transcript.slice(0, TRANSCRIPT_MAX) };
+  if (body.transcript.length > TRANSCRIPT_MAX) body = { ...body, transcript: cut(body.transcript, TRANSCRIPT_MAX) };
   const lab = opts.labDelayMs ?? 0;
   const started = performance.now();
   for (let attempt = 0; ; attempt++) {
-    const left = TURN_BUDGET_MS - (performance.now() - started);
-    const limit = attempt === 0 ? TURN_FIRST_TRY_MS : left;
+    // 판단 지연 흉내(lab)는 시도마다 서버가 더 기다리므로 예산에도 시도마다 더합니다.
+    const left = TURN_BUDGET_MS + lab * (attempt + 1) - (performance.now() - started);
+    const limit = attempt === 0 ? TURN_FIRST_TRY_MS : left - lab;
     const s = linkedSignal(opts.signal, limit + lab);
     try {
       return await postJson<BrainReply>(url, body, s.signal);
@@ -102,7 +103,8 @@ export async function postTurn(
       if (opts.signal?.aborted) throw e;
       const retryable = !(e instanceof ApiError) || e.status >= 500;
       // 남은 시간이 너무 짧으면 다시 보내도 받을 수 없으니 바로 실패로 넘깁니다.
-      const left = TURN_BUDGET_MS - (performance.now() - started);
+      // 다음 시도가 쓸 수 있는 시간 (그 시도의 lab 지연 제외)
+      const left = TURN_BUDGET_MS + lab * (attempt + 1) - (performance.now() - started);
       if (attempt >= 1 || !retryable || left < 1000) throw e;
     } finally {
       s.done();
@@ -132,4 +134,10 @@ export async function fetchVoiceToken(
   } finally {
     s.done();
   }
+}
+
+/** UTF-16 단위로 max까지 자르되, 이모지 같은 서로게이트 쌍의 가운데에서 끊지 않습니다 */
+function cut(text: string, max: number): string {
+  const last = text.charCodeAt(max - 1);
+  return text.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max);
 }
