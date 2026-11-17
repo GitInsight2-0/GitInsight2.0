@@ -1,11 +1,15 @@
-"""분석 저장소 계약 테스트. Postgres 구현(#17 이후)이 생기면 STORES에 추가해 같은 테스트를 돌립니다."""
+"""분석 저장소 계약 테스트. 메모리 구현과 Postgres 구현이 같은 테스트를 통과해야 합니다.
+
+Postgres 구현은 postgres 표시로 기본 실행에서 빠집니다.
+실행: TEST_DATABASE_URL=postgresql://... uv run pytest -m postgres api/tests/test_analysis_store.py
+"""
 
 import asyncio
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from gitinsight_api.analyses.postgres import PostgresAnalysisStore
 from gitinsight_api.analyses.store import (
     STALE_AFTER,
     STALE_ERROR,
@@ -33,9 +37,6 @@ class FakeClock:
         return self.now
 
 
-StoreFactory = Callable[[Clock], AnalysisStore]
-STORES: list[StoreFactory] = [lambda clock: InMemoryAnalysisStore(clock=clock)]
-
 SAMPLE = load_analysis()
 KEY = AnalysisKey(SAMPLE.repo_full_name, SAMPLE.commit_sha, user_id="u1")
 
@@ -45,9 +46,14 @@ def clock() -> FakeClock:
     return FakeClock()
 
 
-@pytest.fixture(params=STORES, ids=["memory"])
+@pytest.fixture(params=["memory", pytest.param("postgres", marks=pytest.mark.postgres)])
 def store(request: pytest.FixtureRequest, clock: FakeClock) -> AnalysisStore:
-    return request.param(clock)
+    # 시간을 앞당기는 테스트가 있어서 두 구현 모두 가짜 시계를 받습니다.
+    # 운영의 Postgres 구현은 시계를 받지 않고 DB now()를 씁니다.
+    test_clock: Clock = clock
+    if request.param == "postgres":
+        return PostgresAnalysisStore(request.getfixturevalue("pg_engine"), clock=test_clock)
+    return InMemoryAnalysisStore(clock=test_clock)
 
 
 def result_for(analysis_id: str) -> AnalysisResult:
@@ -232,6 +238,32 @@ async def test_result_only_for_in_progress_record(store: AnalysisStore) -> None:
 
     with pytest.raises(ValueError, match="진행 중"):
         await store.save_result(record.analysis_id, result_for(record.analysis_id))
+
+
+async def test_fail_in_progress_closes_only_running_records(store: AnalysisStore) -> None:
+    running, _ = await store.get_or_create(KEY)
+    await store.update_state(running.analysis_id, stage1(0.3))
+    queued, _ = await store.get_or_create(AnalysisKey(KEY.repo_full_name, KEY.commit_sha, "u2"))
+    done, _ = await store.get_or_create(AnalysisKey(KEY.repo_full_name, KEY.commit_sha, "u3"))
+    await store.save_result(done.analysis_id, result_for(done.analysis_id))
+
+    closed = await store.fail_in_progress("InterruptedAnalysis")
+
+    assert closed == 2
+    for record_id in (running.analysis_id, queued.analysis_id):
+        record = await store.get_record(record_id)
+        assert record is not None
+        assert (record.state.status, record.state.error) == (
+            AnalysisStatus.FAILED,
+            "InterruptedAnalysis",
+        )
+    # 진행률은 유지해서 화면이 어느 단계에서 멈췄는지 알 수 있습니다.
+    stopped = await store.get_record(running.analysis_id)
+    assert stopped is not None and stopped.state.progress == 0.3
+    finished = await store.get_record(done.analysis_id)
+    assert finished is not None and finished.state.status is AnalysisStatus.DONE
+    # 닫힌 키는 다시 요청하면 새로 분석합니다.
+    assert (await store.get_or_create(KEY))[1]
 
 
 async def test_unknown_record(store: AnalysisStore) -> None:

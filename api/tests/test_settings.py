@@ -2,7 +2,11 @@ from uuid import uuid4
 
 import pytest
 
-from gitinsight_api.brain.factory import build_fixture_brain, build_report_service
+from gitinsight_api.brain.factory import (
+    build_analysis_llm,
+    build_fixture_brain,
+    build_report_service,
+)
 from gitinsight_api.llm.fake import FakeLLM
 from gitinsight_api.settings import PROVIDER_MODELS, Settings
 from gitinsight_contracts.interview import (
@@ -20,6 +24,7 @@ MODEL_ENV = (
     "LLM_ANALYSIS_MODEL",
     "LLM_REPORT_MODEL",
     "BRAIN_FORCE_PREPARED",
+    "LLM_ANALYSIS_REASONING_EFFORT",
 )
 
 
@@ -57,6 +62,17 @@ def test_explicit_model_wins_and_empty_model_falls_back(monkeypatch: pytest.Monk
 
     assert s.llm_judge_model == "gemini/custom-judge"
     assert s.llm_report_model == "gemini/gemini-3.8-flash"
+
+
+def test_analysis_reasoning_effort_defaults_to_low(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 분석 지연이 44~57초에서 7~9초로 줄어든 설정입니다(docs/evals/stage2-2026-11-12.md).
+    assert settings().llm_analysis_reasoning_effort == "low"
+    assert build_analysis_llm(settings())._optional_params == {"reasoning_effort": "low"}
+
+    # 비워 두면 모델 기본값을 씁니다.
+    monkeypatch.setenv("LLM_ANALYSIS_REASONING_EFFORT", "")
+    assert settings().llm_analysis_reasoning_effort is None
+    assert build_analysis_llm(settings())._optional_params == {}
 
 
 def test_unknown_provider_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

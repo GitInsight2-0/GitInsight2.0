@@ -6,7 +6,7 @@
 
 import pytest
 
-from gitinsight_api.llm import LiteLLMClient
+from gitinsight_api.brain.factory import build_analysis_llm
 from gitinsight_api.settings import Settings
 from gitinsight_contracts.fixtures import load_analysis
 from gitinsight_worker.git import git_cloner
@@ -26,7 +26,7 @@ async def test_sample_repo_topics_pass_contract_with_real_llm() -> None:
         git_cloner(url, sample.commit_sha),
         sample.commit_sha,
         Recorder(),
-        LiteLLMClient(Settings().llm_analysis_model),
+        build_analysis_llm(Settings()),
         analysis_id="live-stage2",
         repo_full_name=sample.repo_full_name,
     )

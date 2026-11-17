@@ -1,6 +1,6 @@
 """설정으로 면접 두뇌와 LLM 클라이언트를 만듭니다. CLI와 평가 스크립트가 같이 씁니다."""
 
-from gitinsight_api.brain.analysis_source import FixtureAnalysisSource
+from gitinsight_api.brain.analysis_source import AnalysisSource, FixtureAnalysisSource
 from gitinsight_api.brain.repository import InMemorySessionRepository
 from gitinsight_api.brain.service import InterviewBrain
 from gitinsight_api.llm import CostRecorder, LiteLLMClient, LLMClient
@@ -19,6 +19,17 @@ def build_judge_llm(settings: Settings, cost_recorder: CostRecorder | None = Non
     )
 
 
+def build_analysis_llm(
+    settings: Settings, cost_recorder: CostRecorder | None = None
+) -> LiteLLMClient:
+    """분석 워커의 2단계(주제 생성)용 클라이언트입니다."""
+    return LiteLLMClient(
+        settings.llm_analysis_model,
+        cost_recorder=cost_recorder,
+        reasoning_effort=settings.llm_analysis_reasoning_effort,
+    )
+
+
 def build_report_llm(
     settings: Settings, cost_recorder: CostRecorder | None = None
 ) -> LiteLLMClient:
@@ -32,12 +43,16 @@ def build_report_service(
     *,
     llm: LLMClient | None,
     force_prepared: bool = False,
+    analyses: AnalysisSource | None = None,
 ) -> ReportService:
-    """llm이 없으면 LLM 없이 턴별 판단 표 리포트만 만듭니다."""
+    """llm이 없으면 LLM 없이 턴별 판단 표 리포트만 만듭니다.
+
+    analyses를 주면 analysis 대신 그 저장소(예: Postgres 분석 기록)에서 결과를 읽습니다.
+    """
     from gitinsight_api.llm.fake import FakeLLM
 
     return ReportService(
-        analyses=FixtureAnalysisSource(analysis),
+        analyses=analyses if analyses is not None else FixtureAnalysisSource(analysis),
         sessions=brain.repository,
         store=InMemoryReportStore(),
         builder=ReportBuilder(
@@ -71,13 +86,18 @@ def build_fixture_brain(
     llm: LLMClient | None,
     fixture: str | None = None,
     force_prepared: bool = False,
+    analyses: AnalysisSource | None = None,
 ) -> InterviewBrain:
-    """샘플 분석 결과와 메모리 저장소로 면접 두뇌를 만듭니다. llm이 없으면 미리 만든 질문만 씁니다."""
+    """샘플 분석 결과와 메모리 저장소로 면접 두뇌를 만듭니다. llm이 없으면 미리 만든 질문만 씁니다.
+
+    analyses를 주면 샘플 파일 대신 그 저장소(예: Postgres 분석 기록)에서 면접 재료를 읽습니다.
+    """
     from gitinsight_api.llm.fake import FakeLLM
 
-    analysis = load_analysis(fixture or settings.fixture_analysis)
+    if analyses is None:
+        analyses = FixtureAnalysisSource(load_analysis(fixture or settings.fixture_analysis))
     return InterviewBrain(
-        analyses=FixtureAnalysisSource(analysis),
+        analyses=analyses,
         repository=InMemorySessionRepository(),
         llm=llm if llm is not None else FakeLLM(),
         judge_timeout_s=settings.judge_timeout_s,

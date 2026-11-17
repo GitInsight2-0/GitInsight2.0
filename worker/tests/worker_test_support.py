@@ -1,5 +1,7 @@
 """워커 테스트 공용 도구. pytest 설정의 pythonpath로 테스트 모듈에서 import합니다."""
 
+import os
+import subprocess
 from pathlib import Path
 
 from gitinsight_contracts.api import AnalysisState
@@ -76,3 +78,22 @@ def material(
         hint=hint,
         related_symbol_ids=related or [],
     )
+
+
+def make_origin(path: Path, files: dict[str, str] | None = None) -> str:
+    """REPO_FILES로 커밋 하나짜리 로컬 git 레포를 만들고 커밋 SHA를 돌려줍니다. 작성자는 t@example.com입니다."""
+    path.mkdir()
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.com",
+    }
+    write_repo(path, files)
+    for args in (["init", "--quiet"], ["add", "-A"], ["commit", "--quiet", "-m", "init"]):
+        subprocess.run(["git", *args], cwd=path, check=True, capture_output=True, env=env)
+    out = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=path, check=True, capture_output=True, text=True
+    )
+    return out.stdout.strip()
