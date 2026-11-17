@@ -7,7 +7,7 @@
  */
 import type { VoiceToken } from "@gitinsight/contracts";
 import { EndSensitivity, GoogleGenAI, Modality, Type } from "@google/genai";
-import { DELEGATION_TOOL, TOOL_DESCRIPTION, TOOL_PARAMETERS, type VadSettings, buildInstructions, parseVad } from "@/lib/voice/config";
+import { DELEGATION_TOOL, TOOL_DESCRIPTION, TRANSCRIPT_DESCRIPTION, type VadSettings, buildInstructions, parseVad } from "@/lib/voice/config";
 
 export async function POST(req: Request) {
   if (process.env.LAB_ENABLED !== "true") {
@@ -39,7 +39,7 @@ async function geminiToken(vad: VadSettings, instructions: string): Promise<Voic
       description: TOOL_DESCRIPTION,
       parameters: {
         type: Type.OBJECT,
-        properties: { transcript: { type: Type.STRING, description: TOOL_PARAMETERS.properties.transcript.description } },
+        properties: { transcript: { type: Type.STRING, description: TRANSCRIPT_DESCRIPTION } },
         required: ["transcript"],
       },
     },
