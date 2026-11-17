@@ -3,6 +3,7 @@
 LLM은 여기서 고른 후보마다 질문 재료를 쓰기만 하고, 어떤 심볼을 주제로 삼을지는 정하지 않습니다.
 """
 
+import re
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -65,6 +66,59 @@ def is_eligible(symbol: SymbolRef) -> bool:
         and not is_test_path(symbol.path)
         and not is_inactive_path(symbol.path)
     )
+
+
+# 실제 동작하는 줄이 이보다 적으면 껍데기 코드로 보고 주제로 쓰지 않습니다.
+# 예: 메서드마다 로그 한 줄이나 다른 메서드 호출만 있는 클래스. LLM이 없는 설계 의도를 지어내기 쉽습니다(PR #54 리뷰).
+MIN_LOGIC_LINES = 5
+_DOCSTRING_QUOTES = ('"""', "'''")
+_HEADER = re.compile(r"(?:@|(?:async\s+)?def\s|class\s)")
+_LOG_CALL = re.compile(r"(?:\w+\.)*(?:log|logger|logging|_log|_logger|console)\.\w+\(|print\(")
+_NO_OP = frozenset({"pass", "...", "return", "return None", ")", "]", "}", "{", "):", "]:"})
+
+
+def logic_line_count(code: str) -> int:
+    """심볼 코드에서 실제로 동작하는 줄 수를 셉니다.
+
+    빈 줄, 주석, 문서 문자열, 정의 머리줄(def, class, 데코레이터), 로그·print 호출, pass, 빈 return은 빼고 셉니다.
+    여러 줄짜리 호출의 이어지는 줄은 그대로 세므로, 실제보다 많게 셀 수는 있어도 적게 세지는 않습니다.
+    """
+    count = 0
+    in_docstring: str | None = None
+    # 문서 문자열이 아닌 여러 줄 문자열 값(예: 프롬프트) 안입니다. 이 줄들은 셉니다.
+    in_string: str | None = None
+    for raw in code.splitlines():
+        line = raw.strip()
+        if in_docstring is not None:
+            if in_docstring in line:
+                in_docstring = None
+            continue
+        if in_string is not None:
+            count += 1
+            if line.count(in_string) % 2 == 1:
+                in_string = None
+            continue
+        quote = next((q for q in _DOCSTRING_QUOTES if line.lstrip("rRbBuUfF").startswith(q)), None)
+        if quote is not None:
+            body = line.lstrip("rRbBuUfF")[len(quote) :]
+            if quote not in body:
+                in_docstring = quote
+            continue
+        if (
+            not line
+            or line.startswith(("#", "//"))
+            or _HEADER.match(line)
+            or _LOG_CALL.match(line)
+            or line in _NO_OP
+        ):
+            continue
+        count += 1
+        in_string = next((q for q in _DOCSTRING_QUOTES if line.count(q) % 2 == 1), None)
+    return count
+
+
+def has_enough_logic(code: str) -> bool:
+    return logic_line_count(code) >= MIN_LOGIC_LINES
 
 
 def overlaps(a: SymbolRef, b: SymbolRef) -> bool:
