@@ -11,6 +11,10 @@ from sqlalchemy.exc import ArgumentError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 DRIVER = "postgresql+psycopg"
+# DB 호스트가 응답하지 않을 때 연결을 기다리는 최대 시간(초)입니다.
+# 없으면 OS 기본값(Windows에서 약 130초)만큼 요청과 `alembic upgrade`가 멈춥니다.
+CONNECT_TIMEOUT_S = 5
+CONNECT_ARGS = {"connect_timeout": CONNECT_TIMEOUT_S}
 
 # 제약 조건 이름을 고정해 두면 마이그레이션에서 이름으로 지우거나 바꿀 수 있습니다.
 metadata = MetaData(
@@ -47,4 +51,6 @@ def normalize_url(raw: str) -> URL:
 def create_engine(raw_url: str) -> AsyncEngine:
     """비동기 엔진을 만듭니다. 만들 때는 연결하지 않고, 처음 쿼리할 때 연결합니다."""
     # pool_pre_ping: 호스팅 쪽에서 끊은 연결을 쓰기 전에 걸러 냅니다.
-    return create_async_engine(normalize_url(raw_url), pool_pre_ping=True)
+    return create_async_engine(
+        normalize_url(raw_url), pool_pre_ping=True, connect_args=CONNECT_ARGS
+    )

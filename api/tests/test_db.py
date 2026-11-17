@@ -7,13 +7,20 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 
+import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
 from pydantic import SecretStr
 
 from gitinsight_api import event_loop
-from gitinsight_api.db import DRIVER, DatabaseUrlError, normalize_url
+from gitinsight_api.db import (
+    CONNECT_TIMEOUT_S,
+    DRIVER,
+    DatabaseUrlError,
+    create_engine,
+    normalize_url,
+)
 from gitinsight_api.main import create_app
 from gitinsight_api.metrics_store import (
     JsonlMetricsStore,
@@ -95,6 +102,23 @@ async def test_unreachable_database_raises_without_url(
     assert "s3cret-pw" not in caplog.text
     # DB 장애를 JSONL로 대신 받지 않습니다.
     assert not metrics_path.exists()
+
+
+async def test_engine_passes_connect_timeout_to_psycopg(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 제한 시간이 없으면 응답 없는 DB 호스트에 OS 기본값(Windows 약 130초)만큼 매달립니다.
+    seen: dict[str, object] = {}
+
+    async def fake_connect(*_args: object, **kwargs: object) -> object:
+        seen.update(kwargs)
+        raise OSError("stop before connecting")
+
+    monkeypatch.setattr(psycopg.AsyncConnection, "connect", fake_connect)
+    engine = create_engine(UNREACHABLE)
+    with pytest.raises(OSError):
+        async with engine.connect():
+            pass
+    await engine.dispose()
+    assert seen.get("connect_timeout") == CONNECT_TIMEOUT_S
 
 
 async def test_metrics_route_returns_503_when_store_fails(

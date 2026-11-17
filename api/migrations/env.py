@@ -8,7 +8,7 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 
 import gitinsight_api.tables  # noqa: F401  테이블을 metadata에 등록합니다.
-from gitinsight_api.db import metadata, normalize_url
+from gitinsight_api.db import CONNECT_ARGS, metadata, normalize_url
 from gitinsight_api.settings import Settings
 
 config = context.config
@@ -40,7 +40,8 @@ def run_online() -> None:
     url = database_url()
     if not url:
         raise SystemExit("DATABASE_URL이 없습니다. .env 또는 환경 변수에 Postgres 주소를 넣으세요.")
-    engine = create_engine(normalize_url(url), poolclass=pool.NullPool)
+    # 배포 전 명령에서 DB가 응답하지 않으면 빨리 실패하게 앱과 같은 연결 제한 시간을 씁니다.
+    engine = create_engine(normalize_url(url), poolclass=pool.NullPool, connect_args=CONNECT_ARGS)
     try:
         with engine.connect() as connection:
             context.configure(connection=connection, target_metadata=metadata, compare_type=True)
