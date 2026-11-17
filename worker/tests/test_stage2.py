@@ -330,6 +330,36 @@ async def test_failed_candidates_are_replaced_by_next_ones(tmp_path: Path) -> No
     assert len(llm.calls_for(TOPIC_PURPOSE)) == 4
 
 
+async def test_hollow_candidate_is_skipped_before_llm(tmp_path: Path) -> None:
+    # 메서드마다 로그나 다른 메서드 호출만 있는 클래스는 LLM이 설계 의도를 지어내기 쉬워 주제로 쓰지 않습니다.
+    hollow = [
+        "class SeedManager:",
+        '    """시드를 관리합니다."""',
+        "",
+        "    def __init__(self, service=None):",
+        "        self._service = service",
+        "",
+        "    def run_all(self) -> None:",
+        '        logger.info("건너뜁니다")',
+    ]
+    working = [
+        "def total(items):",
+        *(f"    v{i} = items[{i}] * 2" for i in range(8)),
+        "    return v0",
+    ]
+    write_repo(
+        tmp_path,
+        {"app/seed.py": "\n".join(hollow) + "\n", "app/calc.py": "\n".join(working) + "\n"},
+    )
+    stage1 = analyze_tree(tmp_path, SHA)
+    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+
+    topics = await generate_topics(tmp_path, stage1, llm, target=2)
+
+    assert [t.symbol.symbol_id for t in topics] == ["app/calc.py::total"]
+    assert len(llm.calls_for(TOPIC_PURPOSE)) == 1
+
+
 async def test_target_difficulty_cycles_by_candidate_order(tmp_path: Path) -> None:
     write_repo(tmp_path)
     stage1 = analyze_tree(tmp_path, SHA)

@@ -5,8 +5,9 @@
   uv run python scripts/demo_check.py --block-llm     # 판단 LLM이 오류만 내는 상황을 흉내 냄
   uv run python scripts/demo_check.py --real-llm      # 실제 LLM (API 키 필요, 비용 발생)
   $env:LLM_PROVIDER="gemini"; uv run python scripts/demo_check.py --real-llm   # 제공사 전환 확인
-  uv run python scripts/demo_check.py --from-db       # DATABASE_URL의 DB에 넣은 데모 스냅샷으로 진행
-                                                      # (먼저 scripts/seed_demo_analysis.py로 넣습니다)
+  uv run python scripts/demo_check.py --from-db --user-id <GitHub 숫자 id>
+      # DATABASE_URL의 DB에 넣은 데모 스냅샷으로 진행 (먼저 scripts/seed_demo_analysis.py로 넣습니다).
+      # 서버처럼 그 사용자가 스냅샷의 주인인지 먼저 확인하고, 아니면 실패로 끝납니다.
 
 통과 조건: 마무리(WRAP_UP)까지 가고 리포트가 만들어지며, 턴 처리 서버 시간이 기준 이하입니다.
 답변은 골든 대화의 자막을 돌려 씁니다. 실제 지원자 답변의 품질을 재는 도구가 아닙니다.
@@ -20,7 +21,7 @@ from itertools import cycle
 from uuid import uuid4
 
 from gitinsight_api.analyses.postgres import PostgresAnalysisStore
-from gitinsight_api.brain.analysis_source import AnalysisSource
+from gitinsight_api.analyses.source import StoredAnalysisSource
 from gitinsight_api.brain.factory import (
     build_fixture_brain,
     build_judge_llm,
@@ -49,15 +50,20 @@ async def run(args: argparse.Namespace) -> int:
     if settings.database_url is None:
         print("--from-db에는 DATABASE_URL이 필요합니다", file=sys.stderr)
         return 2
+    if not args.user_id:
+        print("--from-db에는 --user-id(스냅샷을 넣은 GitHub 숫자 id)가 필요합니다", file=sys.stderr)
+        return 2
     engine = create_engine(settings.database_url.get_secret_value())
     try:
-        return await check(args, settings, analyses=PostgresAnalysisStore(engine))
+        # 서버(#52)와 같은 분석 소스를 써서 소유자 확인까지 같은 경로로 점검합니다.
+        source = StoredAnalysisSource(PostgresAnalysisStore(engine))
+        return await check(args, settings, analyses=source)
     finally:
         await engine.dispose()
 
 
 async def check(
-    args: argparse.Namespace, settings: Settings, *, analyses: AnalysisSource | None
+    args: argparse.Namespace, settings: Settings, *, analyses: StoredAnalysisSource | None
 ) -> int:
     recorder = InMemoryCostRecorder()
     judge_llm: LLMClient | None
@@ -75,20 +81,35 @@ async def check(
     print(f"모드: {mode}")
 
     analysis = load_analysis(settings.fixture_analysis)
+    owner_id: str | None = None
     if analyses is not None:
-        print(f"분석 결과: DB (analysis_id={analysis.analysis_id})")
-        if await analyses.get(analysis.analysis_id) is None:
+        analysis_id = args.analysis_id or analysis.analysis_id
+        owner_id = args.user_id
+        print(f"분석 결과: DB (analysis_id={analysis_id}, user_id={owner_id})")
+        owner = await analyses.owner_of(analysis_id)
+        if owner is not None and owner != owner_id:
+            # 서버는 이 경우 세션 시작을 404로 막습니다. 주인 id는 출력하지 않습니다.
+            print(
+                "[실패] 스냅샷의 주인이 --user-id와 다릅니다. "
+                "데모 계정의 GitHub 숫자 id로 다시 넣거나 확인합니다 (gh api users/<login> -q .id)",
+                file=sys.stderr,
+            )
+            return 1
+        stored = await analyses.get(analysis_id)
+        if stored is None:
             print(
                 "[실패] DB에 데모 스냅샷이 없습니다. scripts/seed_demo_analysis.py로 먼저 넣습니다",
                 file=sys.stderr,
             )
             return 1
+        analysis = stored
     brain = build_fixture_brain(settings, llm=judge_llm, analyses=analyses)
     answers = cycle([t.transcript for c in load_conversations() for t in c.turns])
 
     started = time.perf_counter()
     session_id, reply = await brain.start(
-        SessionCreate(analysis_id=analysis.analysis_id, mode=InterviewMode.TEXT, duration_min=10)
+        SessionCreate(analysis_id=analysis.analysis_id, mode=InterviewMode.TEXT, duration_min=10),
+        owner_id=owner_id,
     )
     for _ in range(MAX_TURNS):
         if reply.done:
@@ -137,6 +158,16 @@ def main() -> int:
         "--from-db",
         action="store_true",
         help="샘플 파일 대신 DATABASE_URL의 DB에 넣은 데모 스냅샷을 면접 재료로 씁니다",
+    )
+    parser.add_argument(
+        "--user-id",
+        default=None,
+        help="--from-db에서 면접을 시작할 GitHub 숫자 id. 스냅샷의 주인과 같아야 합니다",
+    )
+    parser.add_argument(
+        "--analysis-id",
+        default=None,
+        help="--from-db에서 쓸 스냅샷의 analysis_id (기본: 샘플 파일의 값)",
     )
     parser.add_argument(
         "--max-turn-ms",

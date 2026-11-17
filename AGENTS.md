@@ -26,7 +26,7 @@ README.md의 "전체 구조"를 따릅니다.
 | `api/src/gitinsight_api/` | FastAPI 서버. `brain/`(면접 두뇌), `llm/`(LLMClient), `routes/` | B, D |
 | `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출, git blame 기여 라벨과 최근 커밋), 2단계(규칙으로 주제 후보 선택, LLM으로 주제 재료 생성과 서버 검증), 전체 흐름 `pipeline.run_analysis`, 분석 기록 저장소와 연결해 실행하는 `jobs`(같은 프로세스 Launcher) | A |
 | `web/` | Next.js 웹. 첫 화면(`/`, GitHub 로그인과 면접 시작), 실제 모드 면접 화면(`/interview/[analysisId]`, 음성·텍스트, 도중 전환, 음성 끊김 시 텍스트 자동 전환, 끝내기와 리포트 요청), 음성 토큰 라우트(`/voice-token`, 실험 모드가 아니면 로그인 필요), 실험 화면(`/lab/voice`, `/lab/interview`)이 있습니다 | C |
-| `fixtures/analysis/` | 데모 레포 분석 결과 샘플 | B |
+| `fixtures/analysis/` | 데모 레포 분석 결과 샘플(`gitinsight_agent`, 손으로 만듦)과 실제 워커로 만든 데모 스냅샷(`gitinsight_agent_live`) | B |
 | `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |
 | `scripts/` | 계약 생성, 샘플 데이터 도구, 데모 스냅샷 넣기, 수동 LLM 평가 스크립트 | |
 | `docs/` | 루브릭, 평가 기록(`docs/evals/`), 결정 기록 | |
@@ -80,8 +80,9 @@ uv run python -m gitinsight_api.brain.cli [--real-llm]             # 터미널 �
 uv run python scripts/llm_latency.py --n 20                        # 판단 LLM 지연 측정 (수동, 비용 발생)
 uv run python scripts/eval_brain.py                                # 골든 대화 실제 LLM 평가 (수동, 비용 발생)
 uv run python scripts/eval_stage2.py                               # 샘플 레포 2단계 분석 실제 LLM 평가 (수동, 비용 발생)
-uv run python scripts/demo_check.py [--block-llm | --real-llm] [--from-db]   # 데모 완주 점검 (docs/runbook-demo.md). --from-db는 DB의 데모 스냅샷 사용
-uv run python scripts/seed_demo_analysis.py --user-id <id>         # 샘플 분석 결과를 DATABASE_URL의 DB에 완료 기록으로 넣기 (데모 스냅샷)
+                                   # --requester-email <커밋 이메일> --save-json <경로>: 그 사람 기준 기여 라벨로 분석하고 스냅샷용 JSON 저장
+uv run python scripts/demo_check.py [--block-llm | --real-llm] [--from-db --user-id <id>]   # 데모 완주 점검 (docs/runbook-demo.md). --from-db는 DB의 데모 스냅샷을 그 주인으로 사용
+uv run python scripts/seed_demo_analysis.py --user-id <id> [--fixture gitinsight_agent_live | --file <json>]   # 분석 결과를 DATABASE_URL의 DB에 완료 기록으로 넣기 (데모 스냅샷)
 pnpm --filter @gitinsight/web dev                                  # 웹 (기본 3000번, /api/*는 API_ORIGIN으로 넘김)
 pnpm --filter @gitinsight/web typecheck                            # 웹 타입 검사
 ```

@@ -41,9 +41,11 @@ def result(tmp_path_factory: pytest.TempPathFactory) -> Stage1Result:
     return analyze_tree(repo, analysis.commit_sha, requester)
 
 
-def test_every_sample_symbol_is_extracted_with_same_range(result: Stage1Result) -> None:
+# gitinsight_agent_live는 실제 워커로 만든 데모 스냅샷이라 같은 레포·커밋입니다.
+@pytest.mark.parametrize("name", ["gitinsight_agent", "gitinsight_agent_live"])
+def test_every_sample_symbol_is_extracted_with_same_range(result: Stage1Result, name: str) -> None:
     extracted = {s.symbol_id: s for s in result.symbols}
-    analysis = load_analysis()
+    analysis = load_analysis(name)
     for topic in analysis.topics:
         for expected in (topic.symbol, *topic.related_symbols):
             assert extracted.get(expected.symbol_id) == expected, expected.symbol_id

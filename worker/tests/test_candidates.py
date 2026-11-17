@@ -3,8 +3,10 @@ from gitinsight_contracts.common import SymbolKind, SymbolRef
 from gitinsight_worker.candidates import (
     MAX_PER_FILE,
     MIN_LINES,
+    has_enough_logic,
     is_inactive_path,
     is_test_path,
+    logic_line_count,
     select_candidates,
 )
 
@@ -87,3 +89,72 @@ def test_contribution_label_comes_before_size() -> None:
     )
 
     assert [c.symbol.name for c in candidates] == ["mine", "theirs"]
+
+
+# ---- 껍데기 코드 거르기 (PR #54 리뷰) ----
+
+HOLLOW_CLASS = '''class SeedManager:
+    """초기 데이터를 관리합니다.
+
+    Args:
+        service: 주입받은 서비스.
+    """
+
+    def __init__(self, service=None):
+        # 나중에 쓰려고 보관합니다.
+        self._service = service
+
+    def run_if_empty(self) -> None:
+        """run_all의 별칭입니다."""
+        self.run_all()
+
+    def run_all(self) -> None:
+        """모든 작업을 실행합니다."""
+        logger.info("기본 작업을 건너뜁니다.")
+'''
+
+WORKING_FUNCTION = '''def total(items):
+    """합계를 구합니다."""
+    result = 0
+    for item in items:
+        if item.skip:
+            continue
+        result += item.value
+    logger.debug("total=%s", result)
+    return result
+'''
+
+
+def test_hollow_class_has_little_logic() -> None:
+    assert logic_line_count(HOLLOW_CLASS) == 2
+    assert not has_enough_logic(HOLLOW_CLASS)
+
+
+def test_working_function_has_enough_logic() -> None:
+    # 로그와 문서 문자열은 빼고, 반복과 분기와 값을 돌려주는 줄은 셉니다.
+    assert logic_line_count(WORKING_FUNCTION) == 6
+    assert has_enough_logic(WORKING_FUNCTION)
+
+
+def test_single_line_docstring_and_other_logging_forms_are_not_logic() -> None:
+    code = '''def noop():
+    """한 줄 문서 문자열."""
+    print("start")
+    logging.warning("x")
+    self._logger.info("y")
+    console.log("z")
+    pass
+    return None
+'''
+    assert logic_line_count(code) == 0
+
+
+def test_string_value_lines_are_counted_not_skipped() -> None:
+    # 문서 문자열이 아닌 여러 줄 문자열 값은 셉니다. 적게 세서 좋은 코드를 버리지 않게 합니다.
+    code = '''def prompt():
+    text = """첫 줄
+둘째 줄
+"""
+    return text
+'''
+    assert logic_line_count(code) == 4

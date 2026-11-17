@@ -29,7 +29,7 @@ from gitinsight_contracts.analysis import (
     Topic,
 )
 from gitinsight_contracts.base import LLMOutput, count_sentences
-from gitinsight_worker.candidates import Candidate, select_candidates
+from gitinsight_worker.candidates import Candidate, has_enough_logic, select_candidates
 from gitinsight_worker.stage1 import Stage1Result
 
 logger = logging.getLogger(__name__)
@@ -436,14 +436,21 @@ class _Prepared:
 def _prepare(root: Path, candidates: list[Candidate]) -> list[_Prepared]:
     readme = read_readme(root)
     prepared: list[_Prepared] = []
+    hollow = 0
     for candidate in candidates:
         try:
             code = read_symbol_code(root, candidate)
         except OSError:
             continue
+        if not has_enough_logic(code):
+            # 실제 동작이 거의 없는 껍데기 코드는 LLM이 없는 설계 의도를 지어내기 쉬워 건너뜁니다.
+            hollow += 1
+            continue
         difficulty = DIFFICULTY_CYCLE[len(prepared) % len(DIFFICULTY_CYCLE)]
         messages = build_topic_messages(candidate, code, readme, difficulty)
         prepared.append(_Prepared(candidate, messages))
+    if hollow:
+        logger.info("stage2_hollow_candidates skipped=%d", hollow)
     return prepared
 
 

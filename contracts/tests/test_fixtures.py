@@ -7,6 +7,8 @@ from gitinsight_contracts.analysis import ContributionLabel
 from gitinsight_contracts.common import SymbolRef
 from gitinsight_contracts.fixtures import load_analysis, load_conversations, show
 
+LIVE_ANALYSIS = "gitinsight_agent_live"
+
 
 def all_symbols() -> list[SymbolRef]:
     result = load_analysis()
@@ -35,6 +37,20 @@ def test_symbol_id_matches_path_and_name() -> None:
         path, qualified = symbol.symbol_id.split("::")
         assert path == symbol.path
         assert qualified.split(".")[-1] == symbol.name
+
+
+def test_live_snapshot_matches_sample_repo_and_is_consistent() -> None:
+    # 실제 워커와 LLM으로 만든 데모 스냅샷입니다 (docs/evals/stage2-2026-11-17.md).
+    live = load_analysis(LIVE_ANALYSIS)
+    sample = load_analysis()
+    assert (live.repo_full_name, live.commit_sha) == (sample.repo_full_name, sample.commit_sha)
+    assert live.analysis_id != sample.analysis_id
+    assert live.symbol_count == sample.symbol_count
+    for symbol in (s for t in live.topics for s in (t.symbol, *t.related_symbols)):
+        path, qualified = symbol.symbol_id.split("::")
+        assert path == symbol.path
+        assert qualified.split(".")[-1] == symbol.name
+        assert symbol.commit_sha == live.commit_sha
 
 
 def test_show_lists_every_topic_with_line_range() -> None:

@@ -1,10 +1,11 @@
-"""데모 스냅샷: 샘플 분석 결과(fixtures/analysis/)를 DATABASE_URL의 DB에 완료 기록으로 넣습니다 (#12).
+"""데모 스냅샷: 샘플 분석 결과(fixtures/analysis/)나 저장한 실제 분석 결과를 DATABASE_URL의 DB에 완료 기록으로 넣습니다 (#12).
 
 현장에서 분석이 실패해도 이 기록으로 면접을 이어 갑니다 (docs/runbook-demo.md 분석 행).
 
 사용:
   uv run python scripts/seed_demo_analysis.py --user-id <데모 계정 id>
   uv run python scripts/seed_demo_analysis.py --user-id <id> --fixture gitinsight_agent
+  uv run python scripts/seed_demo_analysis.py --user-id <id> --file .data/analysis.json   # 실제 분석 결과
 
 - 마이그레이션을 먼저 적용합니다 (uv run alembic -c api/alembic.ini upgrade head).
 - 기록의 analysis_id는 샘플 파일의 값 그대로라서, 여러 번 실행해도 기록 하나만 남습니다.
@@ -15,18 +16,20 @@
 import argparse
 import asyncio
 import sys
+from pathlib import Path
 
 from gitinsight_api.analyses.postgres import PostgresAnalysisStore
 from gitinsight_api.db import create_engine
 from gitinsight_api.event_loop import server_loop_factory
 from gitinsight_api.settings import Settings
+from gitinsight_contracts.analysis import AnalysisResult
 from gitinsight_contracts.fixtures import load_analysis
 
 
-async def seed(database_url: str, fixture: str, user_id: str) -> None:
+async def seed(database_url: str, result: AnalysisResult, user_id: str) -> None:
     engine = create_engine(database_url)
     try:
-        record = await PostgresAnalysisStore(engine).save_snapshot(load_analysis(fixture), user_id)
+        record = await PostgresAnalysisStore(engine).save_snapshot(result, user_id)
     finally:
         await engine.dispose()
     print(f"넣음: analysis_id={record.analysis_id}")
@@ -39,18 +42,30 @@ def main() -> int:
     settings = Settings()
     parser = argparse.ArgumentParser(description="데모 분석 스냅샷을 DB에 넣습니다")
     parser.add_argument("--user-id", required=True, help="데모에 로그인할 계정 id")
-    parser.add_argument(
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
         "--fixture",
         default=settings.fixture_analysis,
         help="fixtures/analysis/<이름>.json의 이름 (기본: FIXTURE_ANALYSIS)",
+    )
+    source.add_argument(
+        "--file",
+        type=Path,
+        default=None,
+        help="AnalysisResult JSON 파일 (예: eval_stage2.py --save-json으로 만든 실제 분석 결과)",
     )
     args = parser.parse_args()
     if settings.database_url is None:
         print("DATABASE_URL이 없습니다", file=sys.stderr)
         return 2
+    result = (
+        AnalysisResult.model_validate_json(args.file.read_text(encoding="utf-8"))
+        if args.file
+        else load_analysis(args.fixture)
+    )
     # psycopg 3 비동기 연결은 Windows 기본 루프를 지원하지 않아 서버와 같은 루프를 씁니다.
     asyncio.run(
-        seed(settings.database_url.get_secret_value(), args.fixture, args.user_id),
+        seed(settings.database_url.get_secret_value(), result, args.user_id),
         loop_factory=server_loop_factory,
     )
     return 0
