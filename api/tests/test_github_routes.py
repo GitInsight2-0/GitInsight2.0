@@ -18,8 +18,6 @@ from gitinsight_api.github_api import (
     MAX_FILE_BYTES,
     GitHubAPI,
     GitHubUnauthorizedError,
-    GitHubUnavailableError,
-    repo_access,
 )
 from gitinsight_api.login_cookie import SESSION_COOKIE, LoginSession, seal_session
 from gitinsight_api.main import create_app
@@ -417,70 +415,11 @@ async def test_repos_page_cap_is_logged(caplog: pytest.LogCaptureFixture) -> Non
     assert "github_api_page_cap" in caplog.text
 
 
-# ---- GitHubAPI: 분석 요청용 (A가 /api/analyses에서 씀) ----
+# ---- GitHubAPI ----
 
 
 def api_with(github: FakeGitHub) -> GitHubAPI:
     return GitHubAPI(github.client(), SecretStr(TOKEN))
-
-
-async def test_get_repo_and_head_sha() -> None:
-    github = FakeGitHub()
-    github.on("/repositories/10", lambda _r: httpx.Response(200, json=repo_json(10, "octo/zeta")))
-    github.on(
-        "/repos/octo/zeta/commits/main",
-        lambda r: (
-            httpx.Response(200, text="a" * 40)
-            if r.headers["accept"] == "application/vnd.github.sha"
-            else httpx.Response(415)
-        ),
-    )
-    api = api_with(github)
-    repo = await api.get_repo(10)
-    assert repo == Repo(repo_id=10, full_name="octo/zeta", private=False, default_branch="main")
-    assert repo is not None
-    assert await api.head_sha(repo) == "a" * 40
-    assert await api.get_repo(11) is None
-
-
-async def test_head_sha_rejects_non_sha() -> None:
-    github = FakeGitHub()
-    github.on("/repos/octo/zeta/commits/main", lambda _r: httpx.Response(200, text="<html>"))
-    with pytest.raises(GitHubUnavailableError):
-        await api_with(github).head_sha(
-            Repo(repo_id=10, full_name="octo/zeta", private=False, default_branch="main")
-        )
-
-
-async def test_repo_access_uses_only_verified_emails() -> None:
-    github = FakeGitHub()
-    github.on(
-        "/user/emails",
-        lambda _r: httpx.Response(
-            200,
-            json=[
-                {"email": "me@example.com", "verified": True, "primary": True},
-                {"email": "fake@example.com", "verified": False, "primary": False},
-            ],
-        ),
-    )
-    access = await repo_access(
-        api_with(github), token=SecretStr(TOKEN), user_id=USER_ID, login="octo"
-    )
-    assert access.emails == ("me@example.com",)
-    assert (access.github_id, access.login) == (4242, "octo")
-    assert TOKEN not in repr(access)
-
-
-@pytest.mark.parametrize("status", [403, 404])
-async def test_repo_access_without_email_permission_has_no_emails(status: int) -> None:
-    # App에 "Email addresses" 읽기 권한이 없으면 GitHub가 403이나 404를 줍니다. noreply 주소로만 맞춥니다.
-    github = FakeGitHub()
-    github.on("/user/emails", lambda _r: httpx.Response(status))
-    access = await repo_access(
-        api_with(github), token=SecretStr(TOKEN), user_id=USER_ID, login="octo"
-    )
-    assert access.emails == ()
 
 
 async def test_unauthorized_is_reported() -> None:

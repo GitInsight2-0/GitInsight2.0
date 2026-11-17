@@ -1,9 +1,8 @@
 """로그인 사용자 토큰으로 부르는 GitHub REST API (#18 2단계).
 
 - 레포 목록: 사용자가 App을 설치한 곳(GET /user/installations)의 레포 중 사용자가 읽을 수 있는 것
-- 레포 하나, 기본 브랜치의 최신 커밋 SHA: 분석 요청(/api/analyses, A)이 씁니다
-- 인증 이메일: 기여 라벨용. App에 이메일 읽기 권한이 없으면 빈 목록입니다
 - 파일 내용: /api/code가 씁니다. 받은 코드는 응답으로만 넘기고 저장하지 않습니다
+분석 요청에 쓰는 레포 조회와 최신 커밋은 github_repos.py(#65)에 있습니다.
 
 토큰, 응답 본문, 코드는 로그와 예외 메시지에 넣지 않습니다. 로그에는 HTTP 상태와 예외 종류만 남깁니다.
 GitHub 문서: https://docs.github.com/rest/apps/installations#list-app-installations-accessible-to-the-user-access-token
@@ -17,7 +16,6 @@ from urllib.parse import quote
 import httpx
 from pydantic import BaseModel, SecretStr, ValidationError
 
-from gitinsight_api.analyses.access import RepoAccess
 from gitinsight_api.github_oauth import API_VERSION, HTTP_TIMEOUT_S
 from gitinsight_contracts.api import Repo
 
@@ -65,11 +63,6 @@ class _Installation(BaseModel):
     id: int
 
 
-class _EmailBody(BaseModel):
-    email: str
-    verified: bool
-
-
 def _path_segments(path: str) -> str:
     """레포 안 파일 경로를 URL 경로로 바꿉니다. `.`, `..`, 빈 조각은 받지 않습니다."""
     parts = path.split("/")
@@ -90,20 +83,12 @@ class GitHubAPI:
             "X-GitHub-Api-Version": API_VERSION,
         }
 
-    async def _get(
-        self,
-        path: str,
-        *,
-        params: dict[str, Any] | None = None,
-        accept: str = "application/vnd.github+json",
-        allow_404: bool = False,
-        allow_403: bool = False,
-    ) -> httpx.Response | None:
+    async def _json(self, path: str, params: dict[str, Any]) -> Any:
         try:
             response = await self._client.get(
                 f"{API}{path}",
                 params=params,
-                headers=self._headers(accept),
+                headers=self._headers(),
                 timeout=HTTP_TIMEOUT_S,
             )
         except httpx.HTTPError as exc:
@@ -111,19 +96,9 @@ class GitHubAPI:
             raise GitHubUnavailableError(type(exc).__name__) from None
         if response.status_code == 401:
             raise GitHubUnauthorizedError
-        if (allow_404 and response.status_code == 404) or (
-            allow_403 and response.status_code == 403
-        ):
-            return None
         if response.status_code != 200:
             logger.warning("github_api_status status=%s", response.status_code)
             raise GitHubUnavailableError(f"HTTP {response.status_code}")
-        return response
-
-    async def _json(self, path: str, **kwargs: Any) -> Any:
-        response = await self._get(path, **kwargs)
-        if response is None:
-            return None
         try:
             return response.json()
         except ValueError:
@@ -133,7 +108,7 @@ class GitHubAPI:
     async def _paged(self, path: str, key: str) -> list[Any]:
         items: list[Any] = []
         for page in range(1, MAX_PAGES + 1):
-            body = await self._json(path, params={"per_page": PER_PAGE, "page": page})
+            body = await self._json(path, {"per_page": PER_PAGE, "page": page})
             chunk = body.get(key) if isinstance(body, dict) else None
             if not isinstance(chunk, list):
                 logger.warning("github_api_bad_shape")
@@ -163,44 +138,6 @@ class GitHubAPI:
             logger.warning("github_api_bad_shape")
             raise GitHubUnavailableError("bad shape") from None
         return sorted(repos.values(), key=lambda r: r.full_name.casefold())
-
-    async def get_repo(self, repo_id: int) -> Repo | None:
-        """사용자 토큰으로 읽을 수 있는 레포 하나입니다. 없거나 권한이 없으면 None입니다."""
-        body = await self._json(f"/repositories/{repo_id}", allow_404=True, allow_403=True)
-        if body is None:
-            return None
-        try:
-            return _RepoBody.model_validate(body).contract()
-        except ValidationError:
-            logger.warning("github_api_bad_shape")
-            raise GitHubUnavailableError("bad shape") from None
-
-    async def head_sha(self, repo: Repo) -> str:
-        """레포 기본 브랜치의 최신 커밋 SHA입니다."""
-        if not _REPO_FULL_NAME.fullmatch(repo.full_name) or ".." in repo.full_name:
-            raise ValueError("repo_full_name은 owner/name 형식이어야 합니다")
-        response = await self._get(
-            f"/repos/{repo.full_name}/commits/{quote(repo.default_branch, safe='')}",
-            accept="application/vnd.github.sha",
-        )
-        assert response is not None
-        sha = response.text.strip()
-        if not _SHA.fullmatch(sha):
-            logger.warning("github_api_bad_shape")
-            raise GitHubUnavailableError("bad sha")
-        return sha
-
-    async def verified_emails(self) -> tuple[str, ...]:
-        """GitHub에서 인증된 이메일입니다. App에 이메일 읽기 권한이 없으면(403·404) 빈 목록입니다."""
-        body = await self._json("/user/emails", allow_404=True, allow_403=True)
-        if body is None:
-            return ()
-        try:
-            emails = [_EmailBody.model_validate(e) for e in body]
-        except (ValidationError, TypeError):
-            logger.warning("github_api_bad_shape")
-            return ()
-        return tuple(e.email for e in emails if e.verified)
 
     async def file_text(self, repo_full_name: str, commit_sha: str, path: str) -> str | None:
         """고정 커밋의 파일 내용입니다. 파일이 없으면 None입니다."""
@@ -234,13 +171,3 @@ class GitHubAPI:
             logger.warning("github_api_request_failed error=%s", type(exc).__name__)
             raise GitHubUnavailableError(type(exc).__name__) from None
         return body.decode("utf-8", errors="replace")
-
-
-async def repo_access(api: GitHubAPI, *, token: SecretStr, user_id: str, login: str) -> RepoAccess:
-    """분석 요청 때 워커에 넘길 접근 정보를 만듭니다. user_id는 로그인 쿠키의 GitHub 숫자 ID입니다."""
-    return RepoAccess(
-        token=token,
-        github_id=int(user_id),
-        login=login,
-        emails=await api.verified_emails(),
-    )

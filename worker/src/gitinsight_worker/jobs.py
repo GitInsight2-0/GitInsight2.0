@@ -4,9 +4,9 @@
 - execute: 분석 하나를 끝까지 돌리고 결과를 save_result로 저장합니다.
 - InProcessLauncher: 첫 배포(#19)에서 쓰는 Launcher입니다. 서버 프로세스 안에서 asyncio 작업으로 분석을 돌립니다.
 
-내려받는 주소와 요청자 신원은 함수로 받습니다.
-요청에 RepoAccess(요청자 GitHub 토큰과 이메일, #18)가 있으면 그 토큰으로 내려받고 요청자 기준으로 기여 라벨을 붙입니다.
-없으면 공개 레포 https 주소와 "요청자 없음"(기여 라벨은 모두 확인 불가)을 씁니다 (데모 스냅샷, 테스트).
+내려받는 방법과 요청자 신원은 분석 기록과 요청자 정보(LaunchContext)를 받는 함수로 정합니다.
+기본은 GitHub https 주소에서 요청자 토큰으로 받고(github_cloner), 요청자 GitHub 계정의 noreply 이메일로
+기여 라벨을 붙입니다(requester_from_login). 토큰과 계정 정보는 작업이 끝나면 버리고 저장하지 않습니다.
 """
 
 import asyncio
@@ -15,12 +15,12 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-from gitinsight_api.analyses.access import RepoAccess
+from gitinsight_api.analyses.service import NO_CONTEXT, LaunchContext
 from gitinsight_api.analyses.store import AnalysisRecord, AnalysisStore
 from gitinsight_api.llm import LLMClient
 from gitinsight_contracts.api import AnalysisState, AnalysisStatus
 from gitinsight_worker.contribution import Requester
-from gitinsight_worker.git import Cloner, git_cloner
+from gitinsight_worker.git import GITHUB_HTTPS, Cloner, git_cloner
 from gitinsight_worker.pipeline import run_analysis
 
 logger = logging.getLogger(__name__)
@@ -32,34 +32,32 @@ INTERRUPTED_ERROR = "InterruptedAnalysis"
 # 계약 AnalysisResult.repo_full_name과 같은 형식입니다.
 _REPO_FULL_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
-CloneFor = Callable[[AnalysisRecord], Cloner]
-RequesterFor = Callable[[AnalysisRecord], Requester | None]
-AccessCloneFor = Callable[[AnalysisRecord, RepoAccess], Cloner]
+CloneFor = Callable[[AnalysisRecord, LaunchContext], Cloner]
+RequesterFor = Callable[[AnalysisRecord, LaunchContext], Requester | None]
 
 
-def _github_url(record: AnalysisRecord) -> str:
+def github_cloner(record: AnalysisRecord, context: LaunchContext) -> Cloner:
+    """GitHub https 주소에서 고정 커밋을 내려받습니다. 요청자 토큰이 있으면 그 토큰으로 인증합니다."""
     repo = record.key.repo_full_name
     if not _REPO_FULL_NAME.fullmatch(repo) or ".." in repo:
         raise ValueError("repo_full_name은 owner/name 형식이어야 합니다")
-    return f"https://github.com/{repo}.git"
+    return git_cloner(
+        f"{GITHUB_HTTPS}{repo}.git", record.key.commit_sha, token=context.github_token
+    )
 
 
-def public_cloner(record: AnalysisRecord) -> Cloner:
-    """공개 레포를 GitHub https 주소로 고정 커밋에 내려받습니다."""
-    return git_cloner(_github_url(record), record.key.commit_sha)
+def requester_from_login(record: AnalysisRecord, context: LaunchContext) -> Requester | None:
+    """요청자 GitHub 계정의 noreply 이메일로 본인 커밋을 맞춥니다.
+
+    GitHub App에 이메일 읽기 권한이 없어 개인 이메일로 한 커밋은 맞추지 못합니다(확인 불가로 남습니다).
+    """
+    if not context.login:
+        return None
+    user_id = int(record.key.user_id) if record.key.user_id.isdigit() else None
+    return Requester.of(login=context.login, user_id=user_id)
 
 
-def user_token_cloner(record: AnalysisRecord, access: RepoAccess) -> Cloner:
-    """요청자 본인의 GitHub 토큰으로 내려받습니다. 비공개 레포도 요청자가 읽을 수 있으면 받습니다."""
-    return git_cloner(_github_url(record), record.key.commit_sha, token=access.token)
-
-
-def requester_of(access: RepoAccess) -> Requester:
-    """GitHub 인증 이메일과 noreply 주소로 요청자 신원을 만듭니다."""
-    return Requester.of(emails=access.emails, login=access.login, user_id=access.github_id)
-
-
-def no_requester(_record: AnalysisRecord) -> Requester | None:
+def no_requester(_record: AnalysisRecord, _context: LaunchContext) -> Requester | None:
     return None
 
 
@@ -138,9 +136,8 @@ class InProcessLauncher:
         store: AnalysisStore,
         llm: LLMClient,
         *,
-        clone_for: CloneFor = public_cloner,
-        requester_for: RequesterFor = no_requester,
-        access_clone_for: AccessCloneFor = user_token_cloner,
+        clone_for: CloneFor = github_cloner,
+        requester_for: RequesterFor = requester_from_login,
         model: str | None = None,
         work_dir: Path | None = None,
         max_concurrent: int = MAX_CONCURRENT_ANALYSES,
@@ -149,7 +146,6 @@ class InProcessLauncher:
         self._llm = llm
         self._clone_for = clone_for
         self._requester_for = requester_for
-        self._access_clone_for = access_clone_for
         self._model = model
         self._work_dir = work_dir
         self._slots = asyncio.Semaphore(max_concurrent)
@@ -162,15 +158,10 @@ class InProcessLauncher:
             logger.info("analysis_recovered closed=%d", closed)
         return closed
 
-    async def launch(self, record: AnalysisRecord, access: RepoAccess | None = None) -> None:
+    async def launch(self, record: AnalysisRecord, context: LaunchContext = NO_CONTEXT) -> None:
         # 주소 형식이 잘못되었으면 작업을 만들지 않고 바로 실패시킵니다. 서비스가 기록을 failed로 닫습니다.
-        if access is None:
-            clone = self._clone_for(record)
-            requester = self._requester_for(record)
-        else:
-            # 토큰은 이 작업의 메모리에만 있고, 작업이 끝나면 함께 사라집니다.
-            clone = self._access_clone_for(record, access)
-            requester = requester_of(access)
+        clone = self._clone_for(record, context)
+        requester = self._requester_for(record, context)
         task = asyncio.create_task(self._run(record, clone, requester))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
