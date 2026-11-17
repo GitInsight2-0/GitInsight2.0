@@ -201,3 +201,33 @@ def test_default_protocol_rejects_local_and_command_transports(tmp_path: Path) -
 def test_git_cloner_rejects_bad_arguments(url: str, sha: str) -> None:
     with pytest.raises(ValueError, match=r"commit_sha|url"):
         git_cloner(url, sha)
+
+
+def test_reference_counts_cover_the_whole_repo(tmp_path: Path) -> None:
+    files = {
+        "app/service.py": (
+            "class Service:\n"
+            "    def index(self):\n"
+            "        return 1\n\n"
+            "    def search(self):\n"
+            "        return self.search() if False else 2\n\n"
+            "    def __init__(self):\n"
+            "        self.ready = True\n"
+        ),
+        "app/main.py": "from app.service import Service\n\nservice = Service()\nservice.index()\n",
+        # 테스트 파일의 참조도 셉니다. 테스트만 부르는 코드도 레포 안에서는 쓰이는 코드입니다.
+        "tests/test_service.py": "def test_index(service):\n    assert service.index() == 1\n",
+    }
+    for rel, text in files.items():
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    references = analyze_tree(tmp_path, "a" * 40).references
+
+    assert references["app/service.py::Service"] == 1
+    assert references["app/service.py::Service.index"] == 2
+    # 자기 자신만 부르는 재귀 호출은 참조로 보지 않습니다.
+    assert references["app/service.py::Service.search"] == 0
+    # 특수 메서드는 언어가 부르므로 참조 수를 알 수 없음으로 둡니다.
+    assert "app/service.py::Service.__init__" not in references
