@@ -90,8 +90,10 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 웹의 음성 측정 화면(`/lab/voice`)도 `web/.env.local`의 `LAB_ENABLED=true`일 때만 열립니다. 방법과 기록은 `docs/evals/voice-g1.md`에 있습니다.
 
 `LAB_ENABLED=false`(기본)이면 서버는 진짜 면접 두뇌와 리포트 API(`POST /api/sessions/{id}/end`, `GET /api/reports/{id}`)를 씁니다.
-로그인(#18)이 붙기 전까지 이 모드의 요청은 401을 돌려줍니다.
-테스트는 `app.dependency_overrides`로 `get_current_user`를 바꿔 로그인 사용자를 넣습니다.
+이 모드의 요청은 GitHub 로그인(#18) 쿠키가 있어야 하고, 없으면 401입니다.
+로그인은 GitHub App 사용자 인증(state + PKCE)입니다. `GET /api/auth/github/login` → GitHub → `GET /api/auth/github/callback` → 웹 첫 화면 순서이고, 실패하면 `/?login_error=denied|invalid_state|github`로 돌아갑니다. `POST /api/auth/logout`, `GET /api/me`도 있습니다.
+로그인 정보는 DB 없이 암호화한 쿠키(`gi_session`, 최대 8시간)에 담습니다 (`api/src/gitinsight_api/login_cookie.py`). 필요한 환경 변수는 `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`, `WEB_ORIGIN`이며 `.env.example`에 설명이 있습니다. GitHub 사용자 토큰은 로그와 DB에 남기지 않습니다.
+테스트는 `app.dependency_overrides`로 `get_current_user`를 바꿔 로그인 사용자를 넣습니다. 로그인 흐름 자체는 `api/tests/test_auth.py`가 가짜 GitHub(`httpx.MockTransport`)로 확인합니다.
 
 `DATABASE_URL`이 있으면 서버는 Postgres를 쓰고(`/api/metrics` → `metric_events` 테이블), 없으면 DB 없이 돌며 측정 이벤트를 `METRICS_PATH`(JSONL)에 쌓습니다.
 분석 기록과 결과는 `analyses` 테이블에 둡니다(`gitinsight_api.analyses.postgres.PostgresAnalysisStore`, 규칙은 `analyses/store.py`의 `AnalysisStore`).
