@@ -1,12 +1,17 @@
 """FastAPI 앱 팩토리."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from gitinsight_api.brain.factory import build_server_services
 from gitinsight_api.brain.protocol import Brain
 from gitinsight_api.brain.scripted import ScriptedBrain
-from gitinsight_api.metrics_store import JsonlMetricsStore, MetricsStore
+from gitinsight_api.db import create_engine
+from gitinsight_api.metrics_store import JsonlMetricsStore, MetricsStore, PostgresMetricsStore
 from gitinsight_api.report.service import ReportService
 from gitinsight_api.routes import metrics, reports, sessions
 from gitinsight_api.settings import Settings
@@ -28,15 +33,36 @@ def create_app(
     report_service: ReportService | None = None,
     metrics_store: MetricsStore | None = None,
 ) -> FastAPI:
-    """brain을 넣으면 report_service도 넣은 그대로 씁니다. 테스트가 가짜 LLM 서비스를 넣을 때 씁니다."""
+    """brain을 넣으면 report_service도 넣은 그대로 씁니다. 테스트가 가짜 LLM 서비스를 넣을 때 씁니다.
+
+    DATABASE_URL이 있으면 Postgres 엔진을 만들고(연결은 첫 쿼리 때), 서버를 끌 때 닫습니다.
+    """
     settings = settings or Settings()
     if brain is None:
         brain, report_service = default_services(settings)
-    app = FastAPI(title="GitInsight API")
+
+    engine: AsyncEngine | None = None
+    if settings.database_url is not None:
+        engine = create_engine(settings.database_url.get_secret_value())
+    if metrics_store is None:
+        metrics_store = (
+            PostgresMetricsStore(engine)
+            if engine is not None
+            else JsonlMetricsStore(settings.metrics_path)
+        )
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        yield
+        if engine is not None:
+            await engine.dispose()
+
+    app = FastAPI(title="GitInsight API", lifespan=lifespan)
     app.state.settings = settings
+    app.state.db_engine = engine
     app.state.brain = brain
     app.state.report_service = report_service
-    app.state.metrics_store = metrics_store or JsonlMetricsStore(settings.metrics_path)
+    app.state.metrics_store = metrics_store
 
     origins = settings.cors_origin_list()
     if origins:

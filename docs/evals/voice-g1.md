@@ -11,7 +11,7 @@
 # 터미널 1: API 서버 (대본 두뇌 켬)
 # --reload-dir로 감시 범위를 서버 코드로 좁힙니다.
 # 레포 전체를 감시하면 Next 개발 서버가 web/.next에 쓸 때마다 재시작되어 메모리의 세션이 사라집니다 (404 세션을 찾을 수 없습니다).
-LAB_ENABLED=true uv run uvicorn --factory gitinsight_api.main:app_factory --reload --reload-dir api/src --reload-dir contracts/src
+LAB_ENABLED=true uv run uvicorn --factory gitinsight_api.main:app_factory --loop gitinsight_api.event_loop:server_loop_factory --reload --reload-dir api/src --reload-dir contracts/src
 
 # 터미널 2: 웹
 cp web/.env.example web/.env.local   # LAB_ENABLED=true, GEMINI_API_KEY 입력
