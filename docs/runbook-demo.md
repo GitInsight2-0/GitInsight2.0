@@ -29,17 +29,20 @@
 ### A. 판단·리포트 LLM 모델 바꾸기
 
 판단·분석·리포트 LLM은 Gemini만 씁니다 (`LLM_PROVIDER` 기본값 `gemini`, #63). 다른 제공사로 넘기는 대비책은 없습니다.
-기본 모델(`gemini/gemini-3.8-flash`)이 과부하(503)나 한도 초과(429)로 막히면 같은 키로 다른 Gemini 모델을 씁니다.
+기본 모델은 판단 `gemini/gemini-3.6-flash`(추론량 `low`, 제한 4초), 분석·리포트 `gemini/gemini-3.8-flash`입니다.
+한 모델이 과부하(503)나 한도 초과(429)로 막히면 같은 키로 다른 Gemini 모델을 씁니다.
 
 ```text
-LLM_JUDGE_MODEL=gemini/gemini-3.6-flash
-LLM_REPORT_MODEL=gemini/gemini-3.6-flash
+LLM_JUDGE_MODEL=gemini/gemini-3.8-flash     # 판단 모델이 막혔을 때
+LLM_REPORT_MODEL=gemini/gemini-3.6-flash    # 리포트 모델이 막혔을 때
 ```
 
-- 되돌릴 때는 두 변수를 비웁니다. 비우면 기본 모델을 씁니다.
-- 바꾸기 전에 로컬에서 확인합니다: `$env:LLM_JUDGE_MODEL="gemini/gemini-3.6-flash"; uv run python scripts/demo_check.py --real-llm`
+- 되돌릴 때는 변수를 비웁니다. 비우면 기본 모델을 씁니다.
+- 바꾸기 전에 로컬에서 확인합니다: `$env:LLM_JUDGE_MODEL="gemini/gemini-3.8-flash"; uv run python scripts/demo_check.py --real-llm`
+- 판단을 3.8 Flash로 바꾸면 느려집니다 (추론량 `low`에서 중앙값 3.8초, 제한 4초에 거의 닿음). 대체 사유 `timeout`이 많으면 B로 갑니다.
 - 키 자체가 막혔거나(인증 오류, 결제 한도) Gemini 전체 장애면 모델을 바꿔도 소용없습니다. 바로 B로 갑니다.
-- [미확인] Gemini 판단 모델의 지연은 아직 측정하지 않았습니다. 리허설 전에 `scripts/llm_latency.py --n 20`으로 두 모델을 측정하고 결과를 `docs/evals/latency.md`에 남깁니다.
+- 무료 등급 키로는 판단 호출이 거의 다 실패했습니다 (429, 503). 배포에는 결제를 등록한 키를 넣습니다.
+- 지연 측정 기록은 `docs/evals/latency.md`에 있습니다 (2026-11-17, 모델과 추론량별 10회).
 
 ### B. LLM 없이 진행
 

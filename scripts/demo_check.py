@@ -172,8 +172,8 @@ def main() -> int:
     parser.add_argument(
         "--max-turn-ms",
         type=float,
-        default=3000,
-        help="턴 하나의 서버 처리 시간 상한(ms). 판단 제한 시간 2.5초에 여유를 더한 값입니다.",
+        default=4500,
+        help="턴 하나의 서버 처리 시간 상한(ms). 판단 제한 시간 4초에 여유를 더한 값입니다.",
     )
     # psycopg 3 비동기 연결은 Windows 기본 루프를 지원하지 않아 서버와 같은 루프를 씁니다.
     return asyncio.run(run(parser.parse_args()), loop_factory=server_loop_factory)
