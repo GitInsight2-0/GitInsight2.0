@@ -19,6 +19,17 @@ def build_judge_llm(settings: Settings, cost_recorder: CostRecorder | None = Non
     )
 
 
+def build_analysis_llm(
+    settings: Settings, cost_recorder: CostRecorder | None = None
+) -> LiteLLMClient:
+    """분석 워커의 2단계(주제 생성)용 클라이언트입니다."""
+    return LiteLLMClient(
+        settings.llm_analysis_model,
+        cost_recorder=cost_recorder,
+        reasoning_effort=settings.llm_analysis_reasoning_effort,
+    )
+
+
 def build_report_llm(
     settings: Settings, cost_recorder: CostRecorder | None = None
 ) -> LiteLLMClient:

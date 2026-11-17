@@ -234,6 +234,32 @@ async def test_result_only_for_in_progress_record(store: AnalysisStore) -> None:
         await store.save_result(record.analysis_id, result_for(record.analysis_id))
 
 
+async def test_fail_in_progress_closes_only_running_records(store: AnalysisStore) -> None:
+    running, _ = await store.get_or_create(KEY)
+    await store.update_state(running.analysis_id, stage1(0.3))
+    queued, _ = await store.get_or_create(AnalysisKey(KEY.repo_full_name, KEY.commit_sha, "u2"))
+    done, _ = await store.get_or_create(AnalysisKey(KEY.repo_full_name, KEY.commit_sha, "u3"))
+    await store.save_result(done.analysis_id, result_for(done.analysis_id))
+
+    closed = await store.fail_in_progress("InterruptedAnalysis")
+
+    assert closed == 2
+    for record_id in (running.analysis_id, queued.analysis_id):
+        record = await store.get_record(record_id)
+        assert record is not None
+        assert (record.state.status, record.state.error) == (
+            AnalysisStatus.FAILED,
+            "InterruptedAnalysis",
+        )
+    # 진행률은 유지해서 화면이 어느 단계에서 멈췄는지 알 수 있습니다.
+    stopped = await store.get_record(running.analysis_id)
+    assert stopped is not None and stopped.state.progress == 0.3
+    finished = await store.get_record(done.analysis_id)
+    assert finished is not None and finished.state.status is AnalysisStatus.DONE
+    # 닫힌 키는 다시 요청하면 새로 분석합니다.
+    assert (await store.get_or_create(KEY))[1]
+
+
 async def test_unknown_record(store: AnalysisStore) -> None:
     assert await store.get_record("missing") is None
     assert await store.get("missing") is None

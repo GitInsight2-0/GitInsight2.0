@@ -86,6 +86,14 @@ class AnalysisStore(Protocol):
         """결과를 저장하고 done으로 바꿉니다. 진행 중인 기록에만 저장할 수 있습니다."""
         ...
 
+    async def fail_in_progress(self, error: str) -> int:
+        """진행 중인 기록을 모두 failed(error)로 닫고 닫은 수를 돌려줍니다.
+
+        분석을 서버 프로세스 안에서 돌리는 동안, 서버가 다시 시작되면 그 작업은 사라집니다.
+        시작할 때 이 메서드로 정리하면 화면이 오래됨 판단(STALE_AFTER)까지 기다리지 않고 실패를 알 수 있습니다.
+        """
+        ...
+
     async def get(self, analysis_id: str) -> AnalysisResult | None:
         """완료된 결과를 돌려줍니다. 면접 두뇌의 AnalysisSource로 씁니다.
 
@@ -188,6 +196,21 @@ class InMemoryAnalysisStore:
                 status=AnalysisStatus.DONE, progress=1.0, commit_sha=record.key.commit_sha
             )
             self._records[analysis_id] = replace(record, state=done, updated_at=self._clock())
+
+    async def fail_in_progress(self, error: str) -> int:
+        async with self._lock:
+            closed = 0
+            for analysis_id, record in list(self._records.items()):
+                if not record.in_progress:
+                    continue
+                failed = record.state.model_copy(
+                    update={"status": AnalysisStatus.FAILED, "error": error}
+                )
+                self._records[analysis_id] = replace(
+                    record, state=sanitized(failed), updated_at=self._clock()
+                )
+                closed += 1
+            return closed
 
     async def get(self, analysis_id: str) -> AnalysisResult | None:
         stored = self._results.get(analysis_id)

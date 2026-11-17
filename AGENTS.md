@@ -24,7 +24,7 @@ README.md의 "전체 구조"를 따릅니다.
 | `contracts/src/gitinsight_contracts/` | 모듈 간 계약(Pydantic 모델) | B (변경 시 2명 승인) |
 | `contracts/schema/contracts.json`, `contracts/ts/index.d.ts` | 계약에서 자동 생성한 JSON Schema와 TS 타입. 직접 고치지 않습니다 | 자동 생성 |
 | `api/src/gitinsight_api/` | FastAPI 서버. `brain/`(면접 두뇌), `llm/`(LLMClient), `routes/` | B, D |
-| `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출, git blame 기여 라벨과 최근 커밋), 2단계(규칙으로 주제 후보 선택, LLM으로 주제 재료 생성과 서버 검증), 전체 흐름 `pipeline.run_analysis` | A |
+| `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출, git blame 기여 라벨과 최근 커밋), 2단계(규칙으로 주제 후보 선택, LLM으로 주제 재료 생성과 서버 검증), 전체 흐름 `pipeline.run_analysis`, 분석 기록 저장소와 연결해 실행하는 `jobs`(같은 프로세스 Launcher) | A |
 | `web/` | Next.js 웹. 지금은 음성 PoC(`/lab/voice`), 임시 토큰 라우트(`/lab/voice-token`), 텍스트 면접 화면 중간 단계(`/lab/interview`)가 있습니다 | C |
 | `fixtures/analysis/` | 데모 레포 분석 결과 샘플 | B |
 | `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |

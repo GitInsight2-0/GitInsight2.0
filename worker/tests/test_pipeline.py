@@ -1,5 +1,3 @@
-import os
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -18,25 +16,7 @@ from gitinsight_worker.pipeline import run_analysis
 from gitinsight_worker.stage1 import analyze_tree
 from gitinsight_worker.stage2 import Stage2Error
 
-from worker_test_support import Recorder, material, write_repo
-
-
-def make_origin(path: Path) -> str:
-    path.mkdir()
-    env = {
-        **os.environ,
-        "GIT_AUTHOR_NAME": "t",
-        "GIT_AUTHOR_EMAIL": "t@example.com",
-        "GIT_COMMITTER_NAME": "t",
-        "GIT_COMMITTER_EMAIL": "t@example.com",
-    }
-    write_repo(path)
-    for args in (["init", "--quiet"], ["add", "-A"], ["commit", "--quiet", "-m", "init"]):
-        subprocess.run(["git", *args], cwd=path, check=True, capture_output=True, env=env)
-    out = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=path, check=True, capture_output=True, text=True
-    )
-    return out.stdout.strip()
+from worker_test_support import Recorder, make_origin, material
 
 
 @pytest.fixture

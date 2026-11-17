@@ -3,7 +3,7 @@
 사용:
   uv run python scripts/eval_stage2.py
   uv run python scripts/eval_stage2.py --model openai/gpt-6.1-sol
-  uv run python scripts/eval_stage2.py --reasoning-effort low
+  uv run python scripts/eval_stage2.py --reasoning-effort ""   # 모델 기본 추론량으로 비교
 
 API 키는 환경 변수로 받습니다. .env에 넣었다면 `uv run --env-file .env python ...`으로 실행합니다.
 진행 중 로그에는 오류 종류와 개수만 나오고, 코드와 응답 본문은 나오지 않습니다.
@@ -74,8 +74,14 @@ async def run(args: argparse.Namespace) -> int:
     settings = Settings()
     model = args.model or settings.llm_analysis_model
     recorder = InMemoryCostRecorder()
-    client = LiteLLMClient(model, cost_recorder=recorder, reasoning_effort=args.reasoning_effort)
-    label = f"{model} (reasoning_effort={args.reasoning_effort or '기본값'})"
+    # 인자를 주지 않으면 설정(LLM_ANALYSIS_REASONING_EFFORT, 기본 low)을, 빈 문자열이면 모델 기본값을 씁니다.
+    effort = (
+        settings.llm_analysis_reasoning_effort
+        if args.reasoning_effort is None
+        else args.reasoning_effort.strip() or None
+    )
+    client = LiteLLMClient(model, cost_recorder=recorder, reasoning_effort=effort)
+    label = f"{model} (reasoning_effort={effort or '모델 기본값'})"
     sample = load_analysis()
     url = f"https://github.com/{sample.repo_full_name}.git"
     result = await run_analysis(
@@ -98,7 +104,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="2단계 분석 실제 LLM 평가")
     parser.add_argument("--model", default=None)
     parser.add_argument(
-        "--reasoning-effort", default=None, help="low, medium, high (비우면 모델 기본값)"
+        "--reasoning-effort",
+        default=None,
+        help="low, medium, high. 주지 않으면 설정값(기본 low), 빈 문자열이면 모델 기본값",
     )
     # 주제 생성 실패 원인(시간 초과, 검증 실패)을 보려고 정보 로그를 켭니다. 본문은 로그에 남지 않습니다.
     logging.basicConfig(level=logging.WARNING, format="  %(levelname)s %(message)s")

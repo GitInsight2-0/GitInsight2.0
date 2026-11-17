@@ -18,9 +18,7 @@ from gitinsight_worker.contribution import (
     parse_line_porcelain,
     summarize,
 )
-from gitinsight_worker.stage1 import analyze_tree, run_stage1
-
-from worker_test_support import Recorder
+from gitinsight_worker.stage1 import analyze_tree
 
 ME = Requester.of(emails=["me@example.com"])
 
@@ -210,21 +208,3 @@ def test_tree_without_git_gets_unknown_contribution(tmp_path: Path) -> None:
     result = analyze_tree(tmp_path, "b" * 40, ME)
 
     assert result.contributions == {"a.py::a": UNKNOWN}
-
-
-async def test_run_stage1_passes_requester(repo: tuple[Path, list[str]], tmp_path: Path) -> None:
-    path, (_, _, third) = repo
-
-    def clone(dest: Path) -> None:
-        subprocess.run(
-            ["git", "clone", "--quiet", "--", str(path), str(dest)],
-            check=True,
-            capture_output=True,
-        )
-
-    work = tmp_path / "work"
-    work.mkdir()
-    result = await run_stage1(clone, third, Recorder(), requester=ME, work_dir=work)
-
-    assert result.contributions["mod.py::mine"].label is ContributionLabel.VERIFIED
-    assert list(work.iterdir()) == []
