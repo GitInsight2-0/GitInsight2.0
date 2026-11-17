@@ -170,6 +170,138 @@
   opacity: 0.5;
 }
 
+/* ── 레포 선택과 분석 진행 (#61) ── */
+
+.picker {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.repoList {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+
+.repoList legend {
+  margin-bottom: 10px;
+  padding: 0;
+}
+
+.search {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--gi-line);
+  border-radius: var(--gi-radius);
+  font-size: 15px;
+}
+
+.repoScroll {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.repoRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--gi-line);
+  border-radius: var(--gi-radius);
+  cursor: pointer;
+}
+
+.repoRow:hover {
+  background: var(--gi-surface);
+}
+
+.repoRowOn {
+  border-color: var(--gi-ink);
+  background: var(--gi-surface);
+}
+
+.repoRow input {
+  accent-color: var(--gi-ink);
+  width: 18px;
+  height: 18px;
+}
+
+.repoRow .repoName {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 15px;
+}
+
+.badge {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--gi-radius-pill);
+  background: var(--gi-ink);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.primary:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.textLink {
+  color: var(--gi-accent-text);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.progressBox {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.progressText {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.progressTrack {
+  width: 100%;
+  height: 8px;
+  border-radius: var(--gi-radius-pill);
+  background: var(--gi-surface);
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: var(--gi-radius-pill);
+  background: var(--gi-accent);
+  transition: width 0.4s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progressFill {
+    transition: none;
+  }
+}
+
 @media (max-width: 720px) {
   .topbar {
     padding: 12px 16px;
