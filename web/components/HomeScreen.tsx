@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { LOGIN_ERROR_TEXT, LOGIN_URL, type MeState, fetchMe, logout } from "@/lib/auth";
-import { DEMO_ANALYSIS_ID, DEMO_REPO } from "@/lib/demo";
+import RepoPicker from "./RepoPicker";
 import styles from "./home.module.css";
 
 /**
  * 첫 화면. 로그인 전에는 소개와 GitHub 로그인, 로그인 뒤에는 면접 시작을 보여 줍니다.
- * 레포 목록과 선택(#18 2단계)이 붙기 전까지는 데모 분석으로 면접을 시작합니다.
+ * 로그인 뒤 레포 고르기와 분석 진행은 RepoPicker가 맡습니다.
  */
 export default function HomeScreen() {
   const [me, setMe] = useState<MeState>({ kind: "loading" });
@@ -88,14 +88,7 @@ export default function HomeScreen() {
 
           {me.kind === "in" && (
             <>
-              <div className={styles.repo}>
-                <span className={styles.label}>면접 볼 레포</span>
-                <span className={styles.repoName}>{DEMO_REPO}</span>
-                <span className={styles.muted}>레포 선택이 열리기 전까지는 준비된 데모 레포로 면접을 봅니다.</span>
-              </div>
-              <a className={styles.primary} href={`/interview/${encodeURIComponent(DEMO_ANALYSIS_ID)}`}>
-                면접 시작
-              </a>
+              <RepoPicker />
               <p className={styles.muted}>음성으로 답하려면 Chrome에서 이어폰을 끼고 시작하세요.</p>
             </>
           )}

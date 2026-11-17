@@ -1,0 +1,53 @@
+/** 레포 목록과 분석 요청·진행 (계약 Repo, AnalysisCreate, AnalysisCreated, AnalysisState) */
+import type { AnalysisCreated, AnalysisState, AnalysisStatus, Repo } from "@gitinsight/contracts";
+import { ApiError } from "@/lib/voice/api";
+
+export type ReposResult =
+  | { kind: "ok"; repos: Repo[] }
+  /** 서버에 아직 레포 목록 API가 없음 (2단계 전). 데모 레포로 시작합니다 */
+  | { kind: "missing" }
+  | { kind: "error"; status: number; message: string };
+
+export async function fetchRepos(signal?: AbortSignal): Promise<ReposResult> {
+  const res = await fetch("/api/repos", { signal, cache: "no-store" });
+  if (res.status === 404 || res.status === 405 || res.status === 501) return { kind: "missing" };
+  if (!res.ok) return { kind: "error", status: res.status, message: await detailOf(res) };
+  return { kind: "ok", repos: (await res.json()) as Repo[] };
+}
+
+/** 분석을 시작합니다. 같은 레포·커밋의 끝난 분석이 있으면 서버가 그것을 돌려줍니다 (cached) */
+export async function startAnalysis(repoId: number, signal?: AbortSignal): Promise<AnalysisCreated> {
+  const res = await fetch("/api/analyses", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ repo_id: repoId }),
+    signal,
+  });
+  if (!res.ok) throw new ApiError(res.status, await detailOf(res));
+  return (await res.json()) as AnalysisCreated;
+}
+
+export async function fetchAnalysis(analysisId: string, signal?: AbortSignal): Promise<AnalysisState> {
+  const res = await fetch(`/api/analyses/${encodeURIComponent(analysisId)}`, { signal, cache: "no-store" });
+  if (!res.ok) throw new ApiError(res.status, await detailOf(res));
+  return (await res.json()) as AnalysisState;
+}
+
+export const STATUS_TEXT: Record<AnalysisStatus, string> = {
+  queued: "분석을 기다리고 있어요",
+  stage1: "코드 구조와 커밋 이력을 읽고 있어요",
+  stage2: "면접 주제를 만들고 있어요",
+  done: "분석이 끝났어요",
+  failed: "분석하지 못했어요",
+};
+
+/** 면접 화면 주소. 코드 뷰어가 코드를 받을 레포 이름을 같이 넘깁니다 */
+export function interviewHref(analysisId: string, repo?: string): string {
+  const q = repo ? `?repo=${encodeURIComponent(repo)}` : "";
+  return `/interview/${encodeURIComponent(analysisId)}${q}`;
+}
+
+async function detailOf(res: Response): Promise<string> {
+  const body = (await res.json().catch(() => null)) as { detail?: unknown } | null;
+  return typeof body?.detail === "string" ? body.detail : `서버 오류 (${res.status})`;
+}
