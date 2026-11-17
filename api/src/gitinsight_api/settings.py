@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gitinsight_api.brain.quotes import QuoteMatcher, QuoteMatchMode
@@ -33,7 +33,11 @@ class Settings(BaseSettings):
     lab_enabled: bool = False
     # 쉼표로 구분한 CORS 허용 출처입니다. 같은 도메인(Next.js rewrites)으로 붙으면 비워 둡니다.
     cors_origins: str = ""
-    # /api/metrics 이벤트를 쌓는 로컬 JSONL 파일입니다. Postgres 저장(Task 9) 전까지 씁니다.
+    # Postgres 접속 주소입니다 (postgresql://user:password@host:5432/dbname).
+    # 비워 두면 DB를 쓰지 않고 /api/metrics 이벤트를 metrics_path(JSONL)에 쌓습니다.
+    # 비밀번호가 들어 있으므로 SecretStr로 받아 repr과 로그에 나오지 않게 합니다.
+    database_url: SecretStr | None = None
+    # DATABASE_URL이 없을 때 /api/metrics 이벤트를 쌓는 로컬 JSONL 파일입니다.
     metrics_path: Path = Path(".data/metrics.jsonl")
     # 면접 재료로 쓸 샘플 분석 파일 이름입니다 (fixtures/analysis/<이름>.json).
     fixture_analysis: str = "gitinsight_agent"
@@ -87,11 +91,17 @@ class Settings(BaseSettings):
         values["llm_provider"] = provider
         return values
 
-    @field_validator("llm_judge_reasoning_effort", "llm_analysis_reasoning_effort", mode="before")
+    @field_validator(
+        "llm_judge_reasoning_effort",
+        "llm_analysis_reasoning_effort",
+        "database_url",
+        mode="before",
+    )
     @classmethod
     def _empty_as_none(cls, value: object) -> object:
-        # .env에 `LLM_JUDGE_REASONING_EFFORT=`처럼 비워 두면 모델 기본값을 씁니다.
-        return None if isinstance(value, str) and not value.strip() else value
+        # .env에 `LLM_JUDGE_REASONING_EFFORT=`, `DATABASE_URL=`처럼 비워 두면 설정하지 않은 것으로 봅니다.
+        text = value.get_secret_value() if isinstance(value, SecretStr) else value
+        return None if isinstance(text, str) and not text.strip() else value
 
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
