@@ -331,6 +331,55 @@
   color: var(--gi-muted);
 }
 
+/* ── 끝내기 확인과 리포트 ── */
+
+.confirm {
+  width: 100%;
+  max-width: 760px;
+  padding: 16px 20px;
+  border: 1px solid var(--gi-line);
+  border-radius: var(--gi-radius);
+  background: var(--gi-surface);
+  text-align: left;
+}
+
+.confirm p {
+  margin: 0 0 12px;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.confirmActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 12px;
+}
+
+.reportBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.reportNote {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--gi-muted);
+}
+
+a.primary {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+a.primary:hover {
+  opacity: 0.9;
+}
+
 /* ── 대화 기록 ── */
 
 .history {
