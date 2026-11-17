@@ -576,7 +576,7 @@ export default function InterviewScreen({
             <>
               <div className={styles.answer}>
                 <div className={styles.label}>{answerSent ? "방금 보낸 답변" : "내 답변"}</div>
-                <p className={styles.answerText}>{lastAnswer ?? (stage === "listening" ? "말씀하시면 여기에 받아 적습니다." : "")}</p>
+                <p className={styles.answerText}>{lastAnswer ?? (stage === "listening" ? "말을 마치면 여기에 적어 드려요." : "")}</p>
               </div>
               <p className={styles.hint}>
                 <MicIcon />
