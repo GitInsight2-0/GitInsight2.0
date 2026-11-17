@@ -1,11 +1,15 @@
-"""분석 저장소 계약 테스트. Postgres 구현(#17 이후)이 생기면 STORES에 추가해 같은 테스트를 돌립니다."""
+"""분석 저장소 계약 테스트. 메모리 구현과 Postgres 구현이 같은 테스트를 통과해야 합니다.
+
+Postgres 구현은 postgres 표시로 기본 실행에서 빠집니다.
+실행: TEST_DATABASE_URL=postgresql://... uv run pytest -m postgres api/tests/test_analysis_store.py
+"""
 
 import asyncio
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from gitinsight_api.analyses.postgres import PostgresAnalysisStore
 from gitinsight_api.analyses.store import (
     STALE_AFTER,
     STALE_ERROR,
@@ -33,9 +37,6 @@ class FakeClock:
         return self.now
 
 
-StoreFactory = Callable[[Clock], AnalysisStore]
-STORES: list[StoreFactory] = [lambda clock: InMemoryAnalysisStore(clock=clock)]
-
 SAMPLE = load_analysis()
 KEY = AnalysisKey(SAMPLE.repo_full_name, SAMPLE.commit_sha, user_id="u1")
 
@@ -45,9 +46,14 @@ def clock() -> FakeClock:
     return FakeClock()
 
 
-@pytest.fixture(params=STORES, ids=["memory"])
+@pytest.fixture(params=["memory", pytest.param("postgres", marks=pytest.mark.postgres)])
 def store(request: pytest.FixtureRequest, clock: FakeClock) -> AnalysisStore:
-    return request.param(clock)
+    # 시간을 앞당기는 테스트가 있어서 두 구현 모두 가짜 시계를 받습니다.
+    # 운영의 Postgres 구현은 시계를 받지 않고 DB now()를 씁니다.
+    test_clock: Clock = clock
+    if request.param == "postgres":
+        return PostgresAnalysisStore(request.getfixturevalue("pg_engine"), clock=test_clock)
+    return InMemoryAnalysisStore(clock=test_clock)
 
 
 def result_for(analysis_id: str) -> AnalysisResult:
