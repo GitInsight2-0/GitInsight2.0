@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import InterfaceError, OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from gitinsight_api.analyses.postgres import PostgresAnalysisStore
@@ -131,8 +132,10 @@ def create_app(
 
     @app.exception_handler(OperationalError)
     @app.exception_handler(InterfaceError)
+    @app.exception_handler(PoolTimeoutError)
     async def database_unavailable(_request: Request, error: Exception) -> JSONResponse:
-        # DB에 연결하지 못한 경우입니다. 같은 요청을 다시 보내면 됩니다 (턴은 turn_id로 한 번만 처리합니다).
+        # DB에 연결하지 못했거나 연결 풀에서 기다리다 시간이 넘은 경우입니다.
+        # 같은 요청을 다시 보내면 됩니다 (턴은 turn_id로 한 번만 처리합니다).
         # 로그에는 예외 종류만 남깁니다. 메시지에는 접속 주소가 섞일 수 있습니다.
         logger.warning("database_unavailable error=%s", type(error).__name__)
         return JSONResponse(

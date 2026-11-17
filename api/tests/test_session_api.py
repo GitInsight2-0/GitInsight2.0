@@ -501,3 +501,23 @@ async def test_database_url_puts_sessions_in_postgres_and_failure_is_503(
     assert turns.json() == {"detail": "데이터베이스에 연결하지 못했습니다"}
     assert "database_unavailable error=OperationalError" in caplog.text
     assert "s3cret-pw" not in caplog.text
+
+
+async def test_pool_timeout_is_503(client_for: ClientFactory, metrics_path: Path) -> None:
+    # 연결 풀에서 기다리다 시간이 넘으면 연결 실패와 같은 503입니다 (PR #57 리뷰).
+    from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+
+    class BusyBrain:
+        async def owner_of(self, session_id: UUID) -> str | None:
+            raise PoolTimeoutError("QueuePool limit reached")
+
+    app = create_app(
+        Settings(lab_enabled=False, metrics_path=metrics_path),
+        brain=BusyBrain(),  # type: ignore[arg-type]
+    )
+    app.dependency_overrides[get_current_user] = Users()
+    async with client_for(app) as client:
+        response = await client.post(f"/api/sessions/{uuid4()}/turns", json=turn())
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "데이터베이스에 연결하지 못했습니다"}
