@@ -1,7 +1,7 @@
 """설정으로 면접 두뇌와 LLM 클라이언트를 만듭니다. CLI와 평가 스크립트가 같이 씁니다."""
 
 from gitinsight_api.brain.analysis_source import AnalysisSource, FixtureAnalysisSource
-from gitinsight_api.brain.repository import InMemorySessionRepository
+from gitinsight_api.brain.repository import InMemorySessionRepository, SessionRepository
 from gitinsight_api.brain.service import InterviewBrain
 from gitinsight_api.llm import CostRecorder, LiteLLMClient, LLMClient
 from gitinsight_api.report.builder import ReportBuilder
@@ -68,17 +68,22 @@ def build_report_service(
 
 
 def build_server_services(
-    settings: Settings, analyses: AnalysisSource | None = None
+    settings: Settings,
+    analyses: AnalysisSource | None = None,
+    sessions: SessionRepository | None = None,
 ) -> tuple[InterviewBrain, ReportService]:
     """HTTP 서버용 면접 두뇌와 리포트 서비스를 만듭니다.
 
     LLM 클라이언트는 만들기만 하고 부르지 않으므로 서버 시작 때 LLM이나 네트워크를 쓰지 않습니다.
-    세션과 리포트는 메모리 저장소에 둡니다.
     analyses를 주면 두뇌와 리포트가 그 저장소에서 분석 결과를 읽고, 없으면 샘플 파일을 읽습니다.
+    sessions를 주면 세션과 턴 기록을 그 저장소에 두고, 없으면 메모리에 둡니다.
+    리포트는 메모리 저장소에 둡니다.
     """
     if analyses is None:
         analyses = FixtureAnalysisSource(load_analysis(settings.fixture_analysis))
-    brain = build_fixture_brain(settings, llm=build_judge_llm(settings), analyses=analyses)
+    brain = build_fixture_brain(
+        settings, llm=build_judge_llm(settings), analyses=analyses, repository=sessions
+    )
     reports = build_report_service(
         settings,
         brain,
@@ -96,10 +101,12 @@ def build_fixture_brain(
     fixture: str | None = None,
     force_prepared: bool = False,
     analyses: AnalysisSource | None = None,
+    repository: SessionRepository | None = None,
 ) -> InterviewBrain:
     """샘플 분석 결과와 메모리 저장소로 면접 두뇌를 만듭니다. llm이 없으면 미리 만든 질문만 씁니다.
 
     analyses를 주면 샘플 파일 대신 그 저장소(예: Postgres 분석 기록)에서 면접 재료를 읽습니다.
+    repository를 주면 메모리 대신 그 저장소(예: Postgres)에 세션을 둡니다.
     """
     from gitinsight_api.llm.fake import FakeLLM
 
@@ -107,7 +114,7 @@ def build_fixture_brain(
         analyses = FixtureAnalysisSource(load_analysis(fixture or settings.fixture_analysis))
     return InterviewBrain(
         analyses=analyses,
-        repository=InMemorySessionRepository(),
+        repository=repository if repository is not None else InMemorySessionRepository(),
         llm=llm if llm is not None else FakeLLM(),
         judge_timeout_s=settings.judge_timeout_s,
         plan_timeout_s=settings.plan_timeout_s,

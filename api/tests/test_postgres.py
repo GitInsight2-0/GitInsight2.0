@@ -11,17 +11,28 @@ import pytest
 from alembic import command
 from pydantic import SecretStr
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from gitinsight_api.analyses.postgres import SNAPSHOT_REPLACED_ERROR, PostgresAnalysisStore
+from gitinsight_api.analyses.source import StoredAnalysisSource
 from gitinsight_api.analyses.store import AnalysisKey
 from gitinsight_api.auth import CurrentUser, get_current_user
+from gitinsight_api.brain.postgres import PostgresSessionRepository
+from gitinsight_api.brain.service import InterviewBrain
+from gitinsight_api.db import CONNECT_ARGS, normalize_url
+from gitinsight_api.llm.fake import FakeLLM
 from gitinsight_api.main import create_app
 from gitinsight_api.metrics_store import PostgresMetricsStore
 from gitinsight_api.settings import Settings
 from gitinsight_api.tables import metric_events
 from gitinsight_contracts.api import AnalysisStatus
 from gitinsight_contracts.fixtures import load_analysis
+from gitinsight_contracts.interview import (
+    InterviewMode,
+    SessionCreate,
+    TurnRequest,
+    TurnSource,
+)
 from gitinsight_contracts.metrics import MetricEvent, MetricName
 
 from api_test_support import ClientFactory, alembic_config
@@ -140,11 +151,71 @@ async def test_session_starts_from_seeded_snapshot_for_its_owner_only(
         app.dependency_overrides[get_current_user] = lambda: CurrentUser("demo", "demo")
         created = await client.post("/api/sessions", json=body)
         session_id = created.json()["session_id"]
-        ended = await client.post(f"/api/sessions/{session_id}/end")
         app.dependency_overrides[get_current_user] = lambda: CurrentUser("other", "other")
         other = await client.post("/api/sessions", json=body)
     await app.state.db_engine.dispose()
 
     assert created.status_code == 201, created.text
-    assert ended.status_code == 200, ended.text
     assert other.status_code == 404
+
+    # 서버를 다시 시작해도 같은 세션이 이어집니다 (#53). 세션과 턴 기록이 DB에 있기 때문입니다.
+    restarted = create_app(settings)
+    restarted.dependency_overrides[get_current_user] = lambda: CurrentUser("demo", "demo")
+    turn = {"turn_id": str(uuid4()), "transcript": "답변입니다", "source": "text"}
+    async with client_for(restarted) as client:
+        first = await client.post(f"/api/sessions/{session_id}/turns", json=turn)
+        again = await client.post(f"/api/sessions/{session_id}/turns", json=turn)
+        ended = await client.post(f"/api/sessions/{session_id}/end")
+        report = await client.get(f"/api/reports/{ended.json()['report_id']}")
+        closed = await client.post(
+            f"/api/sessions/{session_id}/turns", json={**turn, "turn_id": str(uuid4())}
+        )
+        restarted.dependency_overrides[get_current_user] = lambda: CurrentUser("other", "other")
+        forbidden = await client.post(f"/api/sessions/{session_id}/turns", json=turn)
+    await restarted.state.db_engine.dispose()
+
+    assert first.status_code == 200, first.text
+    # 같은 turn_id는 저장된 응답을 그대로 돌려줍니다.
+    assert again.json() == first.json()
+    assert ended.status_code == 200, ended.text
+    assert [t["turn_id"] for t in report.json()["turns"]] == [turn["turn_id"]]
+    assert closed.status_code == 409
+    assert forbidden.status_code == 403
+
+
+async def test_turn_after_restart_needs_only_one_connection(
+    test_database_url: str, pg_engine: AsyncEngine
+) -> None:
+    # 연결이 하나뿐인 풀에서, 서버를 다시 시작한 직후(분석 캐시가 빈 상태)에도 턴이 처리됩니다 (PR #57 리뷰).
+    # 세션 잠금을 잡은 채 분석을 읽으면 두 번째 연결을 기다리다 풀 대기 시간이 넘습니다.
+    sample = load_analysis()
+    await PostgresAnalysisStore(pg_engine).save_snapshot(sample, "demo")
+    single = create_async_engine(
+        normalize_url(test_database_url),
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=2,
+        connect_args=CONNECT_ARGS,
+    )
+
+    def server() -> InterviewBrain:
+        # 서버 하나에 해당합니다. 분석 캐시는 서버마다 새로 시작합니다.
+        return InterviewBrain(
+            analyses=StoredAnalysisSource(PostgresAnalysisStore(single)),
+            repository=PostgresSessionRepository(single),
+            llm=FakeLLM(),
+            force_prepared=True,
+        )
+
+    try:
+        session_id, _ = await server().start(
+            SessionCreate(analysis_id=sample.analysis_id, mode=InterviewMode.TEXT)
+        )
+        reply = await server().handle_turn(
+            session_id,
+            TurnRequest(turn_id=uuid4(), transcript="답변입니다", source=TurnSource.TEXT),
+        )
+    finally:
+        await single.dispose()
+
+    assert reply.turn_id is not None and not reply.done

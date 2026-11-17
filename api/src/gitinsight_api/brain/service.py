@@ -1,6 +1,8 @@
 """진짜 면접 두뇌. 세션 시작과 턴 처리를 맡습니다.
 
 턴 처리 순서:
+0. 세션을 잠그기 전에 분석 결과를 읽습니다. 분석 결과는 바뀌지 않는 값입니다.
+   잠금 안에서 읽으면 Postgres에서 턴 하나가 연결을 두 개 잡습니다 (세션 행 잠금 + 분석 읽기, PR #57 리뷰).
 1. 세션을 잠그고, 이미 처리한 turn_id면 저장된 응답을 그대로 돌려줍니다.
 2. 남은 시간은 서버 시각으로 계산합니다. 클라이언트 시각은 지연 측정에만 씁니다.
 3. 시간이 끝났으면 LLM을 부르지 않습니다.
@@ -139,6 +141,11 @@ class InterviewBrain:
 
     async def handle_turn(self, session_id: UUID, request: TurnRequest) -> BrainReply:
         received = self._perf_counter()
+        unlocked = await self._repository.get(session_id)
+        if unlocked is None:
+            raise SessionNotFoundError(session_id)
+        # analysis_id는 세션을 만든 뒤 바뀌지 않아 잠금 없이 읽습니다.
+        loaded = await self._analyses.get(unlocked.analysis_id)
         async with self._repository.locked(session_id) as handle:
             existing = await handle.get_turn(request.turn_id)
             if existing is not None:
@@ -146,7 +153,9 @@ class InterviewBrain:
             state = handle.state.model_copy(deep=True)
             if state.closed:
                 raise SessionClosedError(session_id)
-            analysis = await self._analysis(state.analysis_id)
+            if loaded is None:
+                raise AnalysisNotFoundError(state.analysis_id)
+            analysis = loaded
             topic = analysis.topic(state.current_topic_id)
             question = state.last_question
 

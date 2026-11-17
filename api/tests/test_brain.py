@@ -1,6 +1,8 @@
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -12,9 +14,10 @@ from gitinsight_api.brain.judge import (
     validate_judgment,
 )
 from gitinsight_api.brain.protocol import SessionClosedError
-from gitinsight_api.brain.repository import InMemorySessionRepository
+from gitinsight_api.brain.repository import InMemorySessionRepository, SessionHandle
 from gitinsight_api.brain.service import InterviewBrain
 from gitinsight_api.llm.fake import FakeLLM, FakeStep
+from gitinsight_contracts.analysis import AnalysisResult
 from gitinsight_contracts.fixtures import (
     GoldenConversation,
     GoldenTurn,
@@ -351,3 +354,44 @@ async def test_llm_followup_highlight_comes_from_analysis() -> None:
 
     assert reply.action is Action.FOLLOW_UP
     assert reply.highlight == related
+
+
+class LockSpyRepository(InMemorySessionRepository):
+    """세션 잠금을 잡고 있는 동안 held가 True입니다."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.held = False
+
+    @asynccontextmanager
+    async def _locked(self, session_id: UUID) -> AsyncIterator[SessionHandle]:
+        async with super()._locked(session_id) as handle:
+            self.held = True
+            try:
+                yield handle
+            finally:
+                self.held = False
+
+
+async def test_turn_reads_analysis_before_taking_session_lock() -> None:
+    # Postgres에서는 잠금이 DB 연결 하나를 잡습니다. 잠금 안에서 분석을 읽으면 턴 하나가 연결 두 개를 씁니다.
+    # 연결 풀이 작으면 서버를 다시 시작한 직후(분석 캐시가 빈 상태) 턴이 계속 실패합니다 (PR #57 리뷰).
+    repository = LockSpyRepository()
+    reads_while_locked: list[str] = []
+
+    class Source:
+        async def get(self, analysis_id: str) -> AnalysisResult | None:
+            if repository.held:
+                reads_while_locked.append(analysis_id)
+            return ANALYSIS if analysis_id == ANALYSIS.analysis_id else None
+
+    brain = InterviewBrain(
+        analyses=Source(), repository=repository, llm=FakeLLM(), force_prepared=True, clock=Clock()
+    )
+    session_id, _ = await brain.start(
+        SessionCreate(analysis_id=ANALYSIS.analysis_id, mode=InterviewMode.TEXT)
+    )
+    reply = await brain.handle_turn(session_id, turn_request("답변입니다"))
+
+    assert reply.action is Action.FOLLOW_UP
+    assert reads_while_locked == []

@@ -1,4 +1,7 @@
-"""세션 상태와 턴 기록. Postgres(Task 9)에는 JSON으로 저장할 수 있게 Pydantic 모델로 둡니다."""
+"""세션 상태와 턴 기록. Postgres(brain/postgres.py)에 JSON으로 저장하므로 Pydantic 모델로 둡니다.
+
+필드를 바꾸면 DB에 저장된 진행 중 세션을 읽지 못할 수 있습니다. 새 필드에는 기본값을 줍니다.
+"""
 
 from datetime import datetime
 from uuid import UUID
