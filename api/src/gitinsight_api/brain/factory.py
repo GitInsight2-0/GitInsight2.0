@@ -5,7 +5,7 @@ from gitinsight_api.brain.repository import InMemorySessionRepository, SessionRe
 from gitinsight_api.brain.service import InterviewBrain
 from gitinsight_api.llm import CostRecorder, LiteLLMClient, LLMClient
 from gitinsight_api.report.builder import ReportBuilder
-from gitinsight_api.report.service import InMemoryReportStore, ReportService
+from gitinsight_api.report.service import InMemoryReportStore, ReportService, ReportStore
 from gitinsight_api.settings import Settings
 from gitinsight_contracts.analysis import AnalysisResult
 from gitinsight_contracts.fixtures import load_analysis
@@ -44,17 +44,19 @@ def build_report_service(
     llm: LLMClient | None,
     force_prepared: bool = False,
     analyses: AnalysisSource | None = None,
+    store: ReportStore | None = None,
 ) -> ReportService:
     """llm이 없으면 LLM 없이 턴별 판단 표 리포트만 만듭니다.
 
     analyses를 주면 analysis 대신 그 저장소(예: Postgres 분석 기록)에서 결과를 읽습니다.
+    store를 주면 리포트를 그 저장소에 두고, 없으면 메모리에 둡니다.
     """
     from gitinsight_api.llm.fake import FakeLLM
 
     return ReportService(
         analyses=analyses if analyses is not None else FixtureAnalysisSource(analysis),
         sessions=brain.repository,
-        store=InMemoryReportStore(),
+        store=store if store is not None else InMemoryReportStore(),
         builder=ReportBuilder(
             llm=llm if llm is not None else FakeLLM(),
             report_timeout_s=settings.report_timeout_s,
@@ -71,13 +73,14 @@ def build_server_services(
     settings: Settings,
     analyses: AnalysisSource | None = None,
     sessions: SessionRepository | None = None,
+    report_store: ReportStore | None = None,
 ) -> tuple[InterviewBrain, ReportService]:
     """HTTP 서버용 면접 두뇌와 리포트 서비스를 만듭니다.
 
     LLM 클라이언트는 만들기만 하고 부르지 않으므로 서버 시작 때 LLM이나 네트워크를 쓰지 않습니다.
     analyses를 주면 두뇌와 리포트가 그 저장소에서 분석 결과를 읽고, 없으면 샘플 파일을 읽습니다.
     sessions를 주면 세션과 턴 기록을 그 저장소에 두고, 없으면 메모리에 둡니다.
-    리포트는 메모리 저장소에 둡니다.
+    report_store를 주면 리포트를 그 저장소에 두고, 없으면 메모리에 둡니다.
     """
     if analyses is None:
         analyses = FixtureAnalysisSource(load_analysis(settings.fixture_analysis))
@@ -90,6 +93,7 @@ def build_server_services(
         load_analysis(settings.fixture_analysis),
         llm=build_report_llm(settings),
         analyses=analyses,
+        store=report_store,
     )
     return brain, reports
 

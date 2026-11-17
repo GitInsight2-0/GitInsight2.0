@@ -23,7 +23,8 @@ from gitinsight_api.brain.repository import SessionRepository
 from gitinsight_api.brain.scripted import ScriptedBrain
 from gitinsight_api.db import create_engine
 from gitinsight_api.metrics_store import JsonlMetricsStore, MetricsStore, PostgresMetricsStore
-from gitinsight_api.report.service import ReportService
+from gitinsight_api.report.postgres import PostgresReportStore
+from gitinsight_api.report.service import ReportService, ReportStore
 from gitinsight_api.routes import analyses as analyses_routes
 from gitinsight_api.routes import auth, github, metrics, reports, sessions
 from gitinsight_api.settings import Settings
@@ -39,16 +40,18 @@ def default_services(
     settings: Settings,
     analyses: StoredAnalysisSource | None = None,
     session_repository: SessionRepository | None = None,
+    report_store: ReportStore | None = None,
 ) -> tuple[Brain, ReportService | None]:
     """실험 모드는 대본 면접 두뇌만, 그 밖에는 진짜 면접 두뇌와 리포트 서비스를 씁니다.
 
     analyses가 있으면 진짜 면접 두뇌와 리포트가 샘플 파일 대신 그 저장소의 분석 결과를 읽습니다.
     session_repository가 있으면 세션과 턴 기록을 메모리 대신 그 저장소에 둡니다.
+    report_store가 있으면 리포트를 메모리 대신 그 저장소에 둡니다.
     """
     if settings.lab_enabled:
         analysis = load_analysis(settings.fixture_analysis)
         return ScriptedBrain({analysis.analysis_id: analysis}), None
-    return build_server_services(settings, analyses, session_repository)
+    return build_server_services(settings, analyses, session_repository, report_store)
 
 
 def create_app(
@@ -66,6 +69,7 @@ def create_app(
     DATABASE_URL이 있으면 Postgres 엔진을 만들고(연결은 첫 쿼리 때), 서버를 끌 때 닫습니다.
     이때 실험 모드가 아니면 면접 재료도 analyses 테이블에서 읽고, 세션을 만들 때 분석 소유자를 확인합니다 (#52).
     세션과 턴 기록도 메모리 대신 Postgres에 둬서, 서버를 다시 시작해도 면접이 이어집니다 (#53).
+    리포트도 Postgres에 둬서, 서버를 다시 시작해도 같은 리포트를 다시 엽니다 (#75).
     analysis_store는 테스트가 메모리 저장소를 넣을 때 씁니다.
     github_http는 GitHub 로그인 호출용 HTTP 클라이언트입니다. 테스트는 가짜 응답 클라이언트를 넣고,
     넣지 않으면 새로 만들어 서버를 끌 때 닫습니다.
@@ -90,7 +94,12 @@ def create_app(
             if engine is not None and not settings.lab_enabled
             else None
         )
-        brain, report_service = default_services(settings, analyses, session_repository)
+        report_store = (
+            PostgresReportStore(engine) if engine is not None and not settings.lab_enabled else None
+        )
+        brain, report_service = default_services(
+            settings, analyses, session_repository, report_store
+        )
     if metrics_store is None:
         metrics_store = (
             PostgresMetricsStore(engine)
