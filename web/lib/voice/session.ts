@@ -94,6 +94,11 @@ export interface VoiceSession {
 /** 서버 응답을 못 받았을 때 음성 AI가 할 말. 면접을 진행시키지 않고 다시 말해 달라고만 합니다. */
 const RETRY_UTTERANCE = "잠시 연결이 불안정했어요. 방금 답변을 한 번만 더 말씀해 주시겠어요?";
 const EMPTY_UTTERANCE = "잘 못 들었어요. 한 번만 더 말씀해 주시겠어요?";
+/** 턴이 이만큼 연달아 실패하면 같은 부탁을 반복하지 않고 음성을 끝냅니다 (화면은 텍스트로 이어 갑니다) */
+const MAX_TURN_FAILURES = 2;
+/** 턴이 연달아 실패해 음성을 끝내기 전에 할 말. 말없이 끊기면 사용자가 무슨 일인지 모릅니다 */
+const DROP_UTTERANCE = "연결이 계속 불안정해서 텍스트로 이어 가겠습니다. 답변은 화면에 적어 주세요.";
+const DROP_END = { reason: "서버 응답이 계속 실패해 음성을 멈췄습니다", kind: "dropped" } as const;
 /** 서버가 이미 끝난 세션이라고 답했을 때 (409) */
 const ENDED_UTTERANCE = "면접이 끝났습니다. 수고하셨습니다.";
 
@@ -157,6 +162,8 @@ export async function startVoiceSession(
     ui.log("system", `모델 ${token.model}`);
 
     let done = false;
+    /** 연달아 실패한 턴 수. 성공하면 0으로 돌아갑니다 */
+    let turnFailures = 0;
     // 연결이 준비되기 전에 온 도구 호출의 답은 준비될 때까지 보류합니다.
     let resolveHandle!: (h: AdapterHandle) => void;
     const handleReady = new Promise<AdapterHandle>((r) => (resolveHandle = r));
@@ -178,6 +185,10 @@ export async function startVoiceSession(
     let fillerArmed = false;
     /** done 발화를 보냈고, 그 소리가 끝나면 정리합니다 */
     let endAfterSpeech = false;
+    /** 마지막 발화 뒤 정리할 때 화면에 알릴 까닭. 면접 종료가 기본이고, 연속 실패면 dropped입니다 */
+    let endAs: { reason: string; kind: EndKind } = { reason: "면접이 끝났습니다", kind: "done" };
+    /** 연속 실패로 음성을 끝내는 중. 이후 도구 호출에는 같은 안내만 합니다 */
+    let dropping = false;
 
     const m = new Meter({
       userStart: (at) => {
@@ -215,7 +226,7 @@ export async function startVoiceSession(
         // 마지막 발화의 소리가 끝나고 한동안 조용하면 면접을 정리합니다.
         if (!endAfterSpeech || replyPending) return;
         if (endQuietTimer) clearTimeout(endQuietTimer);
-        endQuietTimer = setTimeout(() => shutdown("면접이 끝났습니다", "done"), END_QUIET_MS);
+        endQuietTimer = setTimeout(() => shutdown(endAs.reason, endAs.kind), END_QUIET_MS);
       },
       bargeIn: () => ui.bargeIn(),
       bargeStop: (bargeAt, stopMs) => {
@@ -288,13 +299,14 @@ export async function startVoiceSession(
       userSpokeSinceTool = false;
       // 이 턴의 질문 측정 기준: 도구 호출을 받은 시점의 마지막 사용자 말 끝
       const baseEnd = m.lastUserEnd;
-      const respond = (utterance: string, isDone: boolean) => {
+      const respond = (utterance: string, isDone: boolean, end?: { reason: string; kind: EndKind }) => {
         if (closed) return;
         replyPending = true;
         replyBaseEnd = baseEnd;
+        if (end) endAs = end;
         if (isDone) {
           endAfterSpeech = true;
-          endTimer = setTimeout(() => shutdown("면접이 끝났습니다", "done"), END_GRACE_MS);
+          endTimer = setTimeout(() => shutdown(endAs.reason, endAs.kind), END_GRACE_MS);
         }
         void handleReady.then((h) => {
           if (!closed) h.respondTool(callId, name, { utterance, done: isDone });
@@ -304,6 +316,10 @@ export async function startVoiceSession(
       if (name !== DELEGATION_TOOL) {
         ui.log("error", `모르는 도구 호출: ${name}`);
         respond(RETRY_UTTERANCE, false);
+        return;
+      }
+      if (dropping) {
+        respond(DROP_UTTERANCE, true, DROP_END);
         return;
       }
       if (done) {
@@ -339,6 +355,7 @@ export async function startVoiceSession(
           { labDelayMs: opts.labDelayMs, signal: life.signal },
         );
         done = reply.done;
+        turnFailures = 0;
         ui.reply(reply);
         respond(reply.utterance, reply.done);
       } catch (e) {
@@ -352,6 +369,14 @@ export async function startVoiceSession(
         }
         ui.log("error", `서버 응답 실패: ${String(e)}`);
         metric("error", { turn_id: turnId, error_code: "turn_failed" });
+        turnFailures++;
+        if (turnFailures >= MAX_TURN_FAILURES) {
+          // 같은 답변을 계속 거절당하거나 서버가 계속 늦으면, 다시 말해 달라는 부탁만 반복하게 됩니다.
+          // 짧게 안내한 뒤(마지막 발화와 같은 정리 경로) 음성을 끝내고, 화면은 텍스트로 이어 갑니다.
+          dropping = true;
+          respond(DROP_UTTERANCE, true, DROP_END);
+          return;
+        }
         respond(RETRY_UTTERANCE, false);
       } finally {
         const ms = Math.round(performance.now() - t0);
