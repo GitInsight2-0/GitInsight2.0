@@ -138,17 +138,17 @@
         },
         {
           "point_id": "p3",
-          "text": "레포 안에서 index_documents의 직접 호출 참조가 0곳으로 확인되는데, 이 적재 로직이 시스템의 어떤 파이프라인에서 호출되도록 설계되었는지 설명",
-          "probe_question": "index_documents 메서드를 부르는 곳을 찾지 못했는데, 실제로 어디서 이 작업이 트리거되나요?"
+          "text": "레포 안에 index_documents를 부르는 곳이 없다는 것을 알고, 이 적재 기능을 어디에 연결하려던 것인지 말한다",
+          "probe_question": "레포 안에서 index_documents를 부르는 곳을 찾지 못했는데, 지금 실제로 쓰이고 있나요?"
         }
       ],
       "prepared_followups": [
         {
-          "question": "index_documents 메서드는 레포 내 직접 참조를 찾지 못했는데, 실제 런타임에서 어떤 흐름으로 호출되나요?",
+          "question": "index_documents를 부르는 곳을 찾지 못했는데, 이 컬렉션에는 문서가 어떤 경로로 들어가나요?",
           "symbol_id": "app/service/vector_service.py::VectorService.index_documents"
         },
         {
-          "question": "search 메서드에서 query_texts 기반 질의 시 where 필터 예외 처리를 단순 pass 형태로 둔 이유는 무엇인가요?",
+          "question": "검색 중 예외가 나면 빈 리스트를 돌려주는데, 호출하는 쪽은 결과 없음과 검색 실패를 어떻게 구분하나요?",
           "symbol_id": "app/service/vector_service.py::VectorService.search"
         }
       ],
@@ -385,18 +385,18 @@
         },
         {
           "point_id": "p2",
-          "text": "get_vector_service().search 호출 과정에서 발생할 수 있는 네트워크 오류나 벡터 스토어 장애에 대한 예외 처리 부재",
+          "text": "검색 질의 중 예외는 VectorService.search가 빈 리스트로 바꾸지만, 서비스 생성(get_vector_service) 실패 같은 그 밖의 예외는 호출자에게 그대로 올라간다",
           "probe_question": "벡터 서비스 호출 중 오류가 발생하면 어떻게 처리되나요?"
         },
         {
           "point_id": "p3",
-          "text": "현재 레포지토리 내에서 search_documents를 직접 호출하는 참조를 찾지 못했으므로 실제 호출 위치나 연동 계획 확인 필요",
-          "probe_question": "레포 내에서 이 함수를 부르는 곳을 찾지 못했는데 실제로 어디와 연결되나요?"
+          "text": "레포 안에 search_documents를 부르는 곳이 없다는 것을 알고, 이 검색 래퍼를 어디에 연결하려던 것인지 말한다",
+          "probe_question": "레포 안에서 이 함수를 부르는 곳을 찾지 못했는데, 지금 실제로 쓰이고 있나요?"
         }
       ],
       "prepared_followups": [
         {
-          "question": "seed_if_empty 함수도 레포 내 호출처를 찾지 못했는데, 초기 데이터 적재와 검색의 연동 흐름은 어떻게 되나요?",
+          "question": "seed_if_empty도 레포 안에서 부르는 곳을 찾지 못했는데, 검색할 컬렉션에는 문서가 어떻게 채워지나요?",
           "symbol_id": "app/vector_store.py::seed_if_empty"
         }
       ],
