@@ -3,6 +3,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -13,7 +14,7 @@ from gitinsight_api.brain.scripted import ScriptedBrain
 from gitinsight_api.db import create_engine
 from gitinsight_api.metrics_store import JsonlMetricsStore, MetricsStore, PostgresMetricsStore
 from gitinsight_api.report.service import ReportService
-from gitinsight_api.routes import metrics, reports, sessions
+from gitinsight_api.routes import auth, metrics, reports, sessions
 from gitinsight_api.settings import Settings
 from gitinsight_contracts.fixtures import load_analysis
 
@@ -32,10 +33,13 @@ def create_app(
     brain: Brain | None = None,
     report_service: ReportService | None = None,
     metrics_store: MetricsStore | None = None,
+    github_http: httpx.AsyncClient | None = None,
 ) -> FastAPI:
     """brain을 넣으면 report_service도 넣은 그대로 씁니다. 테스트가 가짜 LLM 서비스를 넣을 때 씁니다.
 
     DATABASE_URL이 있으면 Postgres 엔진을 만들고(연결은 첫 쿼리 때), 서버를 끌 때 닫습니다.
+    github_http는 GitHub 로그인 호출용 HTTP 클라이언트입니다. 테스트는 가짜 응답 클라이언트를 넣고,
+    넣지 않으면 새로 만들어 서버를 끌 때 닫습니다.
     """
     settings = settings or Settings()
     if brain is None:
@@ -51,11 +55,18 @@ def create_app(
             else JsonlMetricsStore(settings.metrics_path)
         )
 
+    owns_github_http = github_http is None
+    if github_http is None:
+        # 리다이렉트를 따라가지 않아, 토큰이 실린 요청이 다른 곳으로 넘어가지 않게 합니다.
+        github_http = httpx.AsyncClient(follow_redirects=False)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
         if engine is not None:
             await engine.dispose()
+        if owns_github_http:
+            await github_http.aclose()
 
     app = FastAPI(title="GitInsight API", lifespan=lifespan)
     app.state.settings = settings
@@ -63,6 +74,7 @@ def create_app(
     app.state.brain = brain
     app.state.report_service = report_service
     app.state.metrics_store = metrics_store
+    app.state.github_http = github_http
 
     origins = settings.cors_origin_list()
     if origins:
@@ -79,6 +91,8 @@ def create_app(
         # DB 연결 확인은 T1(D)에서 추가합니다.
         return {"status": "ok"}
 
+    auth.install_access_log_redaction()
+    app.include_router(auth.router)
     app.include_router(sessions.router)
     app.include_router(reports.router)
     app.include_router(metrics.router)
