@@ -4,6 +4,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -21,7 +22,7 @@ from gitinsight_api.brain.scripted import ScriptedBrain
 from gitinsight_api.db import create_engine
 from gitinsight_api.metrics_store import JsonlMetricsStore, MetricsStore, PostgresMetricsStore
 from gitinsight_api.report.service import ReportService
-from gitinsight_api.routes import metrics, reports, sessions
+from gitinsight_api.routes import auth, metrics, reports, sessions
 from gitinsight_api.settings import Settings
 from gitinsight_contracts.fixtures import load_analysis
 
@@ -51,6 +52,7 @@ def create_app(
     report_service: ReportService | None = None,
     metrics_store: MetricsStore | None = None,
     analysis_store: AnalysisStore | None = None,
+    github_http: httpx.AsyncClient | None = None,
 ) -> FastAPI:
     """brain을 넣으면 report_service도 넣은 그대로 씁니다. 테스트가 가짜 LLM 서비스를 넣을 때 씁니다.
 
@@ -58,6 +60,8 @@ def create_app(
     이때 실험 모드가 아니면 면접 재료도 analyses 테이블에서 읽고, 세션을 만들 때 분석 소유자를 확인합니다 (#52).
     세션과 턴 기록도 메모리 대신 Postgres에 둬서, 서버를 다시 시작해도 면접이 이어집니다 (#53).
     analysis_store는 테스트가 메모리 저장소를 넣을 때 씁니다.
+    github_http는 GitHub 로그인 호출용 HTTP 클라이언트입니다. 테스트는 가짜 응답 클라이언트를 넣고,
+    넣지 않으면 새로 만들어 서버를 끌 때 닫습니다.
     """
     settings = settings or Settings()
     engine: AsyncEngine | None = None
@@ -85,11 +89,18 @@ def create_app(
             else JsonlMetricsStore(settings.metrics_path)
         )
 
+    owns_github_http = github_http is None
+    if github_http is None:
+        # 리다이렉트를 따라가지 않아, 토큰이 실린 요청이 다른 곳으로 넘어가지 않게 합니다.
+        github_http = httpx.AsyncClient(follow_redirects=False)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
         if engine is not None:
             await engine.dispose()
+        if owns_github_http:
+            await github_http.aclose()
 
     app = FastAPI(title="GitInsight API", lifespan=lifespan)
     app.state.settings = settings
@@ -98,6 +109,7 @@ def create_app(
     app.state.brain = brain
     app.state.report_service = report_service
     app.state.metrics_store = metrics_store
+    app.state.github_http = github_http
 
     origins = settings.cors_origin_list()
     if origins:
@@ -133,6 +145,8 @@ def create_app(
         # DB 연결 확인은 T1(D)에서 추가합니다.
         return {"status": "ok"}
 
+    auth.install_access_log_redaction()
+    app.include_router(auth.router)
     app.include_router(sessions.router)
     app.include_router(reports.router)
     app.include_router(metrics.router)

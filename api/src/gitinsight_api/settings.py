@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,7 +28,8 @@ PROVIDER_MODELS: dict[str, dict[str, str]] = {
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # 검증 오류 메시지에 입력값(비밀 값일 수 있음)을 넣지 않습니다.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     # 음성 PoC 전용 기능(대본 면접 두뇌, 인위적 지연)을 켭니다. 데모·배포 빌드에서는 꺼야 합니다.
     lab_enabled: bool = False
@@ -39,6 +41,19 @@ class Settings(BaseSettings):
     database_url: SecretStr | None = None
     # DATABASE_URL이 없을 때 /api/metrics 이벤트를 쌓는 로컬 JSONL 파일입니다.
     metrics_path: Path = Path(".data/metrics.jsonl")
+    # GitHub App의 Client ID와 Client secret입니다 (#18). 둘 중 하나라도 없으면 로그인 시작이 503입니다.
+    github_client_id: str | None = None
+    github_client_secret: SecretStr | None = None
+    # 로그인 쿠키를 암호화하는 키입니다. 32자 이상 무작위 문자열을 씁니다.
+    # 없으면 로그인 쿠키를 만들거나 읽지 못해 실제 모드 요청이 모두 401입니다.
+    # 바꾸면 기존 로그인 쿠키는 모두 무효가 됩니다.
+    session_secret: SecretStr | None = None
+    # 브라우저가 여는 웹 주소입니다. GitHub 콜백 주소(<web_origin>/api/auth/github/callback)와
+    # 로그인 뒤 돌아갈 주소를 여기서 만듭니다. GitHub App 설정의 Callback URL과 같아야 합니다.
+    web_origin: str = "http://localhost:3000"
+    # 로그인 쿠키에 Secure를 붙입니다. 배포에서는 켜 둡니다.
+    # Chrome은 http://localhost에도 Secure 쿠키를 저장합니다. 그렇지 않은 브라우저로 로컬 개발할 때만 끕니다.
+    cookie_secure: bool = True
     # 면접 재료로 쓸 샘플 분석 파일 이름입니다 (fixtures/analysis/<이름>.json).
     fixture_analysis: str = "gitinsight_agent"
 
@@ -95,6 +110,9 @@ class Settings(BaseSettings):
         "llm_judge_reasoning_effort",
         "llm_analysis_reasoning_effort",
         "database_url",
+        "github_client_id",
+        "github_client_secret",
+        "session_secret",
         mode="before",
     )
     @classmethod
@@ -102,6 +120,44 @@ class Settings(BaseSettings):
         # .env에 `LLM_JUDGE_REASONING_EFFORT=`, `DATABASE_URL=`처럼 비워 두면 설정하지 않은 것으로 봅니다.
         text = value.get_secret_value() if isinstance(value, SecretStr) else value
         return None if isinstance(text, str) and not text.strip() else value
+
+    @field_validator("session_secret")
+    @classmethod
+    def _session_secret_length(cls, value: SecretStr | None) -> SecretStr | None:
+        # 짧은 키는 추측될 수 있어 받지 않습니다. 값은 오류 메시지에 넣지 않습니다.
+        if value is not None and len(value.get_secret_value()) < 32:
+            raise ValueError("SESSION_SECRET은 32자 이상이어야 합니다")
+        return value
+
+    @field_validator("web_origin")
+    @classmethod
+    def _web_origin_shape(cls, value: str) -> str:
+        # 콜백 주소와 로그인 뒤 이동 주소를 만들므로 경로 없는 http(s) 출처만 받습니다.
+        origin = value.strip().rstrip("/")
+        parsed = urlsplit(origin)
+        if (
+            parsed.scheme not in ("http", "https")
+            or not parsed.netloc
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("WEB_ORIGIN은 https://example.com 같은 출처여야 합니다")
+        return origin
+
+    @model_validator(mode="after")
+    def _secure_cookie_needs_https(self) -> "Settings":
+        # Secure 쿠키는 https(또는 localhost)에서만 저장되므로, 그 밖의 http 주소면 로그인이 항상 실패합니다.
+        parsed = urlsplit(self.web_origin)
+        local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
+        if self.cookie_secure and parsed.scheme == "http" and not local:
+            raise ValueError(
+                "COOKIE_SECURE=true이면 WEB_ORIGIN은 https여야 합니다 (localhost 제외)"
+            )
+        return self
+
+    def github_callback_url(self) -> str:
+        return f"{self.web_origin}/api/auth/github/callback"
 
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
