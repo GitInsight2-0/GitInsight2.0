@@ -6,10 +6,9 @@ import { isAbort } from "@/lib/voice/api";
 import { explainError } from "@/lib/voice/errors";
 import { DEFAULT_VAD, TEST_SCRIPT, VAD_LIMITS, type VadSettings } from "@/lib/voice/config";
 import { connectGemini } from "@/lib/voice/gemini";
-import { connectOpenAI } from "@/lib/voice/openai";
 import { type LogWho, type VoiceSession, startVoiceSession } from "@/lib/voice/session";
 import { summarize } from "@/lib/voice/stats";
-import type { Provider } from "@/lib/voice/types";
+import { PROVIDER } from "@/lib/voice/types";
 
 interface LogLine {
   sec: number;
@@ -17,14 +16,10 @@ interface LogLine {
   text: string;
 }
 
-const CONNECT = { openai: connectOpenAI, gemini: connectGemini } as const;
-const NAMES: Record<Provider, string> = { openai: "OpenAI Realtime (WebRTC)", gemini: "Gemini Live (WebSocket)" };
-
 /** G1 기준: 끊으면 이 시간 안에 AI가 멈춰야 합니다 */
 const BARGE_STOP_TARGET_MS = 500;
 
 export default function VoiceLab({ analysisId }: { analysisId: string }) {
-  const [provider, setProvider] = useState<Provider>("gemini");
   const [labDelayMs, setLabDelayMs] = useState(800);
   const [status, setStatus] = useState("대기");
   const [running, setRunning] = useState(false);
@@ -72,8 +67,7 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
     abort.current = ac;
     try {
       session.current = await startVoiceSession(
-        provider,
-        CONNECT[provider],
+        connectGemini,
         {
           log: add,
           status: setStatus,
@@ -155,7 +149,7 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
   const errors = log.filter((l) => l.who === "error");
   // 자막 원문은 빼고 수치와 오류만 복사합니다 (docs/evals/voice-g1.md에 붙여 넣는 용도).
   const result = {
-    provider,
+    provider: PROVIDER,
     lab_delay_ms: labDelayMs,
     vad,
     filler,
@@ -177,19 +171,12 @@ export default function VoiceLab({ analysisId }: { analysisId: string }) {
 
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: 1100, margin: "24px auto", padding: "0 16px" }}>
-      <h1 style={{ fontSize: 22, marginBottom: 4 }}>G1 음성 비교 PoC</h1>
+      <h1 style={{ fontSize: 22, marginBottom: 4 }}>음성 측정 (Gemini Live)</h1>
       <p style={{ color: "#666", marginTop: 0 }}>
         이어폰을 끼고 테스트합니다. 면접 두뇌는 FastAPI의 대본 두뇌(LAB_ENABLED)입니다. 상태: <b>{status}</b>
       </p>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-        <select value={provider} onChange={(e) => setProvider(e.target.value as Provider)} disabled={running}>
-          {(Object.keys(NAMES) as Provider[]).map((p) => (
-            <option key={p} value={p}>
-              {NAMES[p]}
-            </option>
-          ))}
-        </select>
         <label>
           판단 지연 흉내{" "}
           <input
