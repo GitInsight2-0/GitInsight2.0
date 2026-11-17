@@ -98,6 +98,13 @@ export default function InterviewScreen({
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   /** 음성 모드에서 방금 받아쓴 내 답변. 다음 질문이 오면 지웁니다 */
   const [lastAnswer, setLastAnswer] = useState<string | null>(null);
+  /** lastAnswer가 이미 서버로 보낸 답변인지. 다음 질문이 와도 지우지 않고 "방금 보낸 답변"으로 남깁니다 */
+  const [answerSent, setAnswerSentState] = useState(false);
+  const answerSentRef = useRef(false);
+  const setAnswerSent = (v: boolean) => {
+    answerSentRef.current = v;
+    setAnswerSentState(v);
+  };
   /** 음성 턴을 서버로 보내고 답을 기다리는 중 */
   const [thinking, setThinking] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
@@ -284,7 +291,9 @@ export default function InterviewScreen({
       log: noop,
       answer: (textSoFar) => {
         // 진행기가 이번 턴 받아쓰기 전체를 말하는 동안 계속 보내 줍니다. 늦은 조각은 진행기가 걸러 줍니다.
-        if (current()) setLastAnswer(textSoFar);
+        if (!current()) return;
+        setLastAnswer(textSoFar);
+        setAnswerSent(false);
       },
       status: (s) => {
         if (s === "연결됨") setVoiceState("live");
@@ -303,7 +312,8 @@ export default function InterviewScreen({
         push({ who: "interviewer", text: r.utterance });
         showReply(r);
         // "답변을 살펴보고 있어요"는 AI가 실제로 말하기 시작할 때 끕니다 (speaking).
-        setLastAnswer(null);
+        // 방금 보낸 답변은 다음 답변을 말하기 시작할 때까지 남겨 둡니다.
+        // Gemini가 받아쓰기를 말이 끝난 뒤에 한꺼번에 주면, 지우는 순간 사용자가 한 번도 못 보기 때문입니다.
       },
       speaking: (who, on) => {
         if (!current()) return;
@@ -316,8 +326,12 @@ export default function InterviewScreen({
           return;
         }
         if (on) {
-          // 다시 말하기 시작했으면 아직 답변 중입니다.
+          // 다시 말하기 시작했으면 아직 답변 중입니다. 지난 턴에 보낸 답변은 비우고 새로 받아 적습니다.
           setThinking(false);
+          if (answerSentRef.current) {
+            setLastAnswer(null);
+            setAnswerSent(false);
+          }
           return;
         }
         // 말을 멈췄습니다. 음성 AI가 답변 끝으로 볼 만큼 조용하면 기다리는 중으로 표시합니다.
@@ -358,8 +372,9 @@ export default function InterviewScreen({
       turnSent: (transcript) => {
         if (!current()) return;
         push({ who: "me", text: transcript });
-        // 서버로 보낸 답변 전체를 다음 질문이 올 때까지 보여 줍니다.
+        // 서버로 보낸 답변 전체를 다음 답변을 시작할 때까지 보여 줍니다.
         setLastAnswer(transcript);
+        setAnswerSent(true);
         // 턴이 실제로 서버로 갔습니다. AI가 말을 시작할 때까지 생각 중을 유지합니다.
         clearThinkingTimer();
         setThinking(true);
@@ -410,6 +425,7 @@ export default function InterviewScreen({
     aiSpeakingRef.current = false;
     setAiSpeaking(false);
     setLastAnswer(null);
+    setAnswerSent(false);
   }
 
   // ── 화면 ──
@@ -559,7 +575,7 @@ export default function InterviewScreen({
           ) : mode === "voice" ? (
             <>
               <div className={styles.answer}>
-                <div className={styles.label}>내 답변</div>
+                <div className={styles.label}>{answerSent ? "방금 보낸 답변" : "내 답변"}</div>
                 <p className={styles.answerText}>{lastAnswer ?? (stage === "listening" ? "말씀하시면 여기에 받아 적습니다." : "")}</p>
               </div>
               <p className={styles.hint}>
