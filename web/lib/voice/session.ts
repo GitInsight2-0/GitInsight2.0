@@ -46,8 +46,11 @@ export interface SessionUi {
   delegationMissed(): void;
   /** 서버로 턴 하나를 보냈습니다. transcript는 실제로 보낸 답변입니다 (대본 줄 진행, 대화 기록용) */
   turnSent(transcript: string): void;
-  /** 이번 턴에 쓸 받아쓰기 조각이 왔습니다. 이미 보낸 턴의 늦은 조각은 오지 않습니다 */
-  answer?(text: string): void;
+  /**
+   * 이번 턴에서 지금까지 받아쓴 답변 전체 (말하는 동안 계속 갱신).
+   * 이미 보낸 턴의 늦은 조각은 들어가지 않습니다. 화면 표시용이고, 서버로 보낸 답변은 turnSent로 받습니다.
+   */
+  answer?(textSoFar: string): void;
   /** 음성이 끝났습니다. reason은 화면에 보여 줄 문구, kind는 끝난 까닭입니다. */
   ended(reason: string, kind: EndKind): void;
   /**
@@ -244,9 +247,16 @@ export async function startVoiceSession(
         return;
       }
       asrBuffer.push({ text, key });
-      ui.answer?.(text);
+      showAnswer();
       userSpokeSinceTool = true;
       asrWaiter?.();
+    }
+
+    /** 이번 턴에서 덩어리로 받은 받아쓰기와, 아직 덩어리가 되지 않은 말(partial)을 이어 화면에 알립니다 */
+    function showAnswer(partial = "") {
+      const parts = asrBuffer.map((e) => e.text);
+      if (partial) parts.push(partial);
+      ui.answer?.(parts.join(" "));
     }
 
     function onAiTranscript(text: string, interrupted: boolean) {
@@ -397,6 +407,10 @@ export async function startVoiceSession(
             .catch((e: unknown) => ui.log("error", `위임 처리 오류: ${String(e)}`));
         },
         onUserTranscript,
+        onUserPartial: (textSoFar) => {
+          // 공백뿐인 조각은 건너뜁니다. 넘기면 "방금 보낸 답변"이 빈 칸으로 바뀝니다.
+          if (textSoFar.trim()) showAnswer(textSoFar);
+        },
         onAiTranscript,
         onError: (code, message) => {
           ui.log("error", message);

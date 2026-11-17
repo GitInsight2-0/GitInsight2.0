@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import CodeViewer from "@/components/CodeViewer";
 import { ApiError, TRANSCRIPT_MAX, createSession, endSession, isAbort, postTurn } from "@/lib/voice/api";
 import { DEFAULT_VAD } from "@/lib/voice/config";
-import { explainError } from "@/lib/voice/errors";
+import { explainError, isLoginError } from "@/lib/voice/errors";
 import { connectGemini } from "@/lib/voice/gemini";
 import { type AudioLevels, type SessionUi, type VoiceSession, startVoiceSession } from "@/lib/voice/session";
 import { USER_SILENCE_MS } from "@/lib/voice/meter";
@@ -98,6 +98,13 @@ export default function InterviewScreen({
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   /** 음성 모드에서 방금 받아쓴 내 답변. 다음 질문이 오면 지웁니다 */
   const [lastAnswer, setLastAnswer] = useState<string | null>(null);
+  /** lastAnswer가 이미 서버로 보낸 답변인지. 다음 질문이 와도 지우지 않고 "방금 보낸 답변"으로 남깁니다 */
+  const [answerSent, setAnswerSentState] = useState(false);
+  const answerSentRef = useRef(false);
+  const setAnswerSent = (v: boolean) => {
+    answerSentRef.current = v;
+    setAnswerSentState(v);
+  };
   /** 음성 턴을 서버로 보내고 답을 기다리는 중 */
   const [thinking, setThinking] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
@@ -105,6 +112,8 @@ export default function InterviewScreen({
   const aiSpeakingRef = useRef(false);
   const [levels, setLevels] = useState<AudioLevels | null>(null);
   const [report, setReport] = useState<ReportState>({ kind: "idle" });
+  /** 서버가 401을 돌려줬습니다. 첫 화면으로 가서 다시 로그인하라고 안내합니다 */
+  const [needLogin, setNeedLogin] = useState(false);
   /** "끝내기"를 눌러 확인을 기다리는 중 */
   const [confirmEnd, setConfirmEnd] = useState(false);
   /** 이 세션의 리포트를 이미 요청했는지 (자동 요청이 두 번 나가지 않게) */
@@ -166,7 +175,8 @@ export default function InterviewScreen({
       }
       // 서버는 같은 세션에 같은 report_id를 돌려주므로 다시 시도해도 됩니다.
       reportRequested.current = false;
-      const message = isAbort(e) ? "시간이 너무 오래 걸립니다" : String((e as Error).message ?? e);
+      if (isLoginError(e)) setNeedLogin(true);
+      const message = isAbort(e) ? "시간이 너무 오래 걸립니다" : explainError(e);
       setReport({ kind: "error", message });
     }
   }
@@ -205,7 +215,8 @@ export default function InterviewScreen({
       showReply(created.first);
       setHistory([{ who: "interviewer", text: created.first.utterance }]);
     } catch (e) {
-      setError(String((e as Error).message ?? e));
+      if (isLoginError(e)) setNeedLogin(true);
+      setError(explainError(e));
     } finally {
       setBusy(false);
     }
@@ -242,8 +253,11 @@ export default function InterviewScreen({
         push({ who: "system", text: "이미 끝난 면접입니다." });
         const r = replyRef.current;
         if (r) showReply({ ...r, done: true });
+      } else if (isLoginError(e)) {
+        setNeedLogin(true);
+        setError(explainError(e));
       } else {
-        setError(`답변을 보내지 못했습니다. 다시 보내 주세요. (${String((e as Error).message ?? e)})`);
+        setError(`답변을 보내지 못했습니다. 다시 보내 주세요. (${explainError(e)})`);
       }
     } finally {
       sending.current = false;
@@ -275,9 +289,11 @@ export default function InterviewScreen({
     const ui: SessionUi = {
       // 대화 기록에는 서버로 실제로 보낸 답변(turnSent)과 서버가 정한 문장(reply)만 남깁니다.
       log: noop,
-      answer: (text) => {
-        // 한 답변이 여러 조각으로 올 수 있어 이어 붙입니다. 이미 보낸 턴의 늦은 조각은 진행기가 걸러 줍니다.
-        if (current()) setLastAnswer((prev) => (prev ? `${prev} ${text}` : text));
+      answer: (textSoFar) => {
+        // 진행기가 이번 턴 받아쓰기 전체를 말하는 동안 계속 보내 줍니다. 늦은 조각은 진행기가 걸러 줍니다.
+        if (!current()) return;
+        setLastAnswer(textSoFar);
+        setAnswerSent(false);
       },
       status: (s) => {
         if (s === "연결됨") setVoiceState("live");
@@ -296,7 +312,8 @@ export default function InterviewScreen({
         push({ who: "interviewer", text: r.utterance });
         showReply(r);
         // "답변을 살펴보고 있어요"는 AI가 실제로 말하기 시작할 때 끕니다 (speaking).
-        setLastAnswer(null);
+        // 방금 보낸 답변은 다음 답변을 말하기 시작할 때까지 남겨 둡니다.
+        // Gemini가 받아쓰기를 말이 끝난 뒤에 한꺼번에 주면, 지우는 순간 사용자가 한 번도 못 보기 때문입니다.
       },
       speaking: (who, on) => {
         if (!current()) return;
@@ -309,8 +326,12 @@ export default function InterviewScreen({
           return;
         }
         if (on) {
-          // 다시 말하기 시작했으면 아직 답변 중입니다.
+          // 다시 말하기 시작했으면 아직 답변 중입니다. 지난 턴에 보낸 답변은 비우고 새로 받아 적습니다.
           setThinking(false);
+          if (answerSentRef.current) {
+            setLastAnswer(null);
+            setAnswerSent(false);
+          }
           return;
         }
         // 말을 멈췄습니다. 음성 AI가 답변 끝으로 볼 만큼 조용하면 기다리는 중으로 표시합니다.
@@ -351,6 +372,9 @@ export default function InterviewScreen({
       turnSent: (transcript) => {
         if (!current()) return;
         push({ who: "me", text: transcript });
+        // 서버로 보낸 답변 전체를 다음 답변을 시작할 때까지 보여 줍니다.
+        setLastAnswer(transcript);
+        setAnswerSent(true);
         // 턴이 실제로 서버로 갔습니다. AI가 말을 시작할 때까지 생각 중을 유지합니다.
         clearThinkingTimer();
         setThinking(true);
@@ -375,6 +399,7 @@ export default function InterviewScreen({
       setVoiceState("idle");
       setMode("text");
       if (voiceStoppedByUser.current || isAbort(e)) return;
+      if (isLoginError(e)) setNeedLogin(true);
       const message = explainError(e);
       if (sessionRef.current) setNotice(`음성으로 연결하지 못해 텍스트로 이어 갑니다. (${message})`);
       else setError(message);
@@ -400,6 +425,7 @@ export default function InterviewScreen({
     aiSpeakingRef.current = false;
     setAiSpeaking(false);
     setLastAnswer(null);
+    setAnswerSent(false);
   }
 
   // ── 화면 ──
@@ -430,6 +456,7 @@ export default function InterviewScreen({
               <p role="status" aria-live="polite" className={styles.error}>
                 {error}
               </p>
+              {needLogin && <LoginLink />}
             </div>
           </section>
         </main>
@@ -506,6 +533,12 @@ export default function InterviewScreen({
             </p>
           )}
 
+          {needLogin && (
+            <div className={styles.notice}>
+              로그인이 풀렸어요. 로그인은 8시간 동안 유지돼요. <LoginLink />
+            </div>
+          )}
+
           {confirmEnd && !done && (
             <div role="group" aria-label="면접 끝내기 확인" className={styles.confirm}>
               <p>면접을 끝내고 리포트를 만들까요? 끝내면 이어서 답할 수 없어요.</p>
@@ -542,8 +575,8 @@ export default function InterviewScreen({
           ) : mode === "voice" ? (
             <>
               <div className={styles.answer}>
-                <div className={styles.label}>내 답변</div>
-                <p className={styles.answerText}>{lastAnswer ?? (stage === "listening" ? "말씀하시면 여기에 받아 적습니다." : "")}</p>
+                <div className={styles.label}>{answerSent ? "방금 보낸 답변" : "내 답변"}</div>
+                <p className={styles.answerText}>{lastAnswer ?? (stage === "listening" ? "말을 마치면 여기에 적어 드려요." : "")}</p>
               </div>
               <p className={styles.hint}>
                 <MicIcon />
@@ -597,6 +630,15 @@ export default function InterviewScreen({
         <CodeViewer repo={repo} target={reply?.highlight ?? null} />
       </main>
     </div>
+  );
+}
+
+/** 첫 화면(로그인 버튼이 있는 곳)으로 가는 링크 */
+function LoginLink() {
+  return (
+    <a className={styles.textLink} href="/">
+      첫 화면에서 다시 로그인
+    </a>
   );
 }
 

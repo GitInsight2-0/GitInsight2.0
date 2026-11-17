@@ -159,7 +159,10 @@ export const connectGemini: Connect = async (token, hooks, { signal }) => {
           }
           if (awaitingReply && (hasAudio || sc.interrupted || sc.turnComplete)) awaitingReply = false;
           for (const p of sc.modelTurn?.parts ?? []) if (p.inlineData?.data) enqueue(p.inlineData.data);
-          if (sc.inputTranscription?.text) userText += sc.inputTranscription.text;
+          if (sc.inputTranscription?.text) {
+            userText += sc.inputTranscription.text;
+            hooks.onUserPartial?.(userText.trim());
+          }
           if (sc.outputTranscription?.text) aiText += sc.outputTranscription.text;
           if (sc.turnComplete || sc.interrupted) {
             flushUser();
