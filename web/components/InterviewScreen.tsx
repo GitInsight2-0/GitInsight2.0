@@ -3,7 +3,7 @@
 import type { Action, BrainReply } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import CodeViewer from "@/components/CodeViewer";
-import { ApiError, TRANSCRIPT_MAX, createSession, isAbort, postTurn } from "@/lib/voice/api";
+import { ApiError, TRANSCRIPT_MAX, createSession, endSession, isAbort, postTurn } from "@/lib/voice/api";
 import { DEFAULT_VAD } from "@/lib/voice/config";
 import { explainError } from "@/lib/voice/errors";
 import { connectGemini } from "@/lib/voice/gemini";
@@ -64,10 +64,28 @@ const ACTION_LABEL: Record<Action, string> = {
   WRAP_UP: "마무리",
 };
 
+/** 리포트 요청 상태 */
+type ReportState =
+  | { kind: "idle" }
+  | { kind: "making" }
+  | { kind: "ready"; reportId: string }
+  /** 리포트 서비스가 없는 서버 (LAB_ENABLED의 대본 두뇌) */
+  | { kind: "unavailable" }
+  | { kind: "error"; message: string };
+
 /** 아무것도 하지 않는 측정 콜백 (측정은 /lab/voice에서 봅니다. 서버 /api/metrics에는 진행기가 그대로 보냅니다) */
 const noop = () => undefined;
 
-export default function InterviewScreen({ analysisId, repo }: { analysisId: string; repo: string | null }) {
+export default function InterviewScreen({
+  analysisId,
+  repo,
+  reportHref,
+}: {
+  analysisId: string;
+  repo: string | null;
+  /** 리포트 화면 주소. 리포트 화면(#20)이 생기기 전에는 주지 않습니다 */
+  reportHref?: (reportId: string) => string;
+}) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [reply, setReply] = useState<BrainReply | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -86,6 +104,12 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
   /** 타이머 안에서 AI가 말하는 중인지 보려고 상태와 같이 둡니다 */
   const aiSpeakingRef = useRef(false);
   const [levels, setLevels] = useState<AudioLevels | null>(null);
+  const [report, setReport] = useState<ReportState>({ kind: "idle" });
+  /** "끝내기"를 눌러 확인을 기다리는 중 */
+  const [confirmEnd, setConfirmEnd] = useState(false);
+  /** 이 세션의 리포트를 이미 요청했는지 (자동 요청이 두 번 나가지 않게) */
+  const reportRequested = useRef(false);
+  const reportAbort = useRef<AbortController | null>(null);
   const thinkingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** 실패한 턴. 같은 내용을 다시 보낼 때만 같은 turn_id를 씁니다 (고친 답변이 중복으로 버려지지 않게). */
@@ -110,10 +134,59 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
   useEffect(
     () => () => {
       voiceAbort.current?.abort();
+      reportAbort.current?.abort();
       clearThinkingTimer();
     },
     [],
   );
+
+  // 면접이 끝나면(서버 done, 음성 종료, 409, 끝내기) 리포트를 요청합니다.
+  // 음성으로 끝나면 AI가 마지막 인사를 하는 동안 리포트가 같이 만들어집니다.
+  const finished = reply?.done === true;
+  useEffect(() => {
+    if (finished) void requestReport();
+    // requestReport는 ref로 한 번만 보내므로 finished만 봅니다.
+  }, [finished]);
+
+  async function requestReport() {
+    const id = sessionRef.current;
+    if (!id || reportRequested.current) return;
+    reportRequested.current = true;
+    const ac = new AbortController();
+    reportAbort.current = ac;
+    setReport({ kind: "making" });
+    try {
+      const ended = await endSession(id, ac.signal);
+      setReport({ kind: "ready", reportId: ended.report_id });
+    } catch (e) {
+      if (ac.signal.aborted) return;
+      if (e instanceof ApiError && e.status === 503) {
+        setReport({ kind: "unavailable" });
+        return;
+      }
+      // 서버는 같은 세션에 같은 report_id를 돌려주므로 다시 시도해도 됩니다.
+      reportRequested.current = false;
+      const message = isAbort(e) ? "시간이 너무 오래 걸립니다" : String((e as Error).message ?? e);
+      setReport({ kind: "error", message });
+    }
+  }
+
+  /** 확인을 받은 뒤 면접을 끝냅니다. 음성이 켜져 있으면 끄고, 화면을 종료 상태로 바꿉니다 (리포트는 위 effect가 요청) */
+  function endInterview() {
+    setConfirmEnd(false);
+    if (voice.current || voiceState !== "idle") {
+      voiceStoppedByUser.current = true;
+      voiceAbort.current?.abort();
+      voice.current?.stop();
+      voice.current = null;
+      resetVoiceView();
+      setVoiceState("idle");
+      setMode("text");
+    }
+    push({ who: "system", text: "면접을 끝냈습니다." });
+    const r = replyRef.current;
+    if (r && !r.done) showReply({ ...r, done: true });
+  }
 
   function clearThinkingTimer() {
     if (thinkingTimer.current) clearTimeout(thinkingTimer.current);
@@ -412,6 +485,16 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
               텍스트
             </button>
           </div>
+          {reply && !done && (
+            <button
+              type="button"
+              className={styles.secondary}
+              onClick={() => setConfirmEnd(true)}
+              disabled={busy || confirmEnd}
+            >
+              끝내기
+            </button>
+          )}
         </div>
       </header>
 
@@ -421,6 +504,20 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
             <p role="status" aria-live="polite" className={styles.notice}>
               {notice}
             </p>
+          )}
+
+          {confirmEnd && !done && (
+            <div role="group" aria-label="면접 끝내기 확인" className={styles.confirm}>
+              <p>면접을 끝내고 리포트를 만들까요? 끝내면 이어서 답할 수 없어요.</p>
+              <div className={styles.confirmActions}>
+                <button type="button" className={styles.secondary} onClick={() => setConfirmEnd(false)} autoFocus>
+                  계속하기
+                </button>
+                <button type="button" className={styles.primary} onClick={endInterview}>
+                  끝내고 리포트 만들기
+                </button>
+              </div>
+            </div>
           )}
 
           <div className={styles.voice}>
@@ -437,7 +534,11 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
           </p>
 
           {done ? (
-            <p className={styles.done}>수고하셨습니다.</p>
+            <ReportStatus
+              report={report}
+              href={reportHref}
+              onRetry={() => void requestReport()}
+            />
           ) : mode === "voice" ? (
             <>
               <div className={styles.answer}>
@@ -495,6 +596,45 @@ export default function InterviewScreen({ analysisId, repo }: { analysisId: stri
 
         <CodeViewer repo={repo} target={reply?.highlight ?? null} />
       </main>
+    </div>
+  );
+}
+
+/** 면접이 끝난 뒤 리포트가 어디까지 됐는지 보여 줍니다 */
+function ReportStatus({
+  report,
+  href,
+  onRetry,
+}: {
+  report: ReportState;
+  href?: (reportId: string) => string;
+  onRetry: () => void;
+}) {
+  return (
+    <div role="status" aria-live="polite" className={styles.reportBox}>
+      <p className={styles.done}>수고하셨습니다.</p>
+      {(report.kind === "idle" || report.kind === "making") && (
+        <p className={styles.reportNote}>리포트를 만들고 있어요. 30초쯤 걸릴 수 있어요.</p>
+      )}
+      {report.kind === "ready" &&
+        (href ? (
+          <a className={styles.primary} href={href(report.reportId)}>
+            리포트 보기
+          </a>
+        ) : (
+          <p className={styles.reportNote}>리포트가 준비됐어요. 리포트 화면이 연결되면 여기서 열 수 있어요.</p>
+        ))}
+      {report.kind === "unavailable" && (
+        <p className={styles.reportNote}>실험용 서버(LAB_ENABLED)에서는 리포트를 만들지 않아요.</p>
+      )}
+      {report.kind === "error" && (
+        <>
+          <p className={styles.error}>리포트를 만들지 못했어요. ({report.message})</p>
+          <button type="button" className={styles.secondary} onClick={onRetry}>
+            다시 시도
+          </button>
+        </>
+      )}
     </div>
   );
 }
