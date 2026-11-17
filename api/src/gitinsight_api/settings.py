@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     # 기본값 low 근거: Gemini 3.8 Flash에서 호출당 44~57초가 7~9초로 줄고 품질 차이는 없었습니다
     # (docs/evals/stage2-2026-11-12.md, PR #36).
     llm_analysis_reasoning_effort: str | None = "low"
+    # 리포트 모델의 reasoning_effort입니다. 비우면 모델 기본값을 씁니다.
+    # 기본값 low 근거: Gemini 3.8 Flash 리포트 생성이 23~28초에서 12초 안팎으로 줄었고,
+    # 같은 면접 기록에서 역량 점수는 같았습니다 (2026-11-18, PR #83). 제한 시간(report_timeout_s)은 30초입니다.
+    llm_report_reasoning_effort: str | None = "low"
     # 답변 판단 LLM 호출 제한 시간(초)입니다. 넘으면 미리 만든 질문으로 진행합니다.
     # 4초 근거: Gemini 3.6 Flash(low)가 10번 중 4번 2.5초를 넘었고 최대 3.8초였습니다 (docs/evals/latency.md).
     # 웹은 턴 첫 시도를 6초까지 기다립니다 (web/lib/voice/api.ts).
@@ -115,6 +119,7 @@ class Settings(BaseSettings):
     @field_validator(
         "llm_judge_reasoning_effort",
         "llm_analysis_reasoning_effort",
+        "llm_report_reasoning_effort",
         "database_url",
         "github_client_id",
         "github_client_secret",

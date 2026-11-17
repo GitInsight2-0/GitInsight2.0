@@ -33,7 +33,11 @@ def build_analysis_llm(
 def build_report_llm(
     settings: Settings, cost_recorder: CostRecorder | None = None
 ) -> LiteLLMClient:
-    return LiteLLMClient(settings.llm_report_model, cost_recorder=cost_recorder)
+    return LiteLLMClient(
+        settings.llm_report_model,
+        cost_recorder=cost_recorder,
+        reasoning_effort=settings.llm_report_reasoning_effort,
+    )
 
 
 def build_report_service(

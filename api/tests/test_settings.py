@@ -5,6 +5,7 @@ import pytest
 from gitinsight_api.brain.factory import (
     build_analysis_llm,
     build_fixture_brain,
+    build_report_llm,
     build_report_service,
 )
 from gitinsight_api.llm.fake import FakeLLM
@@ -25,6 +26,7 @@ MODEL_ENV = (
     "LLM_REPORT_MODEL",
     "BRAIN_FORCE_PREPARED",
     "LLM_ANALYSIS_REASONING_EFFORT",
+    "LLM_REPORT_REASONING_EFFORT",
 )
 
 
@@ -82,6 +84,21 @@ def test_explicit_model_wins_and_empty_model_falls_back(monkeypatch: pytest.Monk
 
     assert s.llm_judge_model == "gemini/custom-judge"
     assert s.llm_report_model == "gemini/gemini-3.8-flash"
+
+
+def test_report_reasoning_effort_defaults_to_low_and_can_be_changed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 리포트 생성이 제한 30초에 거의 닿아서 추론량을 낮춥니다 (#82). 환경 변수로 바꾸거나 비울 수 있습니다.
+    assert settings().llm_report_reasoning_effort == "low"
+    assert build_report_llm(settings())._optional_params == {"reasoning_effort": "low"}
+
+    monkeypatch.setenv("LLM_REPORT_REASONING_EFFORT", "medium")
+    assert build_report_llm(settings())._optional_params == {"reasoning_effort": "medium"}
+
+    monkeypatch.setenv("LLM_REPORT_REASONING_EFFORT", "")
+    assert settings().llm_report_reasoning_effort is None
+    assert build_report_llm(settings())._optional_params == {}
 
 
 def test_analysis_reasoning_effort_defaults_to_low(monkeypatch: pytest.MonkeyPatch) -> None:
