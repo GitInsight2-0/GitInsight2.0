@@ -140,11 +140,33 @@ async def test_session_starts_from_seeded_snapshot_for_its_owner_only(
         app.dependency_overrides[get_current_user] = lambda: CurrentUser("demo", "demo")
         created = await client.post("/api/sessions", json=body)
         session_id = created.json()["session_id"]
-        ended = await client.post(f"/api/sessions/{session_id}/end")
         app.dependency_overrides[get_current_user] = lambda: CurrentUser("other", "other")
         other = await client.post("/api/sessions", json=body)
     await app.state.db_engine.dispose()
 
     assert created.status_code == 201, created.text
-    assert ended.status_code == 200, ended.text
     assert other.status_code == 404
+
+    # 서버를 다시 시작해도 같은 세션이 이어집니다 (#53). 세션과 턴 기록이 DB에 있기 때문입니다.
+    restarted = create_app(settings)
+    restarted.dependency_overrides[get_current_user] = lambda: CurrentUser("demo", "demo")
+    turn = {"turn_id": str(uuid4()), "transcript": "답변입니다", "source": "text"}
+    async with client_for(restarted) as client:
+        first = await client.post(f"/api/sessions/{session_id}/turns", json=turn)
+        again = await client.post(f"/api/sessions/{session_id}/turns", json=turn)
+        ended = await client.post(f"/api/sessions/{session_id}/end")
+        report = await client.get(f"/api/reports/{ended.json()['report_id']}")
+        closed = await client.post(
+            f"/api/sessions/{session_id}/turns", json={**turn, "turn_id": str(uuid4())}
+        )
+        restarted.dependency_overrides[get_current_user] = lambda: CurrentUser("other", "other")
+        forbidden = await client.post(f"/api/sessions/{session_id}/turns", json=turn)
+    await restarted.state.db_engine.dispose()
+
+    assert first.status_code == 200, first.text
+    # 같은 turn_id는 저장된 응답을 그대로 돌려줍니다.
+    assert again.json() == first.json()
+    assert ended.status_code == 200, ended.text
+    assert [t["turn_id"] for t in report.json()["turns"]] == [turn["turn_id"]]
+    assert closed.status_code == 409
+    assert forbidden.status_code == 403

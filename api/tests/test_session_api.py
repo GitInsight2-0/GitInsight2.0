@@ -15,6 +15,8 @@ from gitinsight_api.analyses.store import AnalysisKey, InMemoryAnalysisStore
 from gitinsight_api.auth import CurrentUser, get_current_user
 from gitinsight_api.brain.factory import build_fixture_brain, build_report_service
 from gitinsight_api.brain.judge import JUDGE_PURPOSE
+from gitinsight_api.brain.postgres import PostgresSessionRepository
+from gitinsight_api.brain.repository import InMemorySessionRepository
 from gitinsight_api.brain.service import InterviewBrain
 from gitinsight_api.llm import LiteLLMClient, LLMTimeoutError
 from gitinsight_api.llm.fake import FakeLLM, FakeStep
@@ -471,3 +473,31 @@ async def test_lab_and_no_database_keep_using_fixture(
     assert lab.state.analyses is None and plain.state.analyses is None
     async with client_for(lab) as client:
         await create(client)
+
+
+async def test_database_url_puts_sessions_in_postgres_and_failure_is_503(
+    client_for: ClientFactory, metrics_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # 세션 저장소가 DB에 연결하지 못하면 500이 아니라 503입니다 (#53).
+    plain = create_app(Settings(lab_enabled=False, metrics_path=metrics_path))
+    lab = create_app(
+        Settings(lab_enabled=True, metrics_path=metrics_path, database_url=SecretStr(UNREACHABLE))
+    )
+    app = create_app(
+        Settings(lab_enabled=False, metrics_path=metrics_path, database_url=SecretStr(UNREACHABLE))
+    )
+    app.dependency_overrides[get_current_user] = Users()
+    with caplog.at_level(logging.WARNING):
+        async with client_for(app) as client:
+            turns = await client.post(f"/api/sessions/{uuid4()}/turns", json=turn())
+            ended = await client.post(f"/api/sessions/{uuid4()}/end")
+    await app.state.db_engine.dispose()
+    await lab.state.db_engine.dispose()
+
+    assert isinstance(plain.state.brain.repository, InMemorySessionRepository)
+    assert not isinstance(lab.state.brain, InterviewBrain)
+    assert isinstance(app.state.brain.repository, PostgresSessionRepository)
+    assert turns.status_code == ended.status_code == 503
+    assert turns.json() == {"detail": "데이터베이스에 연결하지 못했습니다"}
+    assert "database_unavailable error=OperationalError" in caplog.text
+    assert "s3cret-pw" not in caplog.text

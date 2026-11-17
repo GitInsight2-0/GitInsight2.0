@@ -1,7 +1,7 @@
 """세션 저장소 인터페이스와 메모리 구현.
 
 한 세션의 턴은 세션 잠금 안에서 순서대로 처리합니다.
-메모리 구현은 세션별 asyncio.Lock, Postgres 구현(Task 9)은 SELECT … FOR UPDATE를 씁니다.
+메모리 구현은 세션별 asyncio.Lock, Postgres 구현(postgres.py)은 SELECT … FOR UPDATE를 씁니다.
 잠금 안에서 commit하지 않고 나가면 아무것도 저장하지 않습니다.
 """
 

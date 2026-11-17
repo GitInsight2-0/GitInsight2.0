@@ -10,10 +10,13 @@ from sqlalchemy import (
     Column,
     DateTime,
     Double,
+    ForeignKey,
     Identity,
     Index,
+    Integer,
     Table,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
     text,
@@ -72,4 +75,34 @@ analyses = Table(
         unique=True,
         postgresql_where=text("status <> 'failed'"),
     ),
+)
+
+# 면접 세션입니다 (#53). 상태(brain/state.py의 SessionState)를 JSON으로 저장하고, 읽을 때 다시 검증합니다.
+# 원본 코드와 JD 원문은 들어가지 않습니다.
+interview_sessions = Table(
+    "interview_sessions",
+    metadata,
+    Column("session_id", Uuid, primary_key=True),
+    Column("state", JSONB, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+# 면접 턴 기록입니다 (#53). 기록(TurnRecord)에는 질문, 답변 자막, 판단, 응답이 들어갑니다.
+interview_turns = Table(
+    "interview_turns",
+    metadata,
+    Column(
+        "session_id",
+        Uuid,
+        ForeignKey("interview_sessions.session_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    # 기본 키 (session_id, turn_id)가 같은 턴을 두 번 저장하지 못하게 막습니다.
+    Column("turn_id", Uuid, primary_key=True),
+    # 세션 안의 순서(TurnRecord.index)입니다.
+    Column("turn_index", Integer, nullable=False),
+    Column("record", JSONB, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint("session_id", "turn_index"),
 )
