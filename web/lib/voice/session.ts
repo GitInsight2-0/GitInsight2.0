@@ -407,7 +407,10 @@ export async function startVoiceSession(
             .catch((e: unknown) => ui.log("error", `위임 처리 오류: ${String(e)}`));
         },
         onUserTranscript,
-        onUserPartial: (textSoFar) => showAnswer(textSoFar),
+        onUserPartial: (textSoFar) => {
+          // 공백뿐인 조각은 건너뜁니다. 넘기면 "방금 보낸 답변"이 빈 칸으로 바뀝니다.
+          if (textSoFar.trim()) showAnswer(textSoFar);
+        },
         onAiTranscript,
         onError: (code, message) => {
           ui.log("error", message);
