@@ -79,11 +79,17 @@ export const connectGemini: Connect = async (token, hooks, { signal }) => {
 
   try {
     // ── 마이크 ──
-    mic = await orAbort(
-      navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-      }),
-    );
+    const micRequest = navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+    });
+    // 권한 창이 떠 있는 동안 멈추면 기다림은 끝나지만, 나중에 허용되어 온 스트림은 아무도 쓰지 않습니다.
+    // 그 스트림을 바로 멈춰 마이크가 켜진 채 남지 않게 합니다.
+    micRequest
+      .then((stream) => {
+        if (signal.aborted) for (const t of stream.getTracks()) t.stop();
+      })
+      .catch(() => undefined);
+    mic = await orAbort(micRequest);
     inCtx = new AudioContext({ sampleRate: 16000 });
     await orAbort(inCtx.audioWorklet.addModule("/pcm-capture-worklet.js"));
     const micSrc = inCtx.createMediaStreamSource(mic);
