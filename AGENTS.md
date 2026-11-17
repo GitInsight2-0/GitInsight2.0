@@ -108,6 +108,7 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 분석 실행기는 워커 패키지에 있어서 `gitinsight_worker.server:app_factory`로 띄울 때만 붙습니다. `DATABASE_URL`이 없거나 실험 모드이거나 `gitinsight_api.main:app_factory`로 띄우면 분석 요청 API는 503입니다.
 같은 조건에서 면접 세션과 턴 기록도 메모리 대신 `interview_sessions`, `interview_turns` 테이블에 둡니다(`brain/postgres.py`의 `PostgresSessionRepository`). 서버를 다시 시작해도 면접이 이어집니다.
 같은 조건에서 리포트도 `reports` 테이블에 둡니다(`report/postgres.py`의 `PostgresReportStore`, #75). 세션 하나에 리포트는 하나이고, 서버를 다시 시작해도 같은 `report_id`로 다시 엽니다.
+이전 면접 비교는 `GET /api/me/progress`입니다(#77). 로그인한 사용자의 리포트에 적힌 역량 수준을 면접별로, 오래된 것부터 최근 20건까지 돌려줍니다. 역량 평가가 없는 리포트(턴별 판단 표)는 빠집니다.
 세션 API가 DB에 연결하지 못하면 503을 돌려줍니다. 턴은 `turn_id`로 한 번만 처리하므로 같은 요청을 다시 보내면 됩니다.
 DB 연결과 테이블 정의는 `api/src/gitinsight_api/db.py`, `tables.py`, 마이그레이션은 `api/migrations/versions/`에 있습니다. 새 테이블은 두 곳을 같이 바꾸고 `alembic check`로 맞는지 확인합니다.
 기본 `pytest`는 DB 없이 돕니다(`api/tests/conftest.py`가 `DATABASE_URL`을 비웁니다). 실제 Postgres 테스트는 `postgres` 표시로 따로 돌립니다. 공용 픽스처 `test_database_url`, `pg_engine`(마이그레이션 적용 후 모든 테이블을 비움)도 `conftest.py`에 있습니다.
