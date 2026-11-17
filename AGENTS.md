@@ -97,6 +97,9 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 
 `DATABASE_URL`이 있으면 서버는 Postgres를 쓰고(`/api/metrics` → `metric_events` 테이블), 없으면 DB 없이 돌며 측정 이벤트를 `METRICS_PATH`(JSONL)에 쌓습니다.
 분석 기록과 결과는 `analyses` 테이블에 둡니다(`gitinsight_api.analyses.postgres.PostgresAnalysisStore`, 규칙은 `analyses/store.py`의 `AnalysisStore`).
+`DATABASE_URL`이 있고 `LAB_ENABLED=false`이면 면접 두뇌와 리포트도 샘플 파일 대신 이 테이블의 분석 결과를 읽습니다(`analyses/source.py`의 `StoredAnalysisSource`).
+이때 `POST /api/sessions`는 분석을 요청한 본인만 쓸 수 있고, 다른 사람의 분석과 없는 분석은 같은 404입니다. 샘플 분석도 `scripts/seed_demo_analysis.py`로 넣은 계정만 씁니다.
+분석 결과를 읽다가 DB 오류가 나면 503을 돌려줍니다.
 DB 연결과 테이블 정의는 `api/src/gitinsight_api/db.py`, `tables.py`, 마이그레이션은 `api/migrations/versions/`에 있습니다. 새 테이블은 두 곳을 같이 바꾸고 `alembic check`로 맞는지 확인합니다.
 기본 `pytest`는 DB 없이 돕니다(`api/tests/conftest.py`가 `DATABASE_URL`을 비웁니다). 실제 Postgres 테스트는 `postgres` 표시로 따로 돌립니다. 공용 픽스처 `test_database_url`, `pg_engine`(마이그레이션 적용 후 모든 테이블을 비움)도 `conftest.py`에 있습니다.
 서버는 `--loop gitinsight_api.event_loop:server_loop_factory`로 띄웁니다. psycopg 3 비동기 연결이 Windows 기본 루프(Proactor)를 지원하지 않아 Windows에서는 Selector 루프를 씁니다(다른 OS는 uvicorn 기본값). 테스트는 `conftest.py`가 같은 루프를 씁니다. 이 옵션 없이 Windows에서 `DATABASE_URL`을 넣으면 `/api/metrics`가 계속 503입니다.

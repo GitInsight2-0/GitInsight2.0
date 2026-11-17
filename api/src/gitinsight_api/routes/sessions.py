@@ -18,7 +18,13 @@ from gitinsight_api.brain.protocol import (
     SessionClosedError,
     SessionNotFoundError,
 )
-from gitinsight_api.routes.deps import BrainDep, ReportServiceDep, UserDep, ensure_owner
+from gitinsight_api.routes.deps import (
+    AnalysesDep,
+    BrainDep,
+    ReportServiceDep,
+    UserDep,
+    ensure_owner,
+)
 from gitinsight_api.settings import Settings
 from gitinsight_contracts.interview import (
     BrainReply,
@@ -34,6 +40,7 @@ router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 MAX_LAB_DELAY_MS = 5000
 SESSION_FORBIDDEN = "이 세션에 접근할 수 없습니다"
+ANALYSIS_NOT_FOUND = "분석 결과를 찾을 수 없습니다"
 
 
 def _settings(request: Request) -> Settings:
@@ -41,11 +48,17 @@ def _settings(request: Request) -> Settings:
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_session(body: SessionCreate, brain: BrainDep, user: UserDep) -> SessionCreated:
+async def create_session(
+    body: SessionCreate, brain: BrainDep, user: UserDep, analyses: AnalysesDep
+) -> SessionCreated:
+    # 분석 결과에는 비공개 레포의 심볼 경로, 요약, 질문이 들어 있어 요청한 본인만 씁니다.
+    # 다른 사람의 분석도 없는 분석과 같은 404로 답해, 분석이 있는지 알 수 없게 합니다.
+    if analyses is not None and await analyses.owner_of(body.analysis_id) != user.user_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, ANALYSIS_NOT_FOUND)
     try:
         session_id, first = await brain.start(body, owner_id=user.user_id)
     except AnalysisNotFoundError:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "분석 결과를 찾을 수 없습니다") from None
+        raise HTTPException(status.HTTP_404_NOT_FOUND, ANALYSIS_NOT_FOUND) from None
     logger.info(
         "session start session=%s analysis=%s mode=%s",
         session_id,
@@ -91,7 +104,7 @@ async def end_session(
     except SessionNotFoundError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "세션을 찾을 수 없습니다") from None
     except AnalysisNotFoundError:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "분석 결과를 찾을 수 없습니다") from None
+        raise HTTPException(status.HTTP_404_NOT_FOUND, ANALYSIS_NOT_FOUND) from None
     logger.info(
         "session end session=%s report=%s kind=%s ms=%.0f",
         session_id,

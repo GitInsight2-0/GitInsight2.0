@@ -65,6 +65,9 @@ uv run python scripts/demo_check.py --real-llm    # 실제 LLM으로 완주 (비
 - [ ] Railway 환경 변수: `LAB_ENABLED=false`, `BRAIN_FORCE_PREPARED=false`, `LLM_PROVIDER=openai`, 모델 이름 변수 비움
 - [ ] 두 제공사 API 키 등록, 결제 한도 확인 (예산 상한 $100)
 - [ ] 데모 레포 분석 스냅샷을 운영 DB에 넣고(`seed_demo_analysis.py --user-id <데모 계정 id>`), `demo_check.py --from-db`로 확인 (A)
+  - `--user-id`는 데모에 로그인할 계정의 GitHub 숫자 id입니다 (`gh api users/<login> -q .id`). 로그인 이름이 아닙니다
+  - 서버는 `DATABASE_URL`이 있으면 DB의 분석만 쓰고 요청한 본인에게만 열어 줍니다. `--user-id`가 다르면 세션 시작이 404입니다 (#52)
+  - `demo_check.py --from-db`는 소유자 확인을 거치지 않아 `--user-id`가 틀려도 통과합니다. 배포 서버에서 데모 계정으로 로그인해 세션이 시작되는지 따로 확인합니다
 - [ ] 녹화 영상을 발표 노트북에 내려받아 둠 (C)
 - [ ] 모바일 핫스팟 연결 확인
 
