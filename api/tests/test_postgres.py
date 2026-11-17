@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from gitinsight_api.analyses.postgres import SNAPSHOT_REPLACED_ERROR, PostgresAnalysisStore
 from gitinsight_api.analyses.store import AnalysisKey
+from gitinsight_api.auth import CurrentUser, get_current_user
 from gitinsight_api.main import create_app
 from gitinsight_api.metrics_store import PostgresMetricsStore
 from gitinsight_api.settings import Settings
@@ -119,3 +120,31 @@ async def test_demo_snapshot_is_idempotent_and_reused(pg_engine: AsyncEngine) ->
     # 같은 키를 다시 요청하면 새로 분석하지 않고 스냅샷을 재사용합니다.
     reused, created = await store.get_or_create(key)
     assert (reused.analysis_id, created) == (sample.analysis_id, False)
+
+
+async def test_session_starts_from_seeded_snapshot_for_its_owner_only(
+    client_for: ClientFactory, test_database_url: str, pg_engine: AsyncEngine, tmp_path: Path
+) -> None:
+    # 데모 경로입니다 (#52). 스냅샷을 넣은 계정만 그 분석으로 면접을 시작합니다.
+    sample = load_analysis()
+    await PostgresAnalysisStore(pg_engine).save_snapshot(sample, "demo")
+    settings = Settings(
+        lab_enabled=False,
+        metrics_path=tmp_path / "m.jsonl",
+        brain_force_prepared=True,
+        database_url=SecretStr(test_database_url),
+    )
+    app = create_app(settings)
+    body = {"analysis_id": sample.analysis_id, "mode": "text"}
+    async with client_for(app) as client:
+        app.dependency_overrides[get_current_user] = lambda: CurrentUser("demo", "demo")
+        created = await client.post("/api/sessions", json=body)
+        session_id = created.json()["session_id"]
+        ended = await client.post(f"/api/sessions/{session_id}/end")
+        app.dependency_overrides[get_current_user] = lambda: CurrentUser("other", "other")
+        other = await client.post("/api/sessions", json=body)
+    await app.state.db_engine.dispose()
+
+    assert created.status_code == 201, created.text
+    assert ended.status_code == 200, ended.text
+    assert other.status_code == 404

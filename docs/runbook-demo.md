@@ -64,7 +64,10 @@ uv run python scripts/demo_check.py --real-llm    # 실제 LLM으로 완주 (비
 
 - [ ] Railway 환경 변수: `LAB_ENABLED=false`, `BRAIN_FORCE_PREPARED=false`, `LLM_PROVIDER=openai`, 모델 이름 변수 비움
 - [ ] 두 제공사 API 키 등록, 결제 한도 확인 (예산 상한 $100)
-- [ ] 데모 레포 분석 스냅샷을 운영 DB에 넣고(`seed_demo_analysis.py --user-id <데모 계정 id> --fixture gitinsight_agent_live`), `demo_check.py --from-db --analysis-id demo-gitinsight-agent-live`로 확인 (A)
+- [ ] 데모 레포 분석 스냅샷을 운영 DB에 넣고(`seed_demo_analysis.py --user-id <데모 계정 id> --fixture gitinsight_agent_live`), `demo_check.py --from-db --user-id <데모 계정 id> --analysis-id demo-gitinsight-agent-live`로 확인 (A)
+  - `--user-id`는 데모에 로그인할 계정의 GitHub 숫자 id입니다 (`gh api users/<login> -q .id`). 로그인 이름이 아닙니다
+  - 서버는 `DATABASE_URL`이 있으면 DB의 분석만 쓰고 요청한 본인에게만 열어 줍니다. `--user-id`가 다르면 세션 시작이 404입니다 (#52)
+  - `demo_check.py --from-db`도 서버와 같은 소유자 확인을 거칩니다. 스냅샷을 넣은 `--user-id`와 다르면 실패로 끝납니다
   - `gitinsight_agent_live`는 레포 주인(D)이 요청했다고 보고 실제 워커로 만든 결과라 기여 라벨이 모두 본인 기여입니다. 다른 계정으로 시연하면 `eval_stage2.py --requester-email ... --save-json`으로 다시 만듭니다
 - [ ] 녹화 영상을 발표 노트북에 내려받아 둠 (C)
 - [ ] 모바일 핫스팟 연결 확인
