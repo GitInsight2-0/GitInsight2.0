@@ -3,6 +3,8 @@
 같은 대본, 같은 대본 두뇌(LAB_ENABLED), 같은 측정 방식으로 OpenAI Realtime과 Gemini Live를 비교합니다.
 측정 이벤트는 `/api/metrics`로 들어가 `.data/metrics.jsonl`에 쌓이고, 화면의 "결과 JSON 복사"로 요약을 받습니다.
 
+> 지금은 Gemini Live만 측정합니다. OpenAI Realtime 코드와 제공사 선택은 #40에서 지웠습니다. 아래 결과 표의 OpenAI 칸은 비교를 계획했던 당시 기록이라 그대로 둡니다.
+
 ## 실행
 
 ```text
@@ -12,7 +14,7 @@
 LAB_ENABLED=true uv run uvicorn --factory gitinsight_api.main:app_factory --loop gitinsight_api.event_loop:server_loop_factory --reload --reload-dir api/src --reload-dir contracts/src
 
 # 터미널 2: 웹
-cp web/.env.example web/.env.local   # LAB_ENABLED=true, 제공사 키 입력
+cp web/.env.example web/.env.local   # LAB_ENABLED=true, GEMINI_API_KEY 입력
 pnpm --filter @gitinsight/web dev    # http://localhost:3000/lab/voice
 ```
 
@@ -126,6 +128,7 @@ Gemini `realtimeInputConfig.automaticActivityDetection`의 `silenceDurationMs`, 
   - 한국어 음성 면접을 대본 두뇌와 끝까지 진행했고, 위임(도구 호출)·끼어들기·하이라이트 전환이 동작했습니다.
   - 무료 등급으로 개발과 측정을 할 수 있습니다.
   - OpenAI Realtime은 측정하지 않았습니다. 같은 조건의 비교 결과는 없고, 비교 없이 Gemini 단독으로 정했습니다.
+  - 비교용으로 만든 OpenAI Realtime 어댑터와 제공사 선택은 #40에서 지웠습니다.
 - 이유 (회의에서 나온 것): <!-- 회의 기록이 있으면 채웁니다 -->
 - 남은 과제 (G4 전에 해결):
   - 응답 지연: 기본 설정 약 3.1초, 멈춤에 강한 설정(2000ms, LOW) 약 4.1초 → 목표 1.5초. 위임 대기 중 짧은 맞장구(계약의 `filler_start`)를 검토합니다.

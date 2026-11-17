@@ -1,6 +1,5 @@
 /**
- * 두 음성 제공사에 똑같이 쓰는 지시문과 도구 정의입니다.
- * 비교가 공정하려면 이 값이 같아야 합니다.
+ * 음성 AI(Gemini Live)에 쓰는 지시문과 도구 정의입니다.
  * 토큰 발급이 FastAPI로 옮겨 가면 이 내용도 서버가 VoiceToken.instructions, tools로 내려줍니다.
  */
 
@@ -65,19 +64,13 @@ export function parseVad(v: unknown): VadSettings {
 
 export const TOOL_DESCRIPTION = "사용자의 답변을 면접 서버에 보내고 다음에 할 말을 받는다. 사용자가 말을 마칠 때마다 호출한다.";
 
-export const TOOL_PARAMETERS = {
-  type: "object",
-  properties: {
-    transcript: { type: "string", description: "사용자가 방금 한 말 전체" },
-  },
-  required: ["transcript"],
-  additionalProperties: false,
-} as const;
+/** 위임 도구의 transcript 인자 설명 */
+export const TRANSCRIPT_DESCRIPTION = "사용자가 방금 한 말 전체";
 
 /** 음성 AI에 서버 발화를 말하게 할 때 보내는 메시지 */
 export const sayMessage = (utterance: string) => `[면접 서버] 다음 문장을 말하세요: "${utterance}"`;
 
-/** 비교 테스트 대본. docs/evals/voice-g1.md와 같습니다. */
+/** 측정 대본. docs/evals/voice-g1.md와 같습니다. */
 export const TEST_SCRIPT = [
   "먼저 깃허브에서 레포를 클론하고, 트리시터로 함수 목록을 뽑은 다음에 FastAPI 라우터로 결과를 넘깁니다.",
   "파일을 세 개만 읽은 건 토큰 한도 때문이었는데, 레포가 크면 중요한 파일을 놓칠 수 있습니다.",

@@ -1,10 +1,11 @@
 import type { VoiceToken } from "@gitinsight/contracts";
 
-export type Provider = VoiceToken["provider"];
+/** 음성 AI 제공사. G1에서 Gemini Live로 정했습니다 (docs/evals/voice-g1.md). */
+export const PROVIDER: VoiceToken["provider"] = "gemini";
 
 /**
  * 받아쓰기와 도구 호출이 어느 사용자 턴에 속하는지 나타내는 키.
- * OpenAI는 사용자 음성 item id, Gemini는 어댑터가 매기는 턴 번호입니다.
+ * Gemini 어댑터가 사용자 턴마다 매기는 번호입니다.
  * 진행기는 이 키로 늦게 도착한 받아쓰기를 이전 턴 것으로 판단합니다 (시간 창을 쓰지 않음).
  */
 export type TurnKey = string;

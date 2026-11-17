@@ -18,9 +18,15 @@ import { ApiError, createSession, fetchVoiceToken, isAbort, postMetric, postTurn
 import { DELEGATION_TOOL, type VadSettings, sayMessage } from "./config";
 import { Meter, epochMs } from "./meter";
 import { similarity } from "./similarity";
-import type { AdapterHandle, Connect, Provider, TurnKey } from "./types";
+import { type AdapterHandle, type Connect, PROVIDER, type TurnKey } from "./types";
 
 export type LogWho = "user" | "ai" | "system" | "error";
+
+/**
+ * 음성이 끝난 까닭.
+ * done: 면접이 끝남 (서버 done, 409 이미 끝난 세션). user: 사용자나 화면이 멈춤. dropped: 연결 끊김, 시작 실패 등.
+ */
+export type EndKind = "done" | "user" | "dropped";
 
 export interface SessionUi {
   log(who: LogWho, text: string): void;
@@ -38,10 +44,27 @@ export interface SessionUi {
   transcriptSimilarity(ratio: number): void;
   /** 음성 AI가 사용자 말에 도구 호출 없이 직접 답했습니다 (위임 누락) */
   delegationMissed(): void;
-  /** 서버로 턴 하나를 보냈습니다 (대본 줄 진행용) */
-  turnSent(): void;
-  /** 면접이 끝났습니다. 이유는 화면에 보여 줄 문구입니다. */
-  ended(reason: string): void;
+  /** 서버로 턴 하나를 보냈습니다. transcript는 실제로 보낸 답변입니다 (대본 줄 진행, 대화 기록용) */
+  turnSent(transcript: string): void;
+  /** 이번 턴에 쓸 받아쓰기 조각이 왔습니다. 이미 보낸 턴의 늦은 조각은 오지 않습니다 */
+  answer?(text: string): void;
+  /** 음성이 끝났습니다. reason은 화면에 보여 줄 문구, kind는 끝난 까닭입니다. */
+  ended(reason: string, kind: EndKind): void;
+  /**
+   * 세션이 정해졌습니다 (새로 만들었거나 이어받음). 음성 연결 전에 불리므로,
+   * 연결에 실패해도 화면은 이 세션으로 텍스트 면접을 이어 갈 수 있습니다.
+   */
+  started?(sessionId: string, current: BrainReply): void;
+  /** 누가 소리를 내기 시작하거나 멈췄습니다 (측정기 기준). 화면의 듣는 중, 말하는 중 표시에 씁니다. */
+  speaking?(who: "user" | "ai", on: boolean): void;
+  /** 음성 연결이 열렸습니다. 화면이 소리 크기를 그릴 수 있게 측정용 노드를 넘깁니다. */
+  audio?(levels: AudioLevels): void;
+}
+
+/** 측정용 소리 노드. 연결 중에는 null일 수 있어 그때그때 꺼내 씁니다. */
+export interface AudioLevels {
+  user(): AnalyserNode | null;
+  ai(): AnalyserNode | null;
 }
 
 export interface SessionOptions {
@@ -56,6 +79,12 @@ export interface SessionOptions {
   filler: boolean;
   /** 이 신호가 멈추면 연결 중이든 진행 중이든 면접을 끝냅니다. */
   signal: AbortSignal;
+  /**
+   * 이미 진행 중인 세션을 이어받습니다 (텍스트 면접 도중 음성으로 바꿀 때).
+   * 주면 세션을 새로 만들지 않고, current의 발화부터 음성으로 다시 말합니다.
+   * 음성 연결을 닫아도 서버 세션은 끝내지 않습니다.
+   */
+  existing?: { sessionId: string; current: BrainReply };
 }
 
 export interface VoiceSession {
@@ -65,10 +94,15 @@ export interface VoiceSession {
 /** 서버 응답을 못 받았을 때 음성 AI가 할 말. 면접을 진행시키지 않고 다시 말해 달라고만 합니다. */
 const RETRY_UTTERANCE = "잠시 연결이 불안정했어요. 방금 답변을 한 번만 더 말씀해 주시겠어요?";
 const EMPTY_UTTERANCE = "잘 못 들었어요. 한 번만 더 말씀해 주시겠어요?";
+/** 턴이 이만큼 연달아 실패하면 같은 부탁을 반복하지 않고 음성을 끝냅니다 (화면은 텍스트로 이어 갑니다) */
+const MAX_TURN_FAILURES = 2;
+/** 턴이 연달아 실패해 음성을 끝내기 전에 할 말. 말없이 끊기면 사용자가 무슨 일인지 모릅니다 */
+const DROP_UTTERANCE = "연결이 계속 불안정해서 텍스트로 이어 가겠습니다. 답변은 화면에 적어 주세요.";
+const DROP_END = { reason: "서버 응답이 계속 실패해 음성을 멈췄습니다", kind: "dropped" } as const;
 /** 서버가 이미 끝난 세션이라고 답했을 때 (409) */
 const ENDED_UTTERANCE = "면접이 끝났습니다. 수고하셨습니다.";
 
-/** 도구 호출이 받아쓰기보다 먼저 오면 이만큼 기다립니다 (OpenAI는 받아쓰기가 늦게 오는 경우가 많음). */
+/** 도구 호출이 받아쓰기보다 먼저 오면 이만큼 기다립니다 (받아쓰기가 도구 호출보다 늦게 오는 경우가 있음). */
 const ASR_WAIT_MS = 1500;
 /** 마지막 발화(done)를 말한 뒤 소리가 끝나지 않아도 이 시간이 지나면 정리합니다. */
 const END_GRACE_MS = 20_000;
@@ -76,7 +110,6 @@ const END_GRACE_MS = 20_000;
 const END_QUIET_MS = 1500;
 
 export async function startVoiceSession(
-  provider: Provider,
   connect: Connect,
   ui: SessionUi,
   opts: SessionOptions,
@@ -90,7 +123,7 @@ export async function startVoiceSession(
   let endQuietTimer: ReturnType<typeof setTimeout> | null = null;
   let asrWaiter: (() => void) | null = null;
 
-  function shutdown(reason: string) {
+  function shutdown(reason: string, kind: EndKind) {
     if (closed) return;
     closed = true;
     life.abort(new DOMException(reason, "AbortError"));
@@ -100,9 +133,9 @@ export async function startVoiceSession(
     meter?.stop();
     handle?.stop();
     ui.status("종료됨");
-    ui.ended(reason);
+    ui.ended(reason, kind);
   }
-  const onOuterAbort = () => shutdown("사용자가 멈췄습니다");
+  const onOuterAbort = () => shutdown("사용자가 멈췄습니다", "user");
   if (opts.signal.aborted) onOuterAbort();
   opts.signal.addEventListener("abort", onOuterAbort, { once: true });
   const ensureOpen = () => {
@@ -111,21 +144,26 @@ export async function startVoiceSession(
 
   try {
     ui.status("세션 만드는 중");
-    const created = await createSession({ analysis_id: opts.analysisId, mode: "voice" }, life.signal);
+    const created = opts.existing
+      ? { session_id: opts.existing.sessionId, first: opts.existing.current }
+      : await createSession({ analysis_id: opts.analysisId, mode: "voice" }, life.signal);
     ensureOpen();
     const sessionId = created.session_id;
+    ui.started?.(sessionId, created.first);
     ui.reply(created.first);
     ui.log("system", `세션 ${sessionId.slice(0, 8)}`);
 
     const metric = (name: MetricName, extra: Partial<MetricEvent> = {}) =>
-      postMetric({ name, session_id: sessionId, at_ms: Date.now(), provider, scenario: opts.scenario(), ...extra });
+      postMetric({ name, session_id: sessionId, at_ms: Date.now(), provider: PROVIDER, scenario: opts.scenario(), ...extra });
 
     ui.status("임시 토큰 받는 중");
-    const token = await fetchVoiceToken(provider, opts.vad, opts.filler, life.signal);
+    const token = await fetchVoiceToken(opts.vad, opts.filler, life.signal);
     ensureOpen();
     ui.log("system", `모델 ${token.model}`);
 
     let done = false;
+    /** 연달아 실패한 턴 수. 성공하면 0으로 돌아갑니다 */
+    let turnFailures = 0;
     // 연결이 준비되기 전에 온 도구 호출의 답은 준비될 때까지 보류합니다.
     let resolveHandle!: (h: AdapterHandle) => void;
     const handleReady = new Promise<AdapterHandle>((r) => (resolveHandle = r));
@@ -147,14 +185,23 @@ export async function startVoiceSession(
     let fillerArmed = false;
     /** done 발화를 보냈고, 그 소리가 끝나면 정리합니다 */
     let endAfterSpeech = false;
+    /** 마지막 발화 뒤 정리할 때 화면에 알릴 까닭. 면접 종료가 기본이고, 연속 실패면 dropped입니다 */
+    let endAs: { reason: string; kind: EndKind } = { reason: "면접이 끝났습니다", kind: "done" };
+    /** 연속 실패로 음성을 끝내는 중. 이후 도구 호출에는 같은 안내만 합니다 */
+    let dropping = false;
 
     const m = new Meter({
-      userStart: (at) => metric("vad_start", { at_ms: at }),
+      userStart: (at) => {
+        ui.speaking?.("user", true);
+        metric("vad_start", { at_ms: at });
+      },
       userEnd: (at) => {
+        ui.speaking?.("user", false);
         metric("vad_end", { at_ms: at });
         fillerArmed = true;
       },
       aiStart: (at) => {
+        ui.speaking?.("ai", true);
         if (endQuietTimer) {
           clearTimeout(endQuietTimer);
           endQuietTimer = null;
@@ -175,10 +222,11 @@ export async function startVoiceSession(
         }
       },
       aiEnd: () => {
+        ui.speaking?.("ai", false);
         // 마지막 발화의 소리가 끝나고 한동안 조용하면 면접을 정리합니다.
         if (!endAfterSpeech || replyPending) return;
         if (endQuietTimer) clearTimeout(endQuietTimer);
-        endQuietTimer = setTimeout(() => shutdown("면접이 끝났습니다"), END_QUIET_MS);
+        endQuietTimer = setTimeout(() => shutdown(endAs.reason, endAs.kind), END_QUIET_MS);
       },
       bargeIn: () => ui.bargeIn(),
       bargeStop: (bargeAt, stopMs) => {
@@ -196,6 +244,7 @@ export async function startVoiceSession(
         return;
       }
       asrBuffer.push({ text, key });
+      ui.answer?.(text);
       userSpokeSinceTool = true;
       asrWaiter?.();
     }
@@ -250,13 +299,14 @@ export async function startVoiceSession(
       userSpokeSinceTool = false;
       // 이 턴의 질문 측정 기준: 도구 호출을 받은 시점의 마지막 사용자 말 끝
       const baseEnd = m.lastUserEnd;
-      const respond = (utterance: string, isDone: boolean) => {
+      const respond = (utterance: string, isDone: boolean, end?: { reason: string; kind: EndKind }) => {
         if (closed) return;
         replyPending = true;
         replyBaseEnd = baseEnd;
+        if (end) endAs = end;
         if (isDone) {
           endAfterSpeech = true;
-          endTimer = setTimeout(() => shutdown("면접이 끝났습니다"), END_GRACE_MS);
+          endTimer = setTimeout(() => shutdown(endAs.reason, endAs.kind), END_GRACE_MS);
         }
         void handleReady.then((h) => {
           if (!closed) h.respondTool(callId, name, { utterance, done: isDone });
@@ -266,6 +316,10 @@ export async function startVoiceSession(
       if (name !== DELEGATION_TOOL) {
         ui.log("error", `모르는 도구 호출: ${name}`);
         respond(RETRY_UTTERANCE, false);
+        return;
+      }
+      if (dropping) {
+        respond(DROP_UTTERANCE, true, DROP_END);
         return;
       }
       if (done) {
@@ -287,7 +341,7 @@ export async function startVoiceSession(
       const turnId = crypto.randomUUID();
       const t0 = performance.now();
       metric("delegation_start", { turn_id: turnId });
-      ui.turnSent();
+      ui.turnSent(transcript);
       try {
         const reply = await postTurn(
           sessionId,
@@ -301,6 +355,7 @@ export async function startVoiceSession(
           { labDelayMs: opts.labDelayMs, signal: life.signal },
         );
         done = reply.done;
+        turnFailures = 0;
         ui.reply(reply);
         respond(reply.utterance, reply.done);
       } catch (e) {
@@ -314,6 +369,14 @@ export async function startVoiceSession(
         }
         ui.log("error", `서버 응답 실패: ${String(e)}`);
         metric("error", { turn_id: turnId, error_code: "turn_failed" });
+        turnFailures++;
+        if (turnFailures >= MAX_TURN_FAILURES) {
+          // 같은 답변을 계속 거절당하거나 서버가 계속 늦으면, 다시 말해 달라는 부탁만 반복하게 됩니다.
+          // 짧게 안내한 뒤(마지막 발화와 같은 정리 경로) 음성을 끝내고, 화면은 텍스트로 이어 갑니다.
+          dropping = true;
+          respond(DROP_UTTERANCE, true, DROP_END);
+          return;
+        }
         respond(RETRY_UTTERANCE, false);
       } finally {
         const ms = Math.round(performance.now() - t0);
@@ -322,7 +385,7 @@ export async function startVoiceSession(
       }
     }
 
-    ui.status(`${provider} 연결 중`);
+    ui.status("음성 연결 중");
     // 연결에 실패하거나 도중에 멈추면 어댑터가 마이크와 오디오 자원을 정리한 뒤 예외를 던집니다.
     const h = await connect(
       token,
@@ -339,7 +402,7 @@ export async function startVoiceSession(
           ui.log("error", message);
           metric("error", { error_code: code });
         },
-        onClosed: (reason) => shutdown(`제공사 연결이 닫혔습니다 (${reason})`),
+        onClosed: (reason) => shutdown(`제공사 연결이 닫혔습니다 (${reason})`, "dropped"),
       },
       { signal: life.signal },
     );
@@ -354,12 +417,13 @@ export async function startVoiceSession(
       () => h.userAnalyser(),
       () => h.aiAnalyser(),
     );
+    ui.audio?.({ user: () => h.userAnalyser(), ai: () => h.aiAnalyser() });
     ui.status("연결됨");
     h.say(sayMessage(created.first.utterance));
   } catch (e) {
     // 시작 도중 실패하거나 멈추면, 열린 것을 모두 닫고 호출한 쪽에 알립니다.
     const reason = isAbort(e) ? "사용자가 멈췄습니다" : "시작하지 못했습니다";
-    shutdown(reason);
+    shutdown(reason, isAbort(e) ? "user" : "dropped");
     opts.signal.removeEventListener("abort", onOuterAbort);
     throw e;
   }
@@ -367,7 +431,7 @@ export async function startVoiceSession(
   return {
     stop() {
       opts.signal.removeEventListener("abort", onOuterAbort);
-      shutdown("사용자가 멈췄습니다");
+      shutdown("사용자가 멈췄습니다", "user");
     },
   };
 }

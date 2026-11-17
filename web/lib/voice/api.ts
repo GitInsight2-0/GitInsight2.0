@@ -13,8 +13,16 @@ export class ApiError extends Error {
 
 /** 세션 생성, 토큰 요청의 제한 시간 */
 export const SETUP_TIMEOUT_MS = 10_000;
-/** 턴 한 번의 제한 시간 (판단 지연 흉내는 따로 더함) */
-const TURN_TIMEOUT_MS = 8000;
+/**
+ * 턴 하나를 기다리는 전체 시간 (재시도 포함, 판단 지연 흉내는 따로 더함).
+ * 런북의 "10초 넘게 반응이 없으면 다음 대비책" 규칙 안에 들어오게 둡니다.
+ * 서버는 판단 LLM을 2.5초 안에 끝내고 대비책으로 넘어가므로 보통 3~4초 안에 답합니다.
+ */
+const TURN_BUDGET_MS = 9000;
+/** 첫 시도의 제한 시간. 남은 시간은 같은 turn_id로 한 번 더 보내는 데 씁니다 */
+const TURN_FIRST_TRY_MS = 6000;
+/** 계약 TurnRequest.transcript의 최대 길이 */
+export const TRANSCRIPT_MAX = 4000;
 
 /**
  * 바깥 신호(사용자 종료)와 제한 시간을 함께 따르는 AbortSignal을 만듭니다.
@@ -80,14 +88,24 @@ export async function postTurn(
 ): Promise<BrainReply> {
   const q = opts.labDelayMs ? `?lab_delay_ms=${opts.labDelayMs}` : "";
   const url = `/api/sessions/${sessionId}/turns${q}`;
+  // 길이 상한을 넘으면 서버가 422로 거절하므로 미리 자릅니다.
+  if (body.transcript.length > TRANSCRIPT_MAX) body = { ...body, transcript: cut(body.transcript, TRANSCRIPT_MAX) };
+  const lab = opts.labDelayMs ?? 0;
+  const started = performance.now();
   for (let attempt = 0; ; attempt++) {
-    const s = linkedSignal(opts.signal, TURN_TIMEOUT_MS + (opts.labDelayMs ?? 0));
+    // 판단 지연 흉내(lab)는 시도마다 서버가 더 기다리므로 예산에도 시도마다 더합니다.
+    const left = TURN_BUDGET_MS + lab * (attempt + 1) - (performance.now() - started);
+    const limit = attempt === 0 ? TURN_FIRST_TRY_MS : left - lab;
+    const s = linkedSignal(opts.signal, limit + lab);
     try {
       return await postJson<BrainReply>(url, body, s.signal);
     } catch (e) {
       if (opts.signal?.aborted) throw e;
       const retryable = !(e instanceof ApiError) || e.status >= 500;
-      if (attempt >= 1 || !retryable) throw e;
+      // 남은 시간이 너무 짧으면 다시 보내도 받을 수 없으니 바로 실패로 넘깁니다.
+      // 다음 시도가 쓸 수 있는 시간 (그 시도의 lab 지연 제외)
+      const left = TURN_BUDGET_MS + lab * (attempt + 1) - (performance.now() - started);
+      if (attempt >= 1 || !retryable || left < 1000) throw e;
     } finally {
       s.done();
     }
@@ -105,7 +123,6 @@ export function postMetric(ev: MetricEvent): void {
 }
 
 export async function fetchVoiceToken(
-  provider: VoiceToken["provider"],
   vad: VadSettings,
   filler: boolean,
   outer?: AbortSignal,
@@ -113,8 +130,14 @@ export async function fetchVoiceToken(
   // TODO: FastAPI의 POST /api/sessions/{id}/voice-token이 생기면 그쪽으로 바꿉니다.
   const s = linkedSignal(outer, SETUP_TIMEOUT_MS);
   try {
-    return await postJson("/lab/voice-token", { provider, vad, filler }, s.signal);
+    return await postJson("/lab/voice-token", { vad, filler }, s.signal);
   } finally {
     s.done();
   }
+}
+
+/** UTF-16 단위로 max까지 자르되, 이모지 같은 서로게이트 쌍의 가운데에서 끊지 않습니다 */
+function cut(text: string, max: number): string {
+  const last = text.charCodeAt(max - 1);
+  return text.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max);
 }
