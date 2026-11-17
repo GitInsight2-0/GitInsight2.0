@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import CodeViewer from "@/components/CodeViewer";
 import { ApiError, TRANSCRIPT_MAX, createSession, endSession, isAbort, postTurn } from "@/lib/voice/api";
 import { DEFAULT_VAD } from "@/lib/voice/config";
-import { explainError } from "@/lib/voice/errors";
+import { explainError, isLoginError } from "@/lib/voice/errors";
 import { connectGemini } from "@/lib/voice/gemini";
 import { type AudioLevels, type SessionUi, type VoiceSession, startVoiceSession } from "@/lib/voice/session";
 import { USER_SILENCE_MS } from "@/lib/voice/meter";
@@ -105,6 +105,8 @@ export default function InterviewScreen({
   const aiSpeakingRef = useRef(false);
   const [levels, setLevels] = useState<AudioLevels | null>(null);
   const [report, setReport] = useState<ReportState>({ kind: "idle" });
+  /** 서버가 401을 돌려줬습니다. 첫 화면으로 가서 다시 로그인하라고 안내합니다 */
+  const [needLogin, setNeedLogin] = useState(false);
   /** "끝내기"를 눌러 확인을 기다리는 중 */
   const [confirmEnd, setConfirmEnd] = useState(false);
   /** 이 세션의 리포트를 이미 요청했는지 (자동 요청이 두 번 나가지 않게) */
@@ -166,7 +168,8 @@ export default function InterviewScreen({
       }
       // 서버는 같은 세션에 같은 report_id를 돌려주므로 다시 시도해도 됩니다.
       reportRequested.current = false;
-      const message = isAbort(e) ? "시간이 너무 오래 걸립니다" : String((e as Error).message ?? e);
+      if (isLoginError(e)) setNeedLogin(true);
+      const message = isAbort(e) ? "시간이 너무 오래 걸립니다" : explainError(e);
       setReport({ kind: "error", message });
     }
   }
@@ -205,7 +208,8 @@ export default function InterviewScreen({
       showReply(created.first);
       setHistory([{ who: "interviewer", text: created.first.utterance }]);
     } catch (e) {
-      setError(String((e as Error).message ?? e));
+      if (isLoginError(e)) setNeedLogin(true);
+      setError(explainError(e));
     } finally {
       setBusy(false);
     }
@@ -242,8 +246,11 @@ export default function InterviewScreen({
         push({ who: "system", text: "이미 끝난 면접입니다." });
         const r = replyRef.current;
         if (r) showReply({ ...r, done: true });
+      } else if (isLoginError(e)) {
+        setNeedLogin(true);
+        setError(explainError(e));
       } else {
-        setError(`답변을 보내지 못했습니다. 다시 보내 주세요. (${String((e as Error).message ?? e)})`);
+        setError(`답변을 보내지 못했습니다. 다시 보내 주세요. (${explainError(e)})`);
       }
     } finally {
       sending.current = false;
@@ -375,6 +382,7 @@ export default function InterviewScreen({
       setVoiceState("idle");
       setMode("text");
       if (voiceStoppedByUser.current || isAbort(e)) return;
+      if (isLoginError(e)) setNeedLogin(true);
       const message = explainError(e);
       if (sessionRef.current) setNotice(`음성으로 연결하지 못해 텍스트로 이어 갑니다. (${message})`);
       else setError(message);
@@ -430,6 +438,7 @@ export default function InterviewScreen({
               <p role="status" aria-live="polite" className={styles.error}>
                 {error}
               </p>
+              {needLogin && <LoginLink />}
             </div>
           </section>
         </main>
@@ -504,6 +513,12 @@ export default function InterviewScreen({
             <p role="status" aria-live="polite" className={styles.notice}>
               {notice}
             </p>
+          )}
+
+          {needLogin && (
+            <div className={styles.notice}>
+              로그인이 풀렸어요. 로그인은 8시간 동안 유지돼요. <LoginLink />
+            </div>
           )}
 
           {confirmEnd && !done && (
@@ -597,6 +612,15 @@ export default function InterviewScreen({
         <CodeViewer repo={repo} target={reply?.highlight ?? null} />
       </main>
     </div>
+  );
+}
+
+/** 첫 화면(로그인 버튼이 있는 곳)으로 가는 링크 */
+function LoginLink() {
+  return (
+    <a className={styles.textLink} href="/">
+      첫 화면에서 다시 로그인
+    </a>
   );
 }
 
