@@ -25,7 +25,7 @@ README.md의 "전체 구조"를 따릅니다.
 | `contracts/src/gitinsight_contracts/` | 모듈 간 계약(Pydantic 모델) | B (변경 시 2명 승인) |
 | `contracts/schema/contracts.json`, `contracts/ts/index.d.ts` | 계약에서 자동 생성한 JSON Schema와 TS 타입. 직접 고치지 않습니다 | 자동 생성 |
 | `api/src/gitinsight_api/` | FastAPI 서버. `brain/`(면접 두뇌), `llm/`(LLMClient), `routes/` | B, D |
-| `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출, git blame 기여 라벨과 최근 커밋), 2단계(규칙으로 주제 후보 선택, LLM으로 주제 재료 생성과 서버 검증), 전체 흐름 `pipeline.run_analysis`, 분석 기록 저장소와 연결해 실행하는 `jobs`(같은 프로세스 Launcher) | A |
+| `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출, git blame 기여 라벨과 최근 커밋), 2단계(규칙으로 주제 후보 선택, LLM으로 주제 재료 생성과 서버 검증), 전체 흐름 `pipeline.run_analysis`, 분석 기록 저장소와 연결해 실행하는 `jobs`(같은 프로세스 Launcher), 분석까지 여는 서버 진입점 `server` | A |
 | `web/` | Next.js 웹. 첫 화면(`/`, GitHub 로그인과 면접 시작), 실제 모드 면접 화면(`/interview/[analysisId]`, 음성·텍스트, 도중 전환, 음성 끊김 시 텍스트 자동 전환, 끝내기와 리포트 요청), 음성 토큰 라우트(`/voice-token`, 실험 모드가 아니면 로그인 필요), 실험 화면(`/lab/voice`, `/lab/interview`)이 있습니다 | C |
 | `fixtures/analysis/` | 데모 레포 분석 결과 샘플(`gitinsight_agent`, 손으로 만듦)과 실제 워커로 만든 데모 스냅샷(`gitinsight_agent_live`) | B |
 | `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |
@@ -75,7 +75,7 @@ uv run alembic -c api/alembic.ini revision --rev-id 0002 -m "설명"  # 새 마�
 uv run alembic -c api/alembic.ini check                            # tables.py와 마이그레이션이 일치하는지 확인 (DB 필요)
 pnpm contracts:gen                         # 계약 → JSON Schema → TS 타입 생성
 pnpm contracts:check                       # 생성 파일이 커밋된 내용과 같은지 검사
-uv run uvicorn --factory gitinsight_api.main:app_factory --loop gitinsight_api.event_loop:server_loop_factory --reload   # API 서버 (기본 8000번)
+uv run uvicorn --factory gitinsight_worker.server:app_factory --loop gitinsight_api.event_loop:server_loop_factory --reload   # API 서버 (기본 8000번, 분석 요청 포함)
 uv run python -m gitinsight_contracts.fixtures show                # 샘플 분석 결과 요약
 uv run python -m gitinsight_api.brain.cli [--real-llm]             # 터미널 텍스트 면접
 uv run python scripts/llm_latency.py --n 20                        # 판단 LLM 지연 측정 (수동, 비용 발생)
@@ -83,7 +83,7 @@ uv run python scripts/eval_brain.py                                # 골든 대�
 uv run python scripts/eval_stage2.py                               # 샘플 레포 2단계 분석 실제 LLM 평가 (수동, 비용 발생)
                                    # --requester-email <커밋 이메일> --save-json <경로>: 그 사람 기준 기여 라벨로 분석하고 스냅샷용 JSON 저장
 uv run python scripts/demo_check.py [--block-llm | --real-llm] [--from-db --user-id <id>]   # 데모 완주 점검 (docs/runbook-demo.md). --from-db는 DB의 데모 스냅샷을 그 주인으로 사용
-uv run python scripts/seed_demo_analysis.py --user-id <id> [--fixture gitinsight_agent_live | --file <json>]   # 분석 결과를 DATABASE_URL의 DB에 완료 기록으로 넣기 (데모 스냅샷)
+uv run python scripts/seed_demo_analysis.py --user-id <id> [--fixture gitinsight_agent_live | --file <json>] [--analysis-id <id>]   # 분석 결과를 DATABASE_URL의 DB에 완료 기록으로 넣기 (데모 스냅샷)
 pnpm --filter @gitinsight/web dev                                  # 웹 (기본 3000번, /api/*는 API_ORIGIN으로 넘김)
 pnpm --filter @gitinsight/web typecheck                            # 웹 타입 검사
 ```
@@ -102,6 +102,9 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 `DATABASE_URL`이 있고 `LAB_ENABLED=false`이면 면접 두뇌와 리포트도 샘플 파일 대신 이 테이블의 분석 결과를 읽습니다(`analyses/source.py`의 `StoredAnalysisSource`).
 이때 `POST /api/sessions`는 분석을 요청한 본인만 쓸 수 있고, 다른 사람의 분석과 없는 분석은 같은 404입니다. 샘플 분석도 `scripts/seed_demo_analysis.py`로 넣은 계정만 씁니다.
 분석 결과를 읽다가 DB 오류가 나면 503을 돌려줍니다.
+분석 요청은 `POST /api/analyses`(본문 `repo_id`), 진행 상태는 `GET /api/analyses/{id}`입니다(`routes/analyses.py`). 상태는 요청한 본인만 보고, 다른 사람의 분석은 404입니다.
+서버는 로그인 쿠키의 GitHub 사용자 토큰으로 레포 이름과 기본 브랜치의 최신 커밋을 확인하고(`github_repos.py`), 같은 토큰으로 레포를 내려받습니다. 토큰은 분석 작업의 메모리에만 있고, git에는 환경 변수로만 넘깁니다.
+분석 실행기는 워커 패키지에 있어서 `gitinsight_worker.server:app_factory`로 띄울 때만 붙습니다. `DATABASE_URL`이 없거나 실험 모드이거나 `gitinsight_api.main:app_factory`로 띄우면 분석 요청 API는 503입니다.
 같은 조건에서 면접 세션과 턴 기록도 메모리 대신 `interview_sessions`, `interview_turns` 테이블에 둡니다(`brain/postgres.py`의 `PostgresSessionRepository`). 서버를 다시 시작해도 면접이 이어집니다.
 리포트는 아직 메모리에만 있어서(#20), 재시작 뒤에는 세션 종료를 다시 불러 새로 만듭니다.
 세션 API가 DB에 연결하지 못하면 503을 돌려줍니다. 턴은 `turn_id`로 한 번만 처리하므로 같은 요청을 다시 보내면 됩니다.
