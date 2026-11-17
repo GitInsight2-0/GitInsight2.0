@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
 
+from gitinsight_api.analyses.source import StoredAnalysisSource
 from gitinsight_api.auth import CurrentUser, get_current_user
 from gitinsight_api.brain.protocol import Brain, SessionNotFoundError
 from gitinsight_api.report.service import ReportService
@@ -12,6 +13,11 @@ from gitinsight_api.report.service import ReportService
 
 def get_brain(request: Request) -> Brain:
     return request.app.state.brain
+
+
+def get_analyses(request: Request) -> StoredAnalysisSource | None:
+    """분석 기록 저장소입니다. 샘플 파일만 쓰는 실행(DB 없음, 실험 모드)에서는 None입니다."""
+    return request.app.state.analyses
 
 
 def get_report_service(request: Request) -> ReportService:
@@ -37,4 +43,5 @@ async def ensure_owner(
 
 BrainDep = Annotated[Brain, Depends(get_brain)]
 UserDep = Annotated[CurrentUser, Depends(get_current_user)]
+AnalysesDep = Annotated[StoredAnalysisSource | None, Depends(get_analyses)]
 ReportServiceDep = Annotated[ReportService, Depends(get_report_service)]
