@@ -108,7 +108,9 @@ def test_functions_classes_and_methods_have_exact_line_range() -> None:
 
     assert symbols == {
         "src/mod.ts::top": (SymbolKind.FUNCTION, 3, 8),
+        "src/mod.ts::top.inner": (SymbolKind.FUNCTION, 4, 6),
         "src/mod.ts::arrow": (SymbolKind.FUNCTION, 10, 13),
+        "src/mod.ts::arrow.nested": (SymbolKind.FUNCTION, 11, 11),
         "src/mod.ts::Service": (SymbolKind.CLASS, 16, 40),
         "src/mod.ts::Service.constructor": (SymbolKind.METHOD, 19, 21),
         "src/mod.ts::Service.list": (SymbolKind.METHOD, 25, 27),
@@ -125,13 +127,14 @@ def test_functions_classes_and_methods_have_exact_line_range() -> None:
 
 
 def test_ranges_cover_the_definition_text() -> None:
-    # 줄 범위의 첫 줄에는 이름이, 마지막 줄에는 닫는 괄호가 있어야 합니다.
+    # 줄 범위의 첫 줄에는 이름이, 마지막 줄에는 닫는 괄호가 있어야 합니다. 한 줄짜리 정의는 첫 줄만 봅니다.
     lines = TS_SOURCE.decode().splitlines()
     result = extract_script(TS_SOURCE, "src/mod.ts", SHA)
 
     for symbol in result.symbols:
         assert symbol.name in lines[symbol.start_line - 1], symbol.symbol_id
-        assert lines[symbol.end_line - 1].strip() in ("}", "};"), symbol.symbol_id
+        if symbol.end_line > symbol.start_line:
+            assert lines[symbol.end_line - 1].strip() in ("}", "};"), symbol.symbol_id
 
 
 def test_decorator_lines_are_not_part_of_the_range() -> None:
@@ -142,14 +145,81 @@ def test_decorator_lines_are_not_part_of_the_range() -> None:
     assert symbols["src/mod.ts::Service.list"][1] == 25
 
 
-def test_nested_definitions_are_counted_but_not_emitted() -> None:
+def test_functions_directly_inside_a_top_level_function_are_emitted() -> None:
     result = extract_script(TS_SOURCE, "src/mod.ts", SHA)
     ids = {s.symbol_id for s in result.symbols}
 
-    assert "src/mod.ts::top.inner" not in ids
-    assert "src/mod.ts::arrow.nested" not in ids
-    # 내보낸 14개와 함수 안의 inner, nested입니다.
+    assert {"src/mod.ts::top.inner", "src/mod.ts::arrow.nested"} <= ids
+    # 정의 수는 내보낸 것과 상관없이 이름 있는 정의 전체입니다.
     assert result.definition_count == 16
+    assert len(result.symbols) == 16
+
+
+COMPONENT = textwrap.dedent(
+    """    export function Profile({ id }: Props) {
+      const [name, setName] = useState("");
+
+      useEffect(() => {
+        const load = async () => {
+          const parse = (raw: string) => raw.trim();
+          setName(parse(await fetchName(id)));
+        };
+        load();
+      }, [id]);
+
+      const handleSave = async () => {
+        await save(id, name);
+      };
+
+      function reset() {
+        setName("");
+      }
+
+      class Local {
+        run() {
+          return 1;
+        }
+      }
+
+      return <button onClick={handleSave}>{name}</button>;
+    }
+
+    export class Store {
+      save() {
+        const inner = () => 1;
+        return inner();
+      }
+    }
+
+    describe("profile", () => {
+      function helper() {
+        return 1;
+      }
+    });
+    """
+).encode()
+
+
+def test_component_handlers_are_emitted_but_deeper_definitions_are_not() -> None:
+    result = extract_script(COMPONENT, "web/Profile.tsx", SHA)
+
+    assert {s.symbol_id: (s.kind, s.start_line, s.end_line) for s in result.symbols} == {
+        "web/Profile.tsx::Profile": (SymbolKind.FUNCTION, 1, 27),
+        # useEffect 콜백처럼 이름 없는 함수 안에 있어도 컴포넌트 바로 아래 이름으로 내보냅니다.
+        "web/Profile.tsx::Profile.load": (SymbolKind.FUNCTION, 5, 8),
+        "web/Profile.tsx::Profile.handleSave": (SymbolKind.FUNCTION, 12, 14),
+        "web/Profile.tsx::Profile.reset": (SymbolKind.FUNCTION, 16, 18),
+        "web/Profile.tsx::Store": (SymbolKind.CLASS, 29, 34),
+        "web/Profile.tsx::Store.save": (SymbolKind.METHOD, 30, 33),
+    }
+    # 내보내지 않은 것: load 안의 parse, 함수 안의 클래스 Local과 run, 메서드 안의 inner, 이름 없는 콜백 안의 helper
+    assert result.definition_count == 11
+
+
+def test_nested_functions_follow_their_parent_in_source_order() -> None:
+    result = extract_script(COMPONENT, "web/Profile.tsx", SHA)
+
+    assert [s.start_line for s in result.symbols] == sorted(s.start_line for s in result.symbols)
 
 
 def test_declarations_without_body_and_unnamed_code_are_skipped() -> None:

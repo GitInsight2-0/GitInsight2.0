@@ -2,8 +2,11 @@
 
 원칙은 Python(symbols.py)과 같습니다.
 - 줄은 1부터 셉니다. 데코레이터 줄은 범위에 넣지 않습니다.
-- 모듈 최상위와 클래스 안의 정의만 SymbolRef로 내보냅니다.
-  함수 안에 중첩된 정의는 내보내지 않지만 symbol_count에는 셉니다.
+- 모듈 최상위와 클래스 안의 정의를 SymbolRef로 내보냅니다.
+- 최상위 함수 바로 안의 이름 있는 함수도 내보냅니다 (`파일::바깥함수.안쪽함수`, function).
+  React 컴포넌트는 동작이 안쪽 함수(이벤트 처리, 데이터 불러오기)에 있어서, 이것이 없으면 컴포넌트 주제에
+  꼬리질문으로 가리킬 관련 심볼이 하나도 없습니다. `useEffect(() => { ... })` 같은 이름 없는 콜백 안의 함수도 포함합니다.
+- 그보다 깊이 중첩된 정의, 메서드 안의 정의, 함수 안의 클래스는 내보내지 않지만 symbol_count에는 셉니다.
 
 정의로 보는 것은 아래와 같습니다. SymbolKind는 Python과 같은 세 가지만 씁니다.
 - 함수 선언(`function f() {}`, 제너레이터 포함) → function
@@ -136,7 +139,8 @@ def _walk(root: Node) -> Iterator[tuple[Node, tuple[str, ...], Container, bool]]
         if found is not None:
             name, is_class, value = found
             inner_scope = (*scope, name)
-            inner_container = "class" if is_class else "function"
+            # 함수 안의 클래스는 내보내지 않으므로 그 메서드도 중첩 정의로 봅니다.
+            inner_container = "class" if is_class and container != "function" else "function"
             if is_class and value is not None:
                 named_classes.add(value.id)
             yield node, inner_scope, container, is_class
@@ -163,11 +167,15 @@ def extract_script(source: bytes, path: str, commit_sha: str) -> ExtractedFile:
     tree = Parser(language).parse(source)
     symbols: list[SymbolRef] = []
     seen: set[str] = set()
+    # 내보낸 최상위 함수 이름입니다. 이 함수 바로 안의 함수만 중첩 정의 중에서 내보냅니다.
+    top_functions: set[str] = set()
     count = 0
     for node, qualified, container, is_class in _walk(tree.root_node):
         count += 1
         if container == "function":
-            continue
+            inside_top_function = len(qualified) == 2 and qualified[0] in top_functions
+            if is_class or not inside_top_function:
+                continue
         symbol_id = f"{path}::{'.'.join(qualified)}"
         name = qualified[-1]
         if len(symbol_id) > MAX_SYMBOL_ID_LENGTH or len(name) > MAX_SYMBOL_ID_LENGTH:
@@ -182,6 +190,8 @@ def extract_script(source: bytes, path: str, commit_sha: str) -> ExtractedFile:
             kind = SymbolKind.METHOD
         else:
             kind = SymbolKind.FUNCTION
+            if container == "module":
+                top_functions.add(name)
         _, end = line_range(node)
         start = _start_line(node)
         symbols.append(

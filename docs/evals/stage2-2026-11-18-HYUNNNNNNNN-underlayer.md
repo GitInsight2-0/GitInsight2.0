@@ -5,99 +5,98 @@
 - 주제 수: 6
 - 기여 라벨: unverified 6개
 - LLM 호출: 6회 (검증 실패 재요청 포함), 이 중 스키마 재시도 0회
-- 비용: $0.0324
-- 호출당 최대 지연: 20787 ms
+- 비용: $0.0340
+- 호출당 최대 지연: 9798 ms
 
 사람이 확인할 것: 기대 포인트가 코드에 실제로 있는가, 질문이 존댓말 한 문장이고 자연스러운가,
 힌트가 답을 알려 주지 않는가, 관련 심볼이 꼬리질문과 맞는가.
 
 ## MyProfile 컴포넌트 동작 (`app/components/MyProfile.tsx::MyProfile`, 난이도 1, 기여 unverified)
 
-- 요약: 세션 정보를 바탕으로 사용자의 프로필과 레이어 통계를 불러와 화면에 렌더링합니다. 닉네임 수정 및 프로필 이미지 업로드 요청을 각각 백엔드 API에 전달해 업데이트합니다. 레이어 개수에 따라 완성도 단계와 시각 효과를 계산해 표시합니다.
+- 요약: 세션 정보를 바탕으로 사용자의 프로필 정보와 레이어 작성 통계를 서버에서 가져와 렌더링합니다. 닉네임 수정 및 프로필 이미지 업로드 요청을 서버 API로 전송하고 로컬 상태에 반영합니다. 레이어 개수에 따라 완성도 시각화 지표와 선호 카테고리를 계산하여 화면에 표시합니다.
 - 질문: MyProfile 컴포넌트가 마운트될 때 어떤 순서로 데이터를 불러오나요?
-- 취지: 사용자 세션이 확인된 후 프로필과 통계 데이터를 어떤 흐름으로 요청하고 상태에 반영하는지 묻는 질문입니다.
-- 힌트: 컴포넌트 상단의 useEffect 훅과 그 안에서 호출하는 두 비동기 함수를 살펴보세요.
-- 관련 심볼: 없음
+- 취지: 컴포넌트가 처음 렌더링될 때 프로필과 통계 데이터를 조회하는 흐름을 알고 있는지 묻는 질문입니다.
+- 힌트: 컴포넌트 내부의 useEffect 훅과 그 안에서 호출하는 비동기 함수들을 확인해 보세요.
+- 관련 심볼: app/components/MyProfile.tsx::MyProfile.fetchProfile, app/components/MyProfile.tsx::MyProfile.fetchMyStats, app/components/MyProfile.tsx::MyProfile.handleImageUpload, app/components/MyProfile.tsx::MyProfile.handleSave
 - 기대 포인트:
-  - useEffect에서 세션의 email 존재 여부를 확인한 뒤 fetchProfile과 fetchMyStats를 호출한다. → 데이터 요청을 시작하기 전에 어떤 조건을 먼저 확인하나요?
-  - fetchProfile을 통해 서버에서 가져온 닉네임과 이미지를 상태에 반영하고, 없으면 세션 정보로 대체한다. → 서버 응답 데이터와 기존 세션 데이터 간에 우선순위를 어떻게 처리하나요?
-  - fetchMyStats에서 전체 레이어 목록을 받아와 현재 세션 사용자의 이메일과 일치하는 것만 필터링해 저장한다. → 사용자의 레이어 통계 데이터는 어떤 방식으로 필터링하여 상태에 담나요?
+  - useEffect에서 세션의 사용자 이메일 존재 여부를 확인한 뒤 fetchProfile과 fetchMyStats를 호출한다. → 세션 정보를 확인한 뒤 어떤 함수들을 실행하나요?
+  - fetchProfile은 사용자 이메일 쿼리로 프로필 API를 호출하여 닉네임과 이미지를 상태에 설정한다. → fetchProfile에서는 어떤 API를 호출하고 응답을 어떻게 처리하나요?
+  - fetchMyStats는 전체 레이어 목록을 조회한 후 현재 사용자 이메일과 일치하는 항목만 필터링하여 myLayers에 저장한다. → fetchMyStats에서 가져온 전체 레이어 중 내 레이어는 어떻게 추려내나요?
 - 꼬리질문:
-  - handleImageUpload 함수는 선택된 이미지 파일을 어떤 방식으로 변환하여 서버에 전달하나요? (-)
-  - fetchMyStats에서 전체 레이어를 가져온 뒤 클라이언트에서 필터링하는 방식의 장단점은 무엇인가요? (-)
+  - handleImageUpload 함수에서는 선택된 이미지 파일을 어떤 절차로 서버에 전달하나요? (app/components/MyProfile.tsx::MyProfile.handleImageUpload)
+  - handleSave 함수에서 닉네임을 변경할 때 유효성 검사와 요청 처리는 어떻게 진행되나요? (app/components/MyProfile.tsx::MyProfile.handleSave)
 
 ## 클라이언트 사이드 데이터 필터링 설계 (`app/components/MyCanvas.tsx::MyCanvas`, 난이도 2, 기여 unverified)
 
-- 요약: MyCanvas 컴포넌트는 사용자의 레이어 목록을 조회하여 화면에 표시하고 삭제, 리스펙, 이미지 내보내기 기능을 제공합니다. useEffect 내부에서 전체 레이어 목록을 가져온 뒤 로그인한 사용자의 이메일과 일치하는 레이어만 클라이언트 측에서 필터링하고 정렬합니다. 또한 html-to-image 라이브러리의 toPng를 활용해 특정 DOM 영역을 캡처하여 다운로드할 수 있도록 처리합니다.
-- 질문: 전체 레이어를 가져와 클라이언트에서 필터링하도록 설계하신 이유가 무엇인가요?
-- 취지: 서버 API에서 특정 사용자의 데이터만 조회하지 않고 브라우저에서 직접 걸러내도록 구현한 의도와 그로 인한 영향을 묻습니다.
-- 힌트: useEffect 안에서 fetchMyLayers 함수가 데이터를 조회하고 가공하는 부분을 살펴보세요.
-- 관련 심볼: 없음
+- 요약: MyCanvas 컴포넌트는 사용자의 레이어 목록을 조회하여 화면에 표시하고 통계와 시각 효과를 계산합니다. 또한 레이어 삭제, 공감 수 증가, 캔버스 영역의 이미지 캡처 및 다운로드 기능을 제공합니다. 데이터 조회 시 전체 레이어를 불러온 뒤 클라이언트에서 이메일 기준으로 필터링과 정렬을 수행합니다.
+- 질문: 사용자의 레이어 목록을 클라이언트에서 필터링하도록 구현하신 이유가 궁금합니다.
+- 취지: 서버 API에서 특정 사용자의 데이터만 조회하지 않고 전체를 받아와 브라우저에서 걸러내도록 만든 배경과 장단점을 묻는 질문입니다.
+- 힌트: useEffect 안에서 실행되는 fetchMyLayers 함수 내부의 API 요청과 응답 처리 방식을 살펴보세요.
+- 관련 심볼: app/components/MyCanvas.tsx::MyCanvas.fetchMyLayers, app/components/MyCanvas.tsx::MyCanvas.handleExportImage, app/components/MyCanvas.tsx::MyCanvas.handleDelete
 - 기대 포인트:
-  - fetchMyLayers에서 /api/layers로 모든 데이터를 받은 뒤 session.user.email로 필터링하고 정렬하는 구조임을 말한다. → 현재 레이어 데이터를 불러와서 화면에 담기까지 어떤 과정을 거치나요?
-  - 데이터가 많아질 경우 불필요한 네트워크 트래픽 증가와 클라이언트 연산 부하가 발생할 수 있음을 인식한다. → 전체 데이터를 가져와서 브라우저가 직접 거르면 성능이나 트래픽 관점에서 어떤 문제가 생길 수 있을까요?
-  - 서버 API에 쿼리 파라미터를 넘기거나 세션을 확인해 사용자별 데이터를 직접 반환하는 백엔드 필터링 방식과 비교하여 개선 방안을 제시한다. → 클라이언트에서 거르는 대신 서버나 API 차원에서 처리한다면 어떻게 개선할 수 있을까요?
+  - 전체 목록을 조회한 뒤 클라이언트에서 filter로 거르면 데이터 양이 많아질수록 네트워크 낭비와 렌더링 성능 저하가 발생할 수 있음을 인식한다. → 전체 목록을 받아와서 브라우저에서 걸러내면 데이터가 늘어났을 때 어떤 문제가 생길 수 있을까요?
+  - 서버 API 경로에 쿼리 파라미터를 추가하거나 세션 기반으로 서버에서 직접 필터링하여 반환하는 방식과의 차이점을 설명한다. → 이 데이터를 서버 API에서 직접 필터링해서 전달받는 방식과 비교하면 어떤 차이가 있을까요?
+  - 보안 관점에서 다른 사용자의 레이어 정보가 브라우저에 그대로 노출될 수 있다는 점을 파악하고 있다. → 네트워크 응답으로 전체 데이터를 받아오는 것이 보안 측면에서는 어떤 영향을 줄 수 있나요?
 - 꼬리질문:
-  - 클라이언트 필터링 방식을 쓸 때 다른 사용자의 레이어 정보가 노출되는 보안 문제는 없을까요? (-)
-  - 화면을 이미지로 캡처할 때 toPng를 선택하고 배경색이나 픽셀 비율을 직접 지정하신 이유가 무엇인가요? (-)
+  - handleExportImage에서 외부 라이브러리를 사용해 DOM을 캡처할 때 고려하셨던 제약 사항이 있나요? (app/components/MyCanvas.tsx::MyCanvas.handleExportImage)
+  - handleDelete에서 삭제 성공 시 상태를 직접 변경하는데 SWR이나 React Query 같은 도구 대신 이 방식을 택하신 이유가 있나요? (app/components/MyCanvas.tsx::MyCanvas.handleDelete)
 
-## 피드 로드 및 상태 동기화 예외 처리 (`app/components/StudioFeed.tsx::StudioFeed`, 난이도 3, 기여 unverified)
+## 피드 로드 및 상태 동기화 (`app/components/StudioFeed.tsx::StudioFeed`, 난이도 3, 기여 unverified)
 
-- 요약: 서버 API에서 레이어 목록을 불러와 필터링 및 정렬하여 화면에 렌더링하는 컴포넌트입니다. 사용자의 리스펙 요청을 PATCH API로 전송하고 로컬 상태에 즉각 반영합니다. 또한 각 작성자별 작성 수를 계산하여 작성자 등급 스타일을 계산해 보여줍니다.
-- 질문: 피드 로드나 리스펙 요청 API 호출이 실패했을 때 사용자 화면 처리는 어떻게 설계하셨나요?
-- 취지: 네트워크 오류나 비정상 응답이 발생했을 때 컴포넌트가 어떻게 반응하고 사용자에게 안내하는지 묻는 질문입니다.
-- 힌트: fetchLayers 함수의 try-catch 블록과 handleRespect 함수의 응답 처리 부분을 확인해 보세요.
-- 관련 심볼: 없음
+- 요약: StudioFeed 컴포넌트는 레이어 목록을 API로부터 가져와 필터링 및 정렬하여 렌더링합니다. 사용자는 레이어에 리스펙을 보낼 수 있으며 상태를 갱신합니다. 작성자별 게시글 수에 따라 단계별 스타일을 계산하여 시각적 배지를 제공합니다.
+- 질문: 피드 로드나 리스펙 요청이 실패하면 화면에서 어떻게 처리되나요?
+- 취지: 네트워크 통신 중 에러가 발생했을 때 사용자 경험과 상태 관리를 어떻게 다루고 있는지 묻는 질문입니다.
+- 힌트: useEffect 내부의 fetchLayers와 handleRespect 함수의 try-catch 블록 및 응답 확인 부분을 확인해보세요.
+- 관련 심볼: app/components/StudioFeed.tsx::StudioFeed.fetchLayers, app/components/StudioFeed.tsx::StudioFeed.handleRespect
 - 기대 포인트:
-  - fetchLayers에서 HTTP 응답 코드가 ok가 아닐 때 별도 에러 처리나 사용자 안내 없이 isLoading만 false가 되어 빈 화면처럼 보일 수 있음을 설명한다. → 서버 응답 상태 코드가 400이나 500대일 경우 화면에는 어떻게 표시되나요?
-  - handleRespect 실행 중 네트워크 예외는 catch 블록의 토스트로 안내하지만 응답이 ok가 아닌 경우에는 별도 실패 처리가 누락되어 있음을 짚는다. → 리스펙 요청 시 서버 응답의 ok가 false라면 어떤 동작이 일어나나요?
-  - 동시에 여러 번 클릭하거나 빠른 속도로 리스펙을 요청할 때 발생할 수 있는 중복 요청 방지나 낙관적 업데이트 롤백 방안을 제시한다. → 사용자가 버튼을 연속으로 여러 번 클릭하면 어떤 문제가 생길 수 있나요?
+  - fetchLayers에서 요청이 실패하거나 response.ok가 아닐 때 사용자에게 별도 에러 알림 없이 빈 목록과 로딩 해제 상태만 유지되는 점을 설명한다. → 초기 데이터를 불러오는 과정에서 오류가 나면 사용자는 어떤 화면을 보게 되나요?
+  - handleRespect에서 PATCH 요청 성공 응답(response.ok)을 받은 뒤에만 낙관적이지 않게 로컬 상태를 갱신하고 에러 시 토스트 메시지를 띄우는 점을 말한다. → 리스펙 요청 시 서버 응답 상태에 따라 화면 데이터는 구체적으로 어떻게 갱신되나요?
+  - handleRespect 실패 시 낙관적 갱신을 되돌릴 필요는 없으나, 네트워크 지연 상황에서 여러 번 클릭했을 때의 중복 요청 제어가 없다는 점을 짚는다. → 사용자가 버튼을 연속으로 빠르게 눌렀을 때 요청 처리가 어떻게 동작할까요?
 - 꼬리질문:
-  - 데이터를 불러오는 중 오류가 발생했을 때 재시도할 수 있는 UI는 어떻게 구성할 수 있을까요? (-)
-  - 레이어 데이터 양이 많아질 경우 전체를 한 번에 불러와 클라이언트에서 필터링하는 방식의 성능 한계는 어떻게 개선할 수 있나요? (-)
+  - handleRespect에서 상태를 갱신할 때 서버의 최신 데이터를 다시 동기화하지 않고 직접 1을 더하는데, 이 방식의 한계는 무엇인가요? (app/components/StudioFeed.tsx::StudioFeed.handleRespect)
+  - fetchLayers 실행 시 response.ok가 false인 경우 catch 블록으로 가지 않는데, 이 상황은 어떻게 처리되나요? (app/components/StudioFeed.tsx::StudioFeed.fetchLayers)
 
-## LayerDetailModal 데이터 페칭 흐름 (`app/components/LayerDetailModal.tsx::LayerDetailModal`, 난이도 1, 기여 unverified)
+## LayerDetailModal 데이터 흐름 (`app/components/LayerDetailModal.tsx::LayerDetailModal`, 난이도 1, 기여 unverified)
 
-- 요약: LayerDetailModal 컴포넌트는 전달받은 레이어 카드의 상세 정보와 댓글을 표시하는 모달입니다. 현재 보고 있는 레이어가 변경될 때마다 댓글 목록을 불러오고, 최종 성공 카테고리인 경우 연결된 실패 카드 목록을 함께 조회하여 화면을 갱신합니다. 또한 관리자 이메일 일치 여부에 따라 삭제 기능을 제공하며 댓글 등록도 수행합니다.
-- 질문: LayerDetailModal에서 레이어가 바뀔 때 데이터를 불러오는 전체적인 순서를 설명해 주시겠어요?
-- 취지: 모달 안에서 카드를 바꿨을 때 어떤 순서와 조건으로 댓글이나 연결된 데이터들을 서버에서 가져오는지 묻는 것입니다.
-- 힌트: 컴포넌트 상단의 currentLayer를 의존성으로 갖는 useEffect 블록 안의 fetchData 함수 동작 순서를 살펴보세요.
-- 관련 심볼: 없음
+- 요약: LayerDetailModal은 선택한 레이어의 상세 정보, 연결된 실패 기록, 댓글을 보여주는 컴포넌트입니다. 현재 선택된 레이어 상태에 따라 댓글과 연관된 레이어 목록을 불러옵니다. 댓글 작성 및 관리자 계정에 대한 삭제 기능도 처리합니다.
+- 질문: LayerDetailModal에서 레이어가 변경될 때 데이터를 어떤 순서로 불러오나요?
+- 취지: 모달이 열리거나 다른 레이어로 전환될 때 필요한 데이터들을 어떻게 조회하고 상태를 갱신하는지 묻는 질문입니다.
+- 힌트: 컴포넌트 상단의 useEffect 훅들과 그 내부의 fetchData 함수 구현부를 살펴보세요.
+- 관련 심볼: app/components/LayerDetailModal.tsx::LayerDetailModal.fetchData, app/components/LayerDetailModal.tsx::LayerDetailModal.handleCommentSubmit, app/components/LayerDetailModal.tsx::LayerDetailModal.handleAdminDelete
 - 기대 포인트:
-  - currentLayer 상태가 변경될 때 useEffect 내부에서 setIsLoadingComments를 참으로 설정하고 비동기 데이터 조회를 시작함을 설명한다. → currentLayer가 바뀐 직후 로딩 상태와 관련해서는 어떤 처리가 먼저 진행되나요?
-  - 현재 레이어의 id를 사용해 해당 레이어의 댓글 목록 엔드포인트(/api/layers/[id]/comments)로 요청을 보내 응답을 상태에 반영함을 설명한다. → 댓글 데이터는 어떤 경로와 식별자를 사용해서 서버에 요청하나요?
-  - 카테고리가 '🌟 최종 성공 (Masterpiece)'이고 linkedLayerIds가 존재할 때, 전체 레이어를 가져온 뒤 파싱한 id 목록과 일치하는 카드들을 필터링해 linkedLayers에 저장함을 설명한다. → 연결된 실패 카드 목록은 어떤 조건에서 어떤 방식으로 추출하여 상태에 담나요?
-  - 조회가 끝나거나 오류가 발생했을 때 finally 블록에서 setIsLoadingComments를 거짓으로 변경해 로딩을 종료함을 설명한다. → 데이터 요청이 성공하거나 실패했을 때 로딩 상태는 최종적으로 어떻게 정리되나요?
+  - currentLayer가 변경될 때 fetchData가 실행되어 댓글 조회와 연관 레이어 조회가 순서대로 진행된다고 설명한다. → currentLayer 상태가 바뀔 때 어떤 부수 효과가 실행되어 데이터를 가져오나요?
+  - 카테고리가 '🌟 최종 성공 (Masterpiece)'이고 linkedLayerIds가 존재할 때만 전체 레이어 목록에서 연결된 실패 카드들을 필터링해 가져온다고 설명한다. → 연결된 실패 기록들은 어떤 조건에서 어떻게 가져오나요?
+  - props로 전달받은 initialLayer가 달라지면 currentLayer를 initialLayer로 동기화한다고 설명한다. → 모달 외부에서 initialLayer가 바뀌면 currentLayer는 어떻게 반영되나요?
 - 꼬리질문:
-  - 연결된 실패 카드를 가져올 때 전체 레이어 목록을 조회하여 클라이언트에서 필터링하는 방식을 선택하신 이유가 있나요? (-)
-  - initialLayer prop이 변경될 때와 모달 내부에서 currentLayer가 직접 변경될 때 각각 어떤 동작이 일어나나요? (-)
+  - fetchData 안에서 연관 레이어를 가져올 때 전체 레이어 API를 호출하는데, 다른 방법도 고려해보셨나요? (app/components/LayerDetailModal.tsx::LayerDetailModal.fetchData)
+  - handleCommentSubmit 완료 후 댓글 목록을 다시 불러오는 과정은 어떻게 동작하나요? (app/components/LayerDetailModal.tsx::LayerDetailModal.handleCommentSubmit)
 
-## QuickSketch 폼 상태 및 연계 데이터 설계 (`app/components/QuickSketch.tsx::QuickSketch`, 난이도 2, 기여 unverified)
+## QuickSketch 폼 설계 (`app/components/QuickSketch.tsx::QuickSketch`, 난이도 2, 기여 unverified)
 
-- 요약: QuickSketch 컴포넌트는 새로운 실패 기록이나 최종 성공 기록을 작성해 서버로 전송하는 폼을 제공합니다. 최종 성공 카테고리를 선택하면 과거 기록을 조회하여 이전 실패들을 선택하고, 선택된 실패 식별자 목록과 요약 텍스트를 함께 전송하도록 구성되어 있습니다. 이미지 업로드 시 FileReader를 이용해 Data URL 형태로 변환하여 상태에 저장합니다.
-- 질문: 성공 모드에서 과거 실패를 연계할 때 상태와 텍스트를 함께 다루도록 설계하신 이유는 무엇인가요?
-- 취지: 실패 ID 배열 상태와 action 입력창 텍스트를 동시에 갱신하는 방식을 선택한 의도나 장단점을 묻습니다.
-- 힌트: handleCheckboxToggle 함수와 handleSubmit 함수에서 실패 데이터를 다루는 부분을 살펴보세요.
-- 관련 심볼: 없음
+- 요약: QuickSketch 컴포넌트는 사용자의 상황, 행동, 교훈 및 이미지 입력을 받아 새 기록을 생성하는 폼입니다. 최종 성공 카테고리를 선택하면 과거 실패 기록 목록을 불러와 체크박스로 선택할 수 있게 합니다. 선택된 과거 실패 기록의 내용과 식별자를 폼 데이터와 함께 서버로 전송합니다.
+- 질문: 성공 모드에서 과거 실패 기록을 불러오고 연동하는 방식을 어떻게 설계하셨나요?
+- 취지: 특정 카테고리를 선택했을 때 이전 데이터를 조회하고 새 데이터와 엮는 흐름의 의도를 묻는 질문입니다.
+- 힌트: formData.category의 값에 따른 useEffect 동작과 handleCheckboxToggle 함수를 살펴보세요.
+- 관련 심볼: app/components/QuickSketch.tsx::QuickSketch.handleCheckboxToggle, app/components/QuickSketch.tsx::QuickSketch.handleSubmit
 - 기대 포인트:
-  - handleCheckboxToggle에서 선택된 실패 ID들을 selectedFailureIds 상태로 관리함과 동시에 formData의 action 텍스트에도 자동 반영되도록 설계한 배경을 설명한다. → 체크박스를 토글할 때 ID 상태뿐 아니라 action 텍스트 필드까지 직접 수정하도록 구현하신 이유가 무엇인가요?
-  - 서버로 데이터를 보낼 때 linkedLayerIds 필드에 ID 배열을 JSON 문자열로 직렬화하여 전달하는 데이터 구조 설계 의도를 말한다. → 서버 요청 본문에서 linkedLayerIds를 JSON 문자열로 직렬화하여 넘기도록 작성한 이유는 무엇인가요?
-  - 사용자가 action 필드를 수동으로 편집했을 때 체크박스 선택 변경 시 기존 입력 내용이 덮어씌워질 수 있는 한계점과 이를 어떻게 개선할 수 있는지 설명한다. → 사용자가 action 내용을 임의로 수정한 뒤 다른 실패 항목을 체크하면 입력값이 어떻게 처리되나요?
+  - formData의 category 상태가 변경될 때 useEffect를 통해 과거 기록을 비동기 조회하여 pastFailures에 저장하는 구조를 설명한다. → 특정 카테고리일 때만 과거 기록을 가져오도록 처리한 과정을 설명해 주실 수 있을까요?
+  - handleCheckboxToggle을 통해 선택된 실패 기록들의 정보를 텍스트 필드(action)에 서식화하여 주입하고 식별자 목록을 관리하는 방식을 설명한다. → 체크박스를 선택했을 때 텍스트 영역에 내용이 자동으로 채워지는 동작은 어떻게 구현하셨나요?
+  - handleSubmit에서 선택된 ID 목록을 문자열로 직렬화하여 API 요청 본문에 담아 전송하는 설계를 설명한다. → 선택된 실패 기록 정보가 폼 제출 시 백엔드로 어떤 형태로 전달되나요?
 - 꼬리질문:
-  - 이미지 파일을 Data URL로 읽어 폼 데이터에 담아 보낼 때 발생할 수 있는 부하 문제는 어떻게 고려하셨나요? (-)
-  - 전체 실패 목록을 클라이언트에서 필터링하는 대신 API 단에서 필터링하도록 설계하지 않은 이유가 있나요? (-)
+  - handleCheckboxToggle에서 텍스트를 덮어쓰면 사용자가 직접 입력한 내용이 유실될 수 있는데, 이를 어떻게 고려하셨나요? (app/components/QuickSketch.tsx::QuickSketch.handleCheckboxToggle)
+  - 전체 목록을 조회한 뒤 클라이언트에서 필터링하는 방식 대신 백엔드 쿼리를 활용하는 방법은 고민해 보셨나요? (-)
 
-## 데이터 페칭 및 상태 동기화 (`app/components/UserCanvas.tsx::UserCanvas`, 난이도 3, 기여 unverified)
+## UserCanvas 데이터 처리와 예외 (`app/components/UserCanvas.tsx::UserCanvas`, 난이도 3, 기여 unverified)
 
-- 요약: UserCanvas 컴포넌트는 email 속성을 받아 관련 레이어 목록을 조회하고 시간순으로 정렬해 타임라인 형태로 표시합니다. 카드 클릭 시 상세 모달을 띄우며, 모달 안에서 리스펙을 누르면 로컬 상태를 변경하고 토스트 메시지를 표시합니다.
-- 질문: 네트워크 실패 시 화면 처리와 handleRespect의 서버 반영 여부를 말씀해 주세요.
-- 취지: 데이터를 불러오거나 리스펙을 보낼 때 실패했을 때의 동작과 상태 동기화 처리 방식을 확인하려는 질문입니다.
-- 힌트: fetchUserLayers 함수의 catch 블록과 handleRespect 함수에서 상태를 갱신하는 부분을 살펴보세요.
-- 관련 심볼: 없음
+- 요약: UserCanvas는 특정 사용자의 레이어 목록을 불러와 시간순으로 정렬해 타임라인 형태로 보여주는 컴포넌트입니다. 사용자가 카드를 클릭하면 상세 모달을 띄우고 모달 내 리스펙 클릭 시 화면 상태를 갱신합니다.
+- 질문: 네트워크 요청 실패나 데이터 누락 시 화면 처리가 어떻게 설계되어 있나요?
+- 취지: 요청이 실패하거나 예상치 못한 데이터 상황에서 컴포넌트가 어떻게 반응하는지 확인하려는 질문입니다.
+- 힌트: useEffect 내부의 데이터 호출 로직과 상태 업데이트 흐름을 확인해 보세요.
+- 관련 심볼: app/components/UserCanvas.tsx::UserCanvas.fetchUserLayers, app/components/UserCanvas.tsx::UserCanvas.handleRespect
 - 기대 포인트:
-  - fetchUserLayers에서 네트워크 요청 실패 시 console.error만 실행되고 에러 안내 화면 대신 빈 목록이나 기본 안내만 노출되는 점을 말한다. → 데이터 요청 중에 네트워크 에러가 발생하면 사용자는 화면에서 어떤 결과를 보게 되나요?
-  - handleRespect 함수가 서버 API 호출 없이 리액트 상태만 갱신하여 새로고침 시 변경 사항이 유지되지 않는 점을 설명한다. → 리스펙 버튼을 눌렀을 때 변경된 카운트가 영구적으로 보존되는지 설명해 주실 수 있나요?
-  - 모달 상태인 selectedLayer와 전체 목록인 layers에 각각 상태를 수동으로 반영하고 있는 구조를 설명한다. → 모달과 목록 양쪽의 숫자를 맞추기 위해 상태를 어떻게 동기화하고 있나요?
+  - fetchUserLayers에서 오류 발생 시 콘솔 로그만 남기고 에러 화면 표시 없이 로딩만 해제되는 점을 짚는다. → 네트워크 통신 중 예외가 발생하면 사용자 화면에는 어떤 모습으로 나타나나요?
+  - handleRespect 함수가 서버 API 요청 없이 로컬 상태만 갱신하여 새로고침 시 변경 사항이 사라지는 구조임을 인지한다. → 리스펙을 보냈을 때 서버와의 동기화는 어떻게 처리되고 있나요?
+  - 전체 레이어 목록을 가져와 클라이언트에서 이메일로 필터링하는 방식의 대용량 데이터 부하 문제를 설명한다. → 전체 레이어 데이터양이 매우 많아질 때 발생할 수 있는 병목은 무엇인가요?
 - 꼬리질문:
-  - API 요청이 실패했을 때 사용자에게 에러 상태를 시각적으로 알리려면 어떤 상태와 UI 처리가 필요한가요? (-)
-  - handleRespect에 백엔드 통신을 추가한다면 낙관적 업데이트 실패 시 롤백은 어떻게 구현할 수 있나요? (-)
+  - fetchUserLayers 함수에서 응답 상태가 정상이 아닐 때 로딩이 끝나면 어떤 화면이 표시되나요? (app/components/UserCanvas.tsx::UserCanvas.fetchUserLayers)
+  - handleRespect 함수는 서버 통신 실패에 대한 롤백 로직이 없는데 어떤 한계가 있나요? (app/components/UserCanvas.tsx::UserCanvas.handleRespect)

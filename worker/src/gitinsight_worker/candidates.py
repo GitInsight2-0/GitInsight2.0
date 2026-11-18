@@ -188,7 +188,7 @@ def select_candidates(symbols: list[SymbolRef], label_of: LabelOf = _unverified)
 
 
 def _related(main: SymbolRef, symbols: list[SymbolRef]) -> tuple[SymbolRef, ...]:
-    # 주 심볼 안의 메서드(클래스 주제)와 같은 파일의 다른 함수가 꼬리질문 하이라이트 대상입니다.
+    # 주 심볼 안의 메서드(클래스 주제)나 안쪽 함수(TS/JS 함수 주제)와 같은 파일의 다른 함수가 꼬리질문 하이라이트 대상입니다.
     same_file = [s for s in symbols if s.path == main.path and s.symbol_id != main.symbol_id]
     inside = [s for s in same_file if overlaps(s, main)]
     outside = [s for s in same_file if not overlaps(s, main)]
