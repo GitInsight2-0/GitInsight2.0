@@ -32,7 +32,7 @@
    4. 아래 "환경 변수" 표의 Vercel 변수를 넣고 배포합니다
 4. **Railway `WEB_ORIGIN`**: Vercel 주소(`https://<프로젝트>.vercel.app`)를 넣고 재배포합니다
 5. **GitHub App Callback URL**: App 주인(B)이 `https://<Vercel 주소>/api/auth/github/callback`을 추가합니다. 로컬 주소는 지우지 않습니다
-6. **데모 스냅샷**: `docs/runbook-demo.md`대로 `scripts/seed_demo_analysis.py --user-id <id>`를 Railway Postgres 주소(Postgres → Connect → Public URL)로 실행합니다
+6. **시연용 레포 미리 분석**: 시연 계정으로 로그인해 시연에 쓸 레포를 한 번 분석해 둡니다 (`docs/runbook-demo.md`). 배포 DB에는 데모 분석 스냅샷을 넣지 않습니다 (#19)
 7. **확인**: 아래 "배포 확인"
 
 이후 배포는 `main`에 머지하면 Railway와 Vercel이 각자 자동으로 합니다.
@@ -84,9 +84,8 @@
 1. `curl https://<Railway API 주소>/api/health` → `{"status":"ok"}`
 2. `curl -i https://<Vercel 주소>/api/me` → 401 (웹이 서버로 넘기고 있음)
 3. 브라우저로 Vercel 주소 → GitHub 로그인 → 첫 화면에 사용자 이름
-4. 데모 레포로 텍스트 면접 몇 턴 → 끝내기 → 리포트
+4. 레포 목록에서 Python 레포를 골라 분석 → 텍스트 면접 몇 턴 → 끝내기 → 리포트
 5. Railway 로그 첫 줄들에 오류가 없고, 토큰·code·키가 찍히지 않음
-6. 시간이 있으면 `uv run python scripts/demo_check.py --real-llm --from-db --user-id <id>` (DB 주소는 Railway Public URL)
 
 ## 롤백
 
