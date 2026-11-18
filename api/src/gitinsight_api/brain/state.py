@@ -51,6 +51,9 @@ class SessionState(BaseModel):
     last_highlight: SymbolRef | None
     persona_keywords: list[str] = Field(default_factory=list)
     plan_source: str = "rules"
+    # 같은 레포로 다시 보는 면접에서 먼저 묻는 주제입니다 (#107). 주제를 시작하는 문장을 고르는 데만 씁니다.
+    revisit_stuck: list[str] = Field(default_factory=list)
+    revisit_changed: list[str] = Field(default_factory=list)
     turn_count: int = 0
     closed: bool = False
 

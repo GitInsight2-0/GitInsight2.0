@@ -39,12 +39,21 @@ _NEXT_INTRO = {
 }
 
 
-# 같은 레포로 다시 보는 면접의 첫 주제입니다 (#107). 지난 리포트의 코드 지도가 근거입니다.
+# 같은 레포로 다시 보는 면접에서 먼저 묻는 주제입니다 (#107). 지난 리포트의 코드 지도가 근거입니다.
 FIRST_INTRO_STUCK = "안녕하세요, 지난 면접에서 설명하지 못했던 코드부터 다시 여쭤보겠습니다."
 FIRST_INTRO_CHANGED = "안녕하세요, 지난 면접 뒤에 커밋이 들어온 코드부터 여쭤보겠습니다."
+NEXT_INTRO_STUCK = "다음도 지난 면접에서 설명하지 못했던 코드입니다."
+NEXT_INTRO_CHANGED = "다음은 지난 면접 뒤에 커밋이 들어온 코드입니다."
 
 
-def topic_intro(label: ContributionLabel, *, first: bool) -> str:
+def topic_intro(
+    label: ContributionLabel, *, first: bool, stuck: bool = False, changed: bool = False
+) -> str:
+    """주제를 시작하는 한 문장입니다. 다시 묻는 주제(stuck, changed)이면 그 까닭을 먼저 말합니다."""
+    if stuck:
+        return FIRST_INTRO_STUCK if first else NEXT_INTRO_STUCK
+    if changed:
+        return FIRST_INTRO_CHANGED if first else NEXT_INTRO_CHANGED
     return (_FIRST_INTRO if first else _NEXT_INTRO)[label]
 
 

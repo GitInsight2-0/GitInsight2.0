@@ -7,7 +7,11 @@ from gitinsight_api.brain.judge import JUDGE_PURPOSE
 from gitinsight_api.brain.planner import RevisitTargets, revisit_first
 from gitinsight_api.brain.repository import InMemorySessionRepository
 from gitinsight_api.brain.service import InterviewBrain
-from gitinsight_api.brain.utterance import FIRST_INTRO_CHANGED, FIRST_INTRO_STUCK
+from gitinsight_api.brain.utterance import (
+    FIRST_INTRO_CHANGED,
+    FIRST_INTRO_STUCK,
+    NEXT_INTRO_CHANGED,
+)
 from gitinsight_api.llm.fake import FakeLLM, FakeStep
 from gitinsight_api.report.builder import ReportBuilder
 from gitinsight_api.report.code_map import ReportHistory, changed_symbol_ids
@@ -276,6 +280,20 @@ async def test_next_interview_asks_stuck_then_changed_functions() -> None:
     state = await server.brain.repository.get(session_id)
     assert state is not None
     assert state.topic_order[:3] == [SECOND.topic_id, changed.topic_id, FIRST.topic_id]
+    # 다음 주제로 넘어갈 때도 다시 묻는 까닭을 말합니다. 모르겠다고 두 번 답하면 다음 주제입니다.
+    replies = []
+    for _ in range(4):
+        server.llm.push(JUDGE_PURPOSE, FakeStep(value=DONT_KNOW))
+        replies.append(
+            await server.brain.handle_turn(
+                session_id,
+                TurnRequest(turn_id=uuid4(), transcript="모르겠습니다.", source=TurnSource.TEXT),
+            )
+        )
+    assert replies[1].utterance == f"{NEXT_INTRO_CHANGED} {changed.base_question}"
+    # 다시 묻는 주제가 끝나면 원래 문장으로 돌아갑니다.
+    assert replies[3].topic_id == FIRST.topic_id
+    assert "지난 면접" not in replies[3].utterance
 
 
 async def test_changed_function_intro_when_nothing_was_stuck() -> None:

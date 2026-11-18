@@ -11,6 +11,7 @@ import type {
   TurnRow,
 } from "@gitinsight/contracts";
 import { useEffect, useState } from "react";
+import { interviewHref } from "@/lib/analyses";
 import {
   ACTION_LABEL,
   COMPETENCY_LABEL,
@@ -343,9 +344,15 @@ function CodeMapSection({ codeMap }: { codeMap: CodeMap }) {
         )}
       </div>
 
-      <p className={styles.muted}>
-        같은 레포로 다시 면접을 보면 막혔던 함수와, 이번 면접 뒤에 커밋이 들어온 함수부터 물어봐요.
-      </p>
+      <div className={styles.mapAgain}>
+        <a className={styles.secondary} href={interviewHref(codeMap.analysis_id, codeMap.repo_full_name)}>
+          이 레포로 다시 면접 보기
+        </a>
+        <p className={styles.muted}>
+          다시 면접을 보면 막혔던 함수부터 물어봐요. 이번 면접 뒤에 커밋을 올렸다면 첫 화면에서 레포를 다시 분석해 주세요. 그러면
+          커밋이 들어온 함수도 먼저 물어봐요.
+        </p>
+      </div>
     </section>
   );
 }

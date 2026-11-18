@@ -139,12 +139,12 @@ class InterviewBrain:
             revisit=revisit,
         )
         topic = analysis.topic(plan.topic_order[0])
-        if topic.topic_id in revisit.stuck:
-            intro = utterance.FIRST_INTRO_STUCK
-        elif topic.topic_id in revisit.changed:
-            intro = utterance.FIRST_INTRO_CHANGED
-        else:
-            intro = utterance.topic_intro(topic.contribution_label, first=True)
+        intro = utterance.topic_intro(
+            topic.contribution_label,
+            first=True,
+            stuck=topic.topic_id in revisit.stuck,
+            changed=topic.topic_id in revisit.changed,
+        )
         now = self._clock()
         state = SessionState(
             session_id=uuid4(),
@@ -161,6 +161,8 @@ class InterviewBrain:
             last_highlight=topic.symbol,
             persona_keywords=plan.persona_keywords,
             plan_source=plan.source,
+            revisit_stuck=[t for t in plan.topic_order if t in revisit.stuck],
+            revisit_changed=[t for t in plan.topic_order if t in revisit.changed],
         )
         await self._repository.create(state)
         reply = BrainReply(
@@ -343,9 +345,13 @@ class InterviewBrain:
                 topic_id=topic.topic_id, started_at_sec=state.elapsed_sec(now)
             )
             highlight = topic.symbol
-            text = utterance.join(
-                utterance.topic_intro(topic.contribution_label, first=False), topic.base_question
+            intro = utterance.topic_intro(
+                topic.contribution_label,
+                first=False,
+                stuck=topic.topic_id in state.revisit_stuck,
+                changed=topic.topic_id in state.revisit_changed,
             )
+            text = utterance.join(intro, topic.base_question)
             state.last_question = topic.base_question
         else:
             raise ValueError(f"턴 처리에서 나올 수 없는 행동입니다: {action}")
