@@ -79,6 +79,10 @@
         {
           "question": "extract_active_db_resources 함수에서 클라이언트를 가져오지 못했을 때 어떻게 동작하나요?",
           "symbol_id": "app/agents/builder.py::extract_active_db_resources"
+        },
+        {
+          "question": "새로운 파일 코드를 수집할 때 추출하는 파일의 개수와 글자 수에 제한을 둔 이유는 무엇인가요?",
+          "symbol_id": null
         }
       ],
       "hint": "build_github_repo 함수 내부에서 API 호출과 컬렉션 캐시 확인, 신규 저장 분기를 차례대로 살펴보세요.",
