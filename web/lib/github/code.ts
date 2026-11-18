@@ -65,11 +65,19 @@ export function fetchFileLines(src: CodeSource, commitSha: string, path: string)
 /** 서버 /api/code. 실패하면 서버가 준 사유를 담아 던집니다 */
 async function fromServer(analysisId: string, path: string): Promise<string> {
   const q = new URLSearchParams({ analysis_id: analysisId, path });
-  const r = await timedFetch(`/api/code?${q}`, { cache: "no-store" });
-  if (r.ok) return r.text();
-  const body = (await r.json().catch(() => null)) as { detail?: unknown } | null;
-  const detail = typeof body?.detail === "string" ? body.detail : `서버 오류 (${r.status})`;
-  throw new CodeFetchError(detail);
+  const r = await timedText(`/api/code?${q}`, { cache: "no-store" });
+  if (r.ok) return r.text;
+  throw new CodeFetchError(detailOf(r.text) ?? `서버 오류 (${r.status})`);
+}
+
+/** 서버 오류 본문({"detail": "..."})의 사유. JSON이 아니거나 detail이 문자열이 아니면 null */
+function detailOf(text: string): string | null {
+  try {
+    const body = JSON.parse(text) as { detail?: unknown } | null;
+    return typeof body?.detail === "string" ? body.detail : null;
+  } catch {
+    return null;
+  }
 }
 
 /** 공개 레포 대비책 (raw.githubusercontent.com) */
@@ -79,16 +87,21 @@ async function fromRaw(repo: string, commitSha: string, path: string): Promise<s
     .filter((p) => p && p !== "." && p !== "..")
     .map(encodeURIComponent)
     .join("/");
-  const r = await timedFetch(`https://raw.githubusercontent.com/${repo}/${commitSha}/${safePath}`, {});
+  const r = await timedText(`https://raw.githubusercontent.com/${repo}/${commitSha}/${safePath}`, {});
   if (!r.ok) throw new CodeFetchError(`GitHub에서 코드를 받지 못했습니다 (${r.status})`);
-  return r.text();
+  return r.text;
 }
 
-async function timedFetch(url: string, init: RequestInit): Promise<Response> {
+/**
+ * 응답 본문까지 FETCH_TIMEOUT_MS 안에 받습니다.
+ * 헤더만 받고 본문이 멈추면 Promise가 끝나지 않아 캐시에 "불러오는 중"으로 남기 때문입니다.
+ */
+async function timedText(url: string, init: RequestInit): Promise<{ ok: boolean; status: number; text: string }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...init, signal: ctrl.signal });
+    const r = await fetch(url, { ...init, signal: ctrl.signal });
+    return { ok: r.ok, status: r.status, text: await r.text() };
   } catch {
     throw new CodeFetchError("코드를 받는 데 시간이 너무 오래 걸리거나 연결하지 못했습니다");
   } finally {
