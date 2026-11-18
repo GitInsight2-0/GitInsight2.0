@@ -20,6 +20,7 @@ from gitinsight_worker.stage1 import (
     PROGRESS_CLONED,
     PROGRESS_STAGE1_DONE,
     PROGRESS_STARTED,
+    NoSupportedCodeError,
     Stage1Result,
     StatusReporter,
     analyze_tree,
@@ -78,6 +79,10 @@ async def run_analysis(
         await asyncio.to_thread(clone, checkout)
         await report(AnalysisStatus.STAGE1, PROGRESS_CLONED)
         stage1 = await asyncio.to_thread(analyze_tree, checkout, commit_sha, requester)
+        if not stage1.symbols:
+            # 지원하는 언어(지금은 Python)의 함수·클래스가 없으면 LLM을 부르지 않고 끝냅니다 (#70).
+            # 화면은 이 예외 이름으로 "지원하지 않는 언어" 안내를 고릅니다 (web/lib/analyses.ts).
+            raise NoSupportedCodeError("지원하는 언어의 함수·클래스가 없습니다")
         await report(AnalysisStatus.STAGE2, PROGRESS_STAGE1_DONE)
 
         async def progress(fraction: float) -> None:

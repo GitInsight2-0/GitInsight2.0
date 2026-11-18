@@ -60,6 +60,14 @@ class Stage1Result:
     references: dict[str, int] = field(default_factory=dict)
 
 
+class NoSupportedCodeError(Exception):
+    """레포에 지원하는 언어(지금은 Python)의 함수·클래스가 없습니다 (#70).
+
+    분석 기록의 error에는 이 예외 종류 이름이 저장되고, 웹은 이 이름으로 "지원하지 않는 언어" 안내를 보여 줍니다.
+    TypeScript·JavaScript 지원은 #72입니다.
+    """
+
+
 class StatusReporter(Protocol):
     """분석 상태를 저장하는 쪽(T11의 DB 구현)이 맡습니다."""
 
