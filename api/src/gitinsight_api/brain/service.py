@@ -8,6 +8,8 @@
 3. 시간이 끝났으면 LLM을 부르지 않습니다.
 4~5. 제한 시간 안에서 판단하고 검증합니다. 실패하면 판단 없이 진행합니다.
 6. 서버 규칙(rules.decide)이 행동을 정합니다.
+   판단 없이 지나간 답변이 있는 주제에서는 빠진 포인트를 다시 묻지 않습니다 (이미 설명했을 수 있음).
+   다른 주제가 다루는 코드를 가리키는 미리 만든 꼬리질문은 쓰지 않습니다 (usable_followups).
 7. 행동에 맞는 발화문과 하이라이트를 만듭니다. 하이라이트는 항상 분석 결과의 SymbolRef입니다.
 8. 턴, 판단, 대체 사유를 저장하고 응답합니다.
 """
@@ -33,7 +35,7 @@ from gitinsight_api.brain.repository import SessionRepository
 from gitinsight_api.brain.rules import Decision, RuleInput, decide
 from gitinsight_api.brain.state import SessionState, TopicProgress, TurnRecord
 from gitinsight_api.llm import LLMClient
-from gitinsight_contracts.analysis import AnalysisResult, Topic
+from gitinsight_contracts.analysis import AnalysisResult, PreparedFollowup, Topic
 from gitinsight_contracts.interview import Action, BrainReply, SessionCreate, TurnRequest
 from gitinsight_contracts.llm import Intent, Judgment
 from gitinsight_contracts.report import FallbackReason
@@ -45,6 +47,26 @@ Clock = Callable[[], datetime]
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def usable_followups(
+    analysis: AnalysisResult, topic_order: list[str], topic: Topic
+) -> list[PreparedFollowup]:
+    """이 주제에서 쓸 수 있는 미리 만든 꼬리질문입니다.
+
+    이번 면접의 다른 주제가 다루는 코드를 가리키는 꼬리질문은 뺍니다.
+    그 코드는 자기 주제에서 물으므로, 여기서 먼저 물으면 같은 함수를 두 번 묻게 됩니다.
+    """
+    other_targets = {
+        analysis.topic(topic_id).symbol.symbol_id
+        for topic_id in topic_order
+        if topic_id != topic.topic_id
+    }
+    return [
+        f
+        for f in topic.prepared_followups
+        if f.symbol_id is None or f.symbol_id not in other_targets
+    ]
 
 
 class InterviewBrain:
@@ -164,6 +186,7 @@ class InterviewBrain:
             judgment: Judgment | None = None
             reason: FallbackReason | None = None
             judge_ms: float | None = None
+            prepared = usable_followups(analysis, state.topic_order, topic)
             if remaining > 0:
                 judgment, reason, judge_ms = await self._judge(state, topic, question, request)
 
@@ -175,12 +198,16 @@ class InterviewBrain:
                     point_ids=[p.point_id for p in topic.expected_points],
                     has_next_topic=state.has_next_topic(),
                     judgment=judgment,
-                    prepared_followups_left=len(topic.prepared_followups)
-                    - state.progress.prepared_used,
+                    prepared_followups_left=len(prepared) - state.progress.prepared_used,
+                    coverage_unknown=state.progress.unjudged_answers > 0,
                 ),
                 self._config,
             )
-            reply = self._apply(state, analysis, topic, decision, judgment, request.turn_id, now)
+            if judgment is None:
+                state.progress.unjudged_answers += 1
+            reply = self._apply(
+                state, analysis, topic, prepared, decision, judgment, request.turn_id, now
+            )
             server_ms = (self._perf_counter() - received) * 1000
             turn = TurnRecord(
                 session_id=session_id,
@@ -236,6 +263,7 @@ class InterviewBrain:
         state: SessionState,
         analysis: AnalysisResult,
         topic: Topic,
+        prepared: list[PreparedFollowup],
         decision: Decision,
         judgment: Judgment | None,
         turn_id: UUID,
@@ -278,6 +306,8 @@ class InterviewBrain:
         elif action is Action.PROBE:
             point = next(p for p in topic.expected_points if p.point_id == decision.probe_point_id)
             progress.probed_points.append(point.point_id)
+            # 기대 포인트는 주제 코드에 대한 것입니다. 직전 꼬리질문이 다른 심볼을 보여 주고 있었어도 주제 코드로 돌아옵니다.
+            highlight = topic.symbol
             text = point.probe_question
             state.last_question = text
         elif action is Action.FOLLOW_UP:
@@ -285,10 +315,10 @@ class InterviewBrain:
                 text = judgment.followup.question
                 symbol_id = judgment.followup.symbol_id
             else:
-                prepared = topic.prepared_followups[progress.prepared_used]
+                followup = prepared[progress.prepared_used]
                 progress.prepared_used += 1
-                text = prepared.question
-                symbol_id = prepared.symbol_id
+                text = followup.question
+                symbol_id = followup.symbol_id
             highlight = (topic.find_symbol(symbol_id) if symbol_id else None) or topic.symbol
             progress.depth += 1
             state.last_question = text

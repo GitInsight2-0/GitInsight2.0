@@ -24,6 +24,8 @@ class RuleInput:
     # 검증을 통과한 판단입니다. 시간 초과·검증 실패면 None입니다.
     judgment: Judgment | None
     prepared_followups_left: int
+    # 이 주제에 판단 없이 지나간 답변이 있습니다. 그 답변이 다룬 포인트를 모르므로 충족률을 믿을 수 없습니다.
+    coverage_unknown: bool = False
 
 
 @dataclass(frozen=True)
@@ -100,7 +102,8 @@ def _decide(
         return _next_topic(rule_input, config, "dont_know_after_hint")
 
     # 6. 답변이 기대 포인트를 충분히 다루지 못했으면 아직 묻지 않은 빠진 포인트를 묻습니다.
-    if ratio < config.probe_threshold:
+    # 판단 없이 지나간 답변이 있으면 묻지 않습니다. 이미 설명한 내용을 다시 묻게 되기 때문입니다.
+    if ratio < config.probe_threshold and not rule_input.coverage_unknown:
         missing = [
             p for p in rule_input.point_ids if p not in covered and p not in progress.probed_points
         ]
