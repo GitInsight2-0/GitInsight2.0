@@ -2,7 +2,7 @@
 
 GET  /api/auth/github/login     GitHub 인증 화면으로 보냅니다.
 GET  /api/auth/github/callback  GitHub가 돌려보내는 곳. 로그인 쿠키를 굽고 웹으로 보냅니다.
-POST /api/auth/logout           로그인 쿠키를 지웁니다.
+POST /api/auth/logout           GitHub 사용자 토큰을 폐기하고 로그인 쿠키를 지웁니다.
 GET  /api/me                    로그인 사용자를 돌려줍니다.
 
 콜백 실패는 웹 첫 화면으로 보내며 ?login_error=<코드>를 붙입니다.
@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from pydantic import SecretStr
 
+from gitinsight_api.auth import read_login_session
 from gitinsight_api.github_oauth import (
     GitHubAuthError,
     GitHubOAuth,
@@ -173,8 +174,18 @@ async def github_callback(
 
 @router.post("/api/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(request: Request) -> Response:
-    # 로그인 쿠키가 없어도 204입니다. 서버에 세션 저장소가 없어 지우는 것은 브라우저 쿠키뿐입니다.
+    # 로그인 쿠키가 없어도 204입니다.
+    # 쿠키 안의 GitHub 토큰을 폐기해, 쿠키가 남거나 새더라도 레포를 읽지 못하게 합니다.
+    # 폐기에 실패해도 쿠키는 지웁니다. 그 토큰은 GitHub 만료 시각(최대 8시간)에 끝납니다.
     settings: Settings = request.app.state.settings
+    session = read_login_session(request)
+    client_id = settings.github_client_id
+    client_secret = settings.github_client_secret
+    if session is not None and client_id is not None and client_secret is not None:
+        client: httpx.AsyncClient = request.app.state.github_http
+        github = GitHubOAuth(client, client_id=client_id, client_secret=client_secret)
+        revoked = await github.revoke_token(session.github_token)
+        logger.info("로그아웃: user_id=%s token_revoked=%s", session.user_id, revoked)
     response = Response(status_code=status.HTTP_204_NO_CONTENT, headers=_NO_STORE)
     clear_session_cookie(response, settings)
     return response

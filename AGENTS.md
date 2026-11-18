@@ -95,7 +95,7 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 `LAB_ENABLED=false`(기본)이면 서버는 진짜 면접 두뇌와 리포트 API(`POST /api/sessions/{id}/end`, `GET /api/reports/{id}`)를 씁니다.
 이 모드의 요청은 GitHub 로그인(#18) 쿠키가 있어야 하고, 없으면 401입니다.
 로그인은 GitHub App 사용자 인증(state + PKCE)입니다. `GET /api/auth/github/login` → GitHub → `GET /api/auth/github/callback` → 웹 첫 화면 순서이고, 실패하면 `/?login_error=denied|invalid_state|github`로 돌아갑니다. `POST /api/auth/logout`, `GET /api/me`도 있습니다.
-로그인 정보는 DB 없이 암호화한 쿠키(`gi_session`, 최대 8시간)에 담습니다 (`api/src/gitinsight_api/login_cookie.py`). 필요한 환경 변수는 `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`, `WEB_ORIGIN`이며 `.env.example`에 설명이 있습니다. GitHub 사용자 토큰은 로그와 DB에 남기지 않습니다.
+로그인 정보는 DB 없이 암호화한 쿠키(`gi_session`, 최대 8시간)에 담습니다 (`api/src/gitinsight_api/login_cookie.py`). 필요한 환경 변수는 `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`, `WEB_ORIGIN`이며 `.env.example`에 설명이 있습니다. GitHub 사용자 토큰은 로그와 DB에 남기지 않습니다. 로그아웃하면 쿠키 속 토큰을 GitHub에서 폐기하고, 폐기에 실패해도 쿠키는 지웁니다.
 테스트는 `app.dependency_overrides`로 `get_current_user`를 바꿔 로그인 사용자를 넣습니다. 로그인 흐름 자체는 `api/tests/test_auth.py`가 가짜 GitHub(`httpx.MockTransport`)로 확인합니다.
 로그인 쿠키의 사용자 토큰을 쓰는 라우트는 `GET /api/repos`(App을 설치한 레포 중 사용자가 읽을 수 있는 것, 계약 `Repo` 배열)와 `GET /api/code?analysis_id=&path=`(본인 분석의 주제 심볼 파일만, `text/plain`)입니다 (`routes/github.py`, GitHub 호출은 `github_api.py`). 실험 모드에서는 둘 다 404입니다.
 
