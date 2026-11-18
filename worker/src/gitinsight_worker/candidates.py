@@ -129,14 +129,19 @@ _BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 _SCRIPT_HEADER = re.compile(
     r"(?:export\s+)?(?:default\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\b|class\s)"
 )
-_SCRIPT_NO_OP = frozenset({"}", "};", "})", "});", "},", ")", ");", "]", "];", "return;", "{"})
+_SCRIPT_NO_OP = frozenset(
+    {"}", "};", "})", "});", "},", ")", ");", "]", "];", "return;", "{", "{}", "/>", ">"}
+)
 
 
 def script_logic_line_count(code: str) -> int:
     """TypeScript·JavaScript 심볼 코드에서 실제로 동작하는 줄 수를 셉니다 (#72).
 
     빈 줄, 주석, 함수·클래스 머리줄, 데코레이터, console 같은 로그 호출, 닫는 괄호만 있는 줄은 빼고 셉니다.
-    변수에 담은 화살표 함수의 머리줄과 메서드 머리줄은 그대로 세므로, 많게 셀 수는 있어도 적게 세지는 않습니다.
+    JSX 태그로 시작하는 줄(`<div>`, `</Button>`, `/>`)도 뺍니다. 마크업뿐인 컴포넌트가 껍데기 판별을 통과하지 않게 합니다.
+    태그 사이의 글자와 `{items.map(...)}` 같은 식은 그대로 셉니다.
+    변수에 담은 화살표 함수의 머리줄과 메서드 머리줄도 그대로 세므로 대체로 많게 셉니다.
+    `<`로 시작하는 줄은 모두 태그로 보므로, 줄 맨 앞에 온 제네릭이나 비교 연산은 세지 않습니다.
     문자열 안의 주석 모양(`"/* */"`)은 가리지 않습니다.
     """
     count = 0
@@ -144,7 +149,7 @@ def script_logic_line_count(code: str) -> int:
         line = raw.strip()
         if (
             not line
-            or line.startswith(("//", "@"))
+            or line.startswith(("//", "@", "<"))
             or _SCRIPT_HEADER.match(line)
             or _LOG_CALL.match(line)
             or line in _SCRIPT_NO_OP

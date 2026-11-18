@@ -244,6 +244,8 @@ def test_typescript_and_javascript_symbols_are_extracted_without_references(
         # 압축한 배포용 파일과 의존성 폴더는 사람이 쓴 코드가 아닙니다.
         "web/public/app.min.js": "function a(){return 1}\n",
         "node_modules/pkg/index.js": "function vendored() {}\n",
+        # 커밋된 Next.js 빌드 결과물도 건너뜁니다.
+        "web/.next/server/chunk.js": "function built() {}\n",
     }
     write_tree(tmp_path, files)
 

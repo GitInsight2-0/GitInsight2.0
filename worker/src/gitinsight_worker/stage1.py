@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 # 의존성과 빌드 결과는 레포 작성자의 코드가 아니므로 건너뜁니다.
 IGNORED_DIRS = frozenset(
-    {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".tox"}
+    {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".tox", ".next"}
 )
 
 # 언어별 심볼 추출기입니다. 여기 없는 언어는 파일 수만 셉니다.

@@ -34,6 +34,7 @@ from gitinsight_contracts.base import LLMOutput, count_sentences
 from gitinsight_contracts.common import SymbolRef
 from gitinsight_worker.candidates import Candidate, has_enough_logic, select_candidates
 from gitinsight_worker.definitions import external_definitions_text, top_level_index
+from gitinsight_worker.languages import PYTHON, language_of
 from gitinsight_worker.stage1 import Stage1Result
 
 logger = logging.getLogger(__name__)
@@ -205,7 +206,9 @@ def read_symbol_code(root: Path, candidate: Candidate) -> str:
     lines = text.splitlines()[symbol.start_line - 1 : symbol.end_line]
     code = "\n".join(lines)
     if len(code) > MAX_CODE_CHARS:
-        code = code[:MAX_CODE_CHARS] + "\n# ... (길어서 이하 생략)"
+        # 잘린 표시는 그 언어의 주석으로 붙입니다. TypeScript·JavaScript에서 `#`은 주석이 아닙니다.
+        comment = "#" if language_of(symbol.path) == PYTHON else "//"
+        code = code[:MAX_CODE_CHARS] + f"\n{comment} ... (길어서 이하 생략)"
     return code
 
 

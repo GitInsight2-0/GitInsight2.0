@@ -213,6 +213,51 @@ def test_hollow_script_class_has_little_logic() -> None:
     assert not has_enough_logic(HOLLOW_SCRIPT_CLASS, "src/audit.ts")
 
 
+MARKUP_ONLY_COMPONENT = """\
+export function Card({ title, children }: Props) {
+  return (
+    <section className="card">
+      {/* 제목 */}
+      <h2>{title}</h2>
+      <div
+        className="body"
+      >
+        {children}
+      </div>
+      <Footer />
+    </section>
+  );
+}
+"""
+
+COMPONENT_WITH_LOGIC = """\
+export function Counter({ start }: Props) {
+  const [count, setCount] = useState(start);
+  const doubled = useMemo(() => count * 2, [count]);
+  const increase = () => setCount((value) => value + 1);
+  useEffect(() => {
+    document.title = String(count);
+  }, [count]);
+  return (
+    <button onClick={increase}>
+      {doubled}
+    </button>
+  );
+}
+"""
+
+
+def test_markup_only_component_has_little_logic() -> None:
+    # `return (`, 태그 속성 줄, `{children}`만 남습니다. 태그로 시작하는 줄과 JSX 주석은 세지 않습니다.
+    assert script_logic_line_count(MARKUP_ONLY_COMPONENT) == 3
+    assert not has_enough_logic(MARKUP_ONLY_COMPONENT, "web/Card.tsx")
+
+
+def test_component_with_hooks_and_handlers_has_enough_logic() -> None:
+    assert script_logic_line_count(COMPONENT_WITH_LOGIC) == 8
+    assert has_enough_logic(COMPONENT_WITH_LOGIC, "web/Counter.tsx")
+
+
 def test_working_script_function_has_enough_logic() -> None:
     # 함수 머리줄과 닫는 괄호를 뺀 다섯 줄입니다.
     assert script_logic_line_count(WORKING_SCRIPT_FUNCTION) == 5

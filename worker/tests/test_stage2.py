@@ -282,7 +282,19 @@ def test_long_code_is_truncated(tmp_path: Path) -> None:
     code = read_symbol_code(tmp_path, candidates[0])
 
     assert len(code) < MAX_CODE_CHARS + 100
-    assert code.endswith("(길어서 이하 생략)")
+    assert code.endswith("\n# ... (길어서 이하 생략)")
+
+
+def test_truncation_marker_is_a_comment_in_the_file_language(tmp_path: Path) -> None:
+    body = "\n".join(f"  const x{i} = {i};" for i in range(3000))
+    write_repo(tmp_path, {"src/big.ts": f"export function big() {{\n{body}\n}}\n"})
+    _, candidates = stage1_and_candidates(tmp_path)
+
+    code = read_symbol_code(tmp_path, candidates[0])
+
+    assert len(code) < MAX_CODE_CHARS + 100
+    # TypeScript·JavaScript에서 `#`은 주석이 아니라 `//`로 붙입니다.
+    assert code.endswith("\n// ... (길어서 이하 생략)")
 
 
 # ---- 생성 흐름 ----
