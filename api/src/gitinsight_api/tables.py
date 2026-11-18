@@ -106,3 +106,25 @@ interview_turns = Table(
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     UniqueConstraint("session_id", "turn_index"),
 )
+
+# 면접 리포트입니다 (#75). 리포트(계약 Report)를 JSON으로 저장하고, 읽을 때 다시 검증합니다.
+# 리포트에는 점수, 근거 인용문, 코드 위치, 턴 표가 들어갑니다. 원본 코드는 들어가지 않습니다.
+reports = Table(
+    "reports",
+    metadata,
+    Column("report_id", Uuid, primary_key=True),
+    Column(
+        "session_id",
+        Uuid,
+        ForeignKey("interview_sessions.session_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("report", JSONB, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    # 세션 소유자(GitHub 숫자 id)입니다 (#77). 이전 면접 비교에서 본인 리포트만 고르는 데 씁니다.
+    # 소유자 없이 만든 세션(로그인 없는 실행)의 리포트는 비워 둡니다.
+    Column("owner_id", Text, nullable=True),
+    # 세션 하나에 리포트는 하나입니다. 같은 세션을 동시에 끝내도 먼저 저장된 것만 남습니다.
+    UniqueConstraint("session_id"),
+    Index("ix_reports_owner_id_created_at", "owner_id", "created_at"),
+)

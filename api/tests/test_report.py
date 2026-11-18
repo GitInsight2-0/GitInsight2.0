@@ -35,7 +35,7 @@ from gitinsight_contracts.llm import (
     ReportDraft,
     TopicDraft,
 )
-from gitinsight_contracts.report import FallbackReason, ReportKind
+from gitinsight_contracts.report import FallbackReason, Report, ReportKind
 
 ANALYSIS = load_analysis()
 ROOT = Path(__file__).resolve().parents[2]
@@ -412,3 +412,35 @@ async def test_evidence_keeps_code_location_only_for_code_shown_in_interview() -
     assert shown.evidence[0].symbol == topic.symbol
     assert not_shown.evidence[0].quote == "커밋 단위로 캐시합니다"
     assert not_shown.evidence[0].symbol is None
+
+
+async def test_end_session_returns_report_another_server_saved_first() -> None:
+    # 서버가 여러 개일 때 같은 세션을 동시에 끝내면, 먼저 저장된 리포트 하나만 남고 둘 다 그 리포트를 받습니다 (#75).
+    session_id, repository, _ = await run_interview()
+    other_server = ReportService(
+        analyses=FixtureAnalysisSource(ANALYSIS),
+        sessions=repository,
+        store=InMemoryReportStore(),
+        builder=ReportBuilder(llm=FakeLLM(), force_prepared=True),
+    )
+    first = await other_server.end_session(session_id)
+
+    class SharedStore(InMemoryReportStore):
+        """이 서버가 리포트를 만드는 사이에 다른 서버가 먼저 저장한 상황입니다."""
+
+        async def save(self, report: Report, owner_id: str | None = None) -> None:
+            if await self.get_by_session(report.session_id) is None:
+                await super().save(first, owner_id)
+            await super().save(report, owner_id)
+
+    service = ReportService(
+        analyses=FixtureAnalysisSource(ANALYSIS),
+        sessions=repository,
+        store=SharedStore(),
+        builder=ReportBuilder(llm=FakeLLM(), force_prepared=True),
+    )
+
+    report = await service.end_session(session_id)
+
+    assert report.report_id == first.report_id
+    assert (await service.end_session(session_id)).report_id == first.report_id
