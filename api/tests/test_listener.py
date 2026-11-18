@@ -21,6 +21,7 @@ from gitinsight_api.report.listener import (
     QuizQuestion,
     build_listener_messages,
     build_quiz_messages,
+    generate_quiz,
     picked_indexes,
     quiz_points,
     run_listener_test,
@@ -458,3 +459,50 @@ def test_report_saved_before_listener_test_still_loads() -> None:
     }
 
     assert Report.model_validate(old).listener_test is None
+
+
+def topic_draft(topic_id: str) -> QuizDraft:
+    return QuizDraft(
+        items=[
+            item(p.point_id, topic_id=topic_id) for p in ANALYSIS.topic(topic_id).expected_points
+        ]
+    )
+
+
+def asked_topic(messages: list[Message]) -> str:
+    """문제 만들기 프롬프트에 실린 주제입니다. 주제마다 따로 부르므로 하나여야 합니다."""
+    block = messages[1]["content"].split('<untrusted_data kind="topics">')[1]
+    (topic,) = json.loads(block.split("</untrusted_data>")[0])
+    return topic["topic_id"]
+
+
+async def test_quiz_is_generated_per_topic_and_a_failed_topic_only_drops_its_questions() -> None:
+    # 주제마다 따로 불러서, 한 주제의 호출이 실패해도 나머지 주제의 문제는 남습니다.
+    other = "vector-service"
+
+    def respond(purpose: str, schema: type[BaseModel], messages: list[Message]) -> FakeStep:
+        topic_id = asked_topic(messages)
+        if topic_id == other:
+            return FakeStep(error=LLMTimeoutError("t"))
+        return FakeStep(value=topic_draft(topic_id))
+
+    llm = FakeLLM(responder=respond)
+
+    questions = await generate_quiz(llm, ANALYSIS, [TOPIC_ID, other], seed=SEED, timeout_s=5.0)
+
+    assert len(llm.calls_for(QUIZ_PURPOSE)) == 2
+    assert [(q.topic_id, q.point_id) for q in questions] == [(TOPIC_ID, p) for p in POINT_IDS]
+
+
+async def test_quiz_calls_skip_topics_past_the_question_cap() -> None:
+    topic_ids = [t.topic_id for t in ANALYSIS.topics]
+    within = {topic_id for topic_id, _ in quiz_points(ANALYSIS, topic_ids)}
+    assert within != set(topic_ids)
+    llm = FakeLLM(
+        responder=lambda _p, _s, messages: FakeStep(value=topic_draft(asked_topic(messages)))
+    )
+
+    questions = await generate_quiz(llm, ANALYSIS, topic_ids, seed=SEED, timeout_s=5.0)
+
+    assert len(llm.calls_for(QUIZ_PURPOSE)) == len(within)
+    assert len(questions) == MAX_QUESTIONS

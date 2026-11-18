@@ -4,6 +4,8 @@
 코드를 모르는 청자는 메울 수 없어서, 실제로 말한 내용만 정답으로 이어집니다.
 
 - 문제는 면접에서 물어본 주제의 기대 요점마다 하나씩 LLM이 만듭니다. 이 호출에는 답변 기록을 주지 않습니다.
+  주제마다 따로, 동시에 부릅니다. 한 번에 만들면 주제 6개(15문제)에서 23초가 걸려 제한 시간을 넘겼습니다.
+  한 주제의 호출이 실패하면 그 주제의 문제만 빠집니다.
 - 청자 호출에는 문제와 지원자의 답변 자막만 줍니다. 코드, 주제 자료, 면접관의 질문과 힌트는 주지 않습니다.
 - 청자는 같은 규칙으로 두 번 풉니다. 답변 기록을 읽고 한 번, 답변 기록 없이 한 번(대조군)입니다.
   청자는 설명에 근거가 없으면 "알 수 없음"을 고릅니다. 대조군에서도 맞힌 문제는 설명 없이 답이 드러나는 문제입니다.
@@ -96,7 +98,10 @@ def quiz_points(analysis: AnalysisResult, topic_ids: Sequence[str]) -> list[tupl
     return points[:MAX_QUESTIONS]
 
 
-def build_quiz_messages(analysis: AnalysisResult, topic_ids: Sequence[str]) -> list[Message]:
+def build_quiz_messages(
+    analysis: AnalysisResult, topic_ids: Sequence[str], only_topic_id: str | None = None
+) -> list[Message]:
+    """only_topic_id를 주면 그 주제의 자료만 넣습니다. 문제 수 상한은 topic_ids 전체 기준입니다."""
     wanted = set(quiz_points(analysis, topic_ids))
     topics = [
         {
@@ -111,6 +116,7 @@ def build_quiz_messages(analysis: AnalysisResult, topic_ids: Sequence[str]) -> l
             ],
         }
         for topic in (analysis.topic(t) for t in topic_ids)
+        if only_topic_id is None or topic.topic_id == only_topic_id
     ]
     topics = [t for t in topics if t["points"]]
     user = "\n\n".join(
@@ -241,14 +247,29 @@ async def generate_quiz(
     timeout_s: float,
     model: str | None = None,
 ) -> list[QuizQuestion]:
-    result = await llm.complete_structured(
-        QuizDraft,
-        build_quiz_messages(analysis, topic_ids),
-        purpose=QUIZ_PURPOSE,
-        timeout_s=timeout_s,
-        model=model,
+    """주제마다 따로, 동시에 문제를 만듭니다. 실패한 주제의 문제는 빠집니다."""
+    # 문제 수 상한 안에 요점이 하나라도 든 주제만 부릅니다.
+    wanted = {topic_id for topic_id, _ in quiz_points(analysis, topic_ids)}
+
+    async def one_topic(topic_id: str) -> QuizDraft | None:
+        try:
+            result = await llm.complete_structured(
+                QuizDraft,
+                build_quiz_messages(analysis, topic_ids, topic_id),
+                purpose=QUIZ_PURPOSE,
+                timeout_s=timeout_s,
+                model=model,
+            )
+        except LLMError as error:
+            logger.info("listener_quiz_topic_skipped reason=%s", type(error).__name__)
+            return None
+        return result.value
+
+    drafts = await asyncio.gather(*(one_topic(t) for t in topic_ids if t in wanted))
+    merged = QuizDraft(
+        items=[item for draft in drafts if draft is not None for item in draft.items]
     )
-    return validate_quiz(result.value, analysis, topic_ids, seed)
+    return validate_quiz(merged, analysis, topic_ids, seed)
 
 
 async def solve_quiz(

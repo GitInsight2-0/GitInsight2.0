@@ -115,7 +115,7 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 리포트에는 질문받은 함수별 상태(설명함, 힌트 받고 설명함, 막힘)를 담은 코드 지도(`Report.code_map`)가 들어갑니다(#107, `report/code_map.py`). LLM 없이 턴 기록으로 집계하고, 누적 숫자는 같은 사용자가 같은 레포로 본 리포트를 합쳐 냅니다.
 리포트에는 AI 청자 테스트(`Report.listener_test`)도 들어갑니다(#111, `report/listener.py`). 코드를 본 적 없는 LLM(청자)이 지원자의 답변 자막만 읽고, 면접에서 물어본 주제의 기대 요점으로 만든 객관식 문제를 풉니다.
 청자에게는 코드, 주제 자료, 면접관의 질문과 힌트를 주지 않고, 근거가 없으면 "알 수 없음"을 고르게 합니다. 보기 순서와 채점은 서버가 정하고, 역량 수준에는 쓰지 않습니다.
-리포트 초안과 동시에 LLM을 세 번(문제 만들기, 답변 없이 풀기, 답변 읽고 풀기) 부르고, 실패하거나 `LISTENER_TIMEOUT_S`(기본 25초)를 넘으면 그 영역만 빠집니다. `LISTENER_TEST_ENABLED=false`로 끕니다. 평가 기록은 `docs/evals/listener-2026-11-18.md`에 있습니다.
+리포트 초안과 동시에 LLM을 부르고(문제 만들기는 주제마다 한 번씩 동시에, 그 뒤 답변 없이 풀기와 답변 읽고 풀기), 실패하거나 `LISTENER_TIMEOUT_S`(기본 25초)를 넘으면 그 영역만 빠집니다. `LISTENER_TEST_ENABLED=false`로 끕니다. 평가 기록은 `docs/evals/listener-2026-11-18.md`에 있습니다.
 같은 레포로 다시 면접을 시작하면(`POST /api/sessions`) 지난 코드 지도에서 막혔던 함수의 주제, 지난 면접 이후 커밋이 들어온 함수의 주제, 나머지 순서로 묻습니다. 새 API나 테이블은 없고 `reports` 테이블의 리포트를 읽습니다.
 세션 API가 DB에 연결하지 못하면 503을 돌려줍니다. 턴은 `turn_id`로 한 번만 처리하므로 같은 요청을 다시 보내면 됩니다.
 DB 연결과 테이블 정의는 `api/src/gitinsight_api/db.py`, `tables.py`, 마이그레이션은 `api/migrations/versions/`에 있습니다. 새 테이블은 두 곳을 같이 바꾸고 `alembic check`로 맞는지 확인합니다.
