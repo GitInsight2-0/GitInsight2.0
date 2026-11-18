@@ -7,8 +7,9 @@
   uv run python scripts/eval_stage2.py --requester-login <GitHub 로그인> --save-json .data/analysis.json
       # 그 계정 기준 기여 라벨을 붙이고, 결과를 데모 스냅샷으로 넣을 수 있게 저장합니다
       # (uv run python scripts/seed_demo_analysis.py --file .data/analysis.json --user-id <id>)
-  uv run python scripts/eval_stage2.py --repo <owner/name> --commit <SHA> --out docs/evals/<이름>.md
-      # 데모 레포가 아닌 레포로 질문 품질을 봅니다 (동의받은 레포만). 샘플과의 비교 단락은 빠집니다
+  uv run python scripts/eval_stage2.py --repo <owner/name> --commit <SHA>
+      # 데모 레포가 아닌 레포로 질문 품질을 봅니다 (동의받은 레포만). 샘플과의 비교 단락은 빠지고,
+      # --out이 없으면 docs/evals/stage2-<날짜>-<owner>-<name>.md에 씁니다
 
 API 키는 환경 변수로 받습니다. .env에 넣었다면 `uv run --env-file .env python ...`으로 실행합니다.
 진행 중 로그에는 오류 종류와 개수만 나오고, 코드와 응답 본문은 나오지 않습니다.
@@ -152,7 +153,9 @@ async def run(args: argparse.Namespace) -> int:
         repo_full_name=repo,
         requester=requester,
     )
-    out = args.out or ROOT / "docs" / "evals" / f"stage2-{datetime.now(UTC):%Y-%m-%d}.md"
+    # 다른 레포의 기록이 같은 날 데모 레포 기록을 덮어쓰지 않게 파일 이름에 레포 이름을 넣습니다.
+    suffix = "" if repo == sample.repo_full_name else "-" + repo.replace("/", "-")
+    out = args.out or ROOT / "docs" / "evals" / f"stage2-{datetime.now(UTC):%Y-%m-%d}{suffix}.md"
     lines = render(result, recorder, label)
     if repo == sample.repo_full_name and commit == sample.commit_sha:
         lines += compare(result, sample)
@@ -169,6 +172,7 @@ async def run(args: argparse.Namespace) -> int:
 
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     parser = argparse.ArgumentParser(description="2단계 분석 실제 LLM 평가")
     parser.add_argument("--model", default=None)
     parser.add_argument(

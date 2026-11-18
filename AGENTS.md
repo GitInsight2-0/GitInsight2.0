@@ -81,7 +81,8 @@ uv run python -m gitinsight_contracts.fixtures show                # 샘플 분�
 uv run python -m gitinsight_api.brain.cli [--real-llm]             # 터미널 텍스트 면접
 uv run python scripts/llm_latency.py --n 20                        # 판단 LLM 지연 측정 (수동, 비용 발생)
 uv run python scripts/eval_brain.py                                # 골든 대화 실제 LLM 평가 (수동, 비용 발생)
-uv run python scripts/eval_stage2.py                               # 샘플 레포 2단계 분석 실제 LLM 평가 (수동, 비용 발생)
+uv run python scripts/eval_stage2.py                               # 샘플(데모) 레포 2단계 분석 실제 LLM 평가 (수동, 비용 발생)
+                                   # --repo <owner/name> --commit <SHA>: 다른 레포 평가 (동의받은 레포만, 기본 기록 이름에 레포 이름이 붙음)
                                    # --requester-email <커밋 이메일> --save-json <경로>: 그 사람 기준 기여 라벨로 분석하고 스냅샷용 JSON 저장
                                    # --out <경로>: 평가 기록 경로 (기본 docs/evals/stage2-<날짜>.md, 같은 날 기록은 덮어씀)
 uv run python scripts/demo_check.py [--block-llm | --real-llm] [--from-db --user-id <id>]   # 데모 완주 점검 (docs/runbook-demo.md). --from-db는 DB의 데모 스냅샷을 그 주인으로 사용
