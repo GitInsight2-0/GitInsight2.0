@@ -48,6 +48,9 @@ const STAGE_LABEL: Record<Stage, string> = {
   done: "면접이 끝났어요",
 };
 
+/** 서버의 마무리 발화 없이 끝났을 때(끝내기, 409) 질문 칸에 보여 주는 문구 (#84). 인사는 아래 리포트 안내에 있습니다 */
+const CLOSED_TEXT = "면접을 마쳤어요.";
+
 /** 말 끝 판정 침묵 (초). 안내 문구에 씁니다 */
 const SILENCE_SEC = DEFAULT_VAD.silenceMs / 1000;
 /**
@@ -94,6 +97,8 @@ export default function InterviewScreen({
 }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [reply, setReply] = useState<BrainReply | null>(null);
+  /** 서버의 done 발화가 아니라 화면에서 끝냄. 이때 reply.utterance는 직전 질문이라 보여 주지 않습니다 (#84) */
+  const [closedLocally, setClosedLocally] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -143,6 +148,13 @@ export default function InterviewScreen({
   const showReply = (r: BrainReply) => {
     replyRef.current = r;
     setReply(r);
+  };
+  /** 서버가 done 발화를 보내지 않았는데 면접을 끝낼 때 (끝내기, 이미 끝난 세션 409) */
+  const closeLocally = () => {
+    const r = replyRef.current;
+    if (!r || r.done) return;
+    setClosedLocally(true);
+    showReply({ ...r, done: true });
   };
 
   // 페이지를 떠나면 마이크와 음성 연결을 닫습니다. 서버 세션은 그대로 둡니다.
@@ -201,8 +213,7 @@ export default function InterviewScreen({
       setMode("text");
     }
     push({ who: "system", text: "면접을 끝냈습니다." });
-    const r = replyRef.current;
-    if (r && !r.done) showReply({ ...r, done: true });
+    closeLocally();
   }
 
   function clearThinkingTimer() {
@@ -258,8 +269,7 @@ export default function InterviewScreen({
       if (e instanceof ApiError && e.status === 409) {
         pendingTurn.current = null;
         push({ who: "system", text: "이미 끝난 면접입니다." });
-        const r = replyRef.current;
-        if (r) showReply({ ...r, done: true });
+        closeLocally();
       } else if (isLoginError(e)) {
         setNeedLogin(true);
         setError(explainError(e));
@@ -360,8 +370,7 @@ export default function InterviewScreen({
         setMode("text");
         if (kind === "done") {
           // 서버가 409(이미 끝난 세션)로 답하면 done인 reply가 오지 않습니다. 화면도 종료로 맞춥니다.
-          const r = replyRef.current;
-          if (r && !r.done) showReply({ ...r, done: true });
+          closeLocally();
           return;
         }
         if (replyRef.current?.done) return;
@@ -495,7 +504,7 @@ export default function InterviewScreen({
     <div className={styles.page}>
       <header className={styles.topbar}>
         <span className={styles.brand}>GitInsight</span>
-        {reply && (
+        {reply && !closedLocally && (
           <span className={styles.progress}>
             <span className={styles.chip}>{ACTION_LABEL[reply.action]}</span>
           </span>
@@ -570,7 +579,7 @@ export default function InterviewScreen({
           </div>
 
           <p aria-live="polite" className={styles.question}>
-            {reply?.utterance ?? "면접을 준비하고 있습니다…"}
+            {closedLocally ? CLOSED_TEXT : reply?.utterance ?? "면접을 준비하고 있습니다…"}
           </p>
 
           {done ? (
