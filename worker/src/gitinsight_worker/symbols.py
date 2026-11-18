@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import tree_sitter_python
-from tree_sitter import Language, Node, Parser
+from tree_sitter import Language, Node, Parser, Tree
 
 from gitinsight_contracts.common import SymbolKind, SymbolRef
 
@@ -74,8 +74,12 @@ def _walk(root: Node) -> Iterator[tuple[Node, tuple[str, ...], Container]]:
             stack.append((child, inner_scope, inner_container))
 
 
-def _identifier_lines(root: Node) -> Iterator[tuple[str, int]]:
-    """정의 이름과 import 문을 뺀 식별자를 (이름, 줄 번호)로 돌려줍니다."""
+def parse_python(source: bytes) -> Tree:
+    return Parser(_PYTHON).parse(source)
+
+
+def identifier_lines(root: Node) -> Iterator[tuple[str, int]]:
+    """정의 이름과 import 문을 뺀 식별자를 소스 순서대로 (이름, 줄 번호)로 돌려줍니다."""
     stack: list[Node] = [root]
     while stack:
         node = stack.pop()
@@ -91,7 +95,8 @@ def _identifier_lines(root: Node) -> Iterator[tuple[str, int]]:
             if not is_definition_name:
                 yield node.text.decode("utf-8", errors="replace"), node.start_point.row + 1
             continue
-        stack.extend(node.children)
+        # 소스 순서대로 돌려주도록 뒤에서부터 쌓습니다.
+        stack.extend(reversed(node.children))
 
 
 def _implicitly_called(node: Node, name: str) -> bool:
@@ -102,7 +107,7 @@ def _implicitly_called(node: Node, name: str) -> bool:
 
 
 def extract_python(source: bytes, path: str, commit_sha: str) -> ExtractedFile:
-    tree = Parser(_PYTHON).parse(source)
+    tree = parse_python(source)
     symbols: list[SymbolRef] = []
     implicit: set[str] = set()
     count = 0
@@ -138,7 +143,7 @@ def extract_python(source: bytes, path: str, commit_sha: str) -> ExtractedFile:
     references: Counter[str] = Counter()
     lines_by_name: dict[str, list[int]] = {}
     own_names = {s.name for s in symbols}
-    for name, line in _identifier_lines(tree.root_node):
+    for name, line in identifier_lines(tree.root_node):
         references[name] += 1
         if name in own_names:
             lines_by_name.setdefault(name, []).append(line)

@@ -31,7 +31,9 @@ from gitinsight_contracts.analysis import (
     Topic,
 )
 from gitinsight_contracts.base import LLMOutput, count_sentences
+from gitinsight_contracts.common import SymbolRef
 from gitinsight_worker.candidates import Candidate, has_enough_logic, select_candidates
+from gitinsight_worker.definitions import external_definitions_text, top_level_index
 from gitinsight_worker.stage1 import Stage1Result
 
 logger = logging.getLogger(__name__)
@@ -78,7 +80,10 @@ TOPIC_SYSTEM_PROMPT = f"""당신은 한국어 기술 모의면접의 질문 재�
 - question_intent는 지원자가 질문 뜻을 되물을 때 면접관이 말하는 문장입니다. 무엇을 묻는지 쉬운 말로 풀어 주되, 답이 되는 내용(코드의 구체적인 동작, 조건, 값, 이름)은 쓰지 않습니다.
 - 줄 번호나 "몇 번째 줄" 같은 위치 표현을 쓰지 않습니다. 코드는 함수, 클래스, 변수 이름으로 가리킵니다.
 - summary는 이 코드가 실제로 하는 일을 3문장 이하로 설명합니다.
-- expected_points는 좋은 답변이라면 다뤄야 할 요점 {MIN_POINTS}~{MAX_POINTS}개입니다. target_code나 서버가 알려 준 사실에서 직접 확인할 수 있는 내용만 쓰고, 코드에 없는 내용을 지어내지 않습니다.
+- expected_points는 좋은 답변이라면 다뤄야 할 요점 {MIN_POINTS}~{MAX_POINTS}개입니다. target_code, external_definitions, 서버가 알려 준 사실에서 직접 확인할 수 있는 내용만 쓰고, 코드에 없는 내용을 지어내지 않습니다.
+- external_definitions는 주제 코드가 쓰는 다른 파일 정의의 요약(시그니처, 클래스 속성과 메서드 이름)입니다. 주제 코드가 그 정의에 없는 속성이나 메서드 이름을 찾거나 쓰고 있으면, 그 점을 다루는 요점이나 꼬리질문을 하나 넣습니다. 이름으로 찾은 요약이라 틀릴 수 있으므로 "정의에서 찾지 못했다"처럼 쓰고 단정하지 않습니다. 맞지 않는 점이 없으면 이 요약으로 요점을 만들지 않습니다.
+- 지원자는 external_definitions를 보지 못합니다. 요점과 질문에 "정의 요약", "외부 정의" 같은 말을 쓰지 말고 코드 이름으로 직접 말합니다. 예: "VectorService에서 _client 속성을 찾지 못했는데, 이 함수는 실제로 클라이언트를 얻나요?"
+- 다른 함수나 메서드의 본문은 보이지 않습니다. 그 안에서 일어나는 일(예외를 잡는지, 무엇을 돌려주는지 등)은 시그니처로 알 수 있는 것 말고는 단정하지 않습니다. 예를 들어 주제 코드에 try가 없다고 해서 예외가 호출자에게 그대로 올라간다고 쓰지 않습니다.
 - 서버가 알려 준 레포 안 참조 수가 0이면 레포에서 그 코드를 부르는 곳을 찾지 못했다는 뜻입니다. 주제 코드가 그렇다면 그 사실을 다루는 요점을 하나 넣습니다. 관련 심볼이 그렇다면 그 심볼을 가리키는 꼬리질문으로 물을 수 있습니다.
 - 이 요점도 다른 요점처럼 좋은 답변이 말해야 할 내용으로 씁니다. 예: "레포 안에 이 코드를 부르는 곳이 없다는 것을 알고, 어디에 연결하려던 것인지 말한다". "~확인 필요", "~설명"처럼 과제나 메모로 쓰지 않습니다.
 - 이 사실을 묻는 질문은 코드가 어딘가에서 불린다고 전제하지 않습니다. 예: "레포 안에서 부르는 곳을 찾지 못했는데, 지금 실제로 쓰이고 있나요?". "쓰이지 않는다", "0곳으로 확인된다"처럼 단정하지 말고 "부르는 곳을 찾지 못했다"처럼 씁니다.
@@ -239,6 +244,7 @@ def build_topic_messages(
     readme: str,
     difficulty: int = 1,
     references: Mapping[str, int] | None = None,
+    external: str = "",
 ) -> list[Message]:
     symbol = candidate.symbol
     target = {"symbol_id": symbol.symbol_id, "name": symbol.name, "kind": symbol.kind.value}
@@ -258,6 +264,11 @@ def build_topic_messages(
     facts = reference_facts(candidate, references or {})
     if facts is not None:
         parts.append(facts)
+    if external:
+        parts += [
+            "주제 코드가 쓰는 다른 파일의 레포 정의 요약입니다. 이름으로 찾아 틀릴 수 있고, 본문은 넣지 않았습니다.",
+            untrusted_block("external_definitions", external),
+        ]
     if readme:
         parts += [
             "레포 README 앞부분입니다. 코드의 목적을 이해하는 데만 참고하세요.",
@@ -468,9 +479,14 @@ class _Prepared:
 
 
 def _prepare(
-    root: Path, candidates: list[Candidate], references: Mapping[str, int] | None = None
+    root: Path,
+    candidates: list[Candidate],
+    references: Mapping[str, int] | None = None,
+    symbols: list[SymbolRef] | None = None,
 ) -> list[_Prepared]:
     readme = read_readme(root)
+    # 다른 파일의 정의를 이름으로 찾는 색인입니다 (#66). 1단계 심볼 목록이 없으면 붙이지 않습니다.
+    index = top_level_index(symbols) if symbols else {}
     prepared: list[_Prepared] = []
     hollow = 0
     for candidate in candidates:
@@ -483,7 +499,8 @@ def _prepare(
             hollow += 1
             continue
         difficulty = DIFFICULTY_CYCLE[len(prepared) % len(DIFFICULTY_CYCLE)]
-        messages = build_topic_messages(candidate, code, readme, difficulty, references)
+        external = external_definitions_text(root, candidate.symbol, index) if index else ""
+        messages = build_topic_messages(candidate, code, readme, difficulty, references, external)
         prepared.append(_Prepared(candidate, messages))
     if hollow:
         logger.info("stage2_hollow_candidates skipped=%d", hollow)
@@ -506,7 +523,7 @@ async def generate_topics(
     contribution = contribution_of or _no_contribution
     candidates = select_candidates(stage1.symbols, lambda s: contribution(s.symbol_id)[0])
     prepared = await asyncio.to_thread(
-        _prepare, root, candidates[:MAX_CANDIDATES], stage1.references
+        _prepare, root, candidates[:MAX_CANDIDATES], stage1.references, stage1.symbols
     )
     semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
     used_slugs: set[str] = set()
