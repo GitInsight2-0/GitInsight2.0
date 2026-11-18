@@ -266,37 +266,42 @@
       ],
       "contribution_label": "verified",
       "difficulty": 1,
-      "summary": "기존에 동작 중인 VectorService에서 Chroma 클라이언트와 임베딩 함수를 찾아 튜플로 반환합니다. 클라이언트는 특정 속성 이름이나 객체 전체 속성을 검사하여 대상 클래스 타입인지를 확인해 추출합니다. 임베딩 함수는 메서드 존재 여부를 확인한 후 LangChainEmbeddingAdapter로 감싸서 반환합니다.",
-      "base_question": "extract_active_db_resources 함수는 필요한 자원을 어떤 순서로 추출하나요?",
-      "question_intent": "해당 함수에서 Chroma 클라이언트와 임베딩 모델을 찾아 반환하는 구체적인 탐색 순서와 방식을 묻는 질문입니다.",
+      "summary": "기존에 실행 중인 VectorService에서 ChromaDB 클라이언트와 임베딩 함수를 찾아 튜플로 반환하려 합니다. 클라이언트는 속성 이름 후보와 인스턴스 전체 속성을 돌며 클래스 이름으로, 임베딩 모델은 embed_query와 embed_documents 메서드를 갖춘 속성으로 찾고 LangChainEmbeddingAdapter로 감쌉니다. 찾지 못하면 (None, None)을 돌려주며, 이 레포의 VectorService에는 _collection만 있어 실제로는 늘 이 경우가 됩니다.",
+      "base_question": "extract_active_db_resources 함수는 어떤 순서로 동작하나요?",
+      "question_intent": "이 함수가 자원을 가져오기 위해 어떤 과정을 거치는지 단계별 흐름을 묻는 질문입니다.",
       "expected_points": [
         {
           "point_id": "p1",
-          "text": "get_vector_service 함수 유무를 확인하고 서비스를 가져온 뒤 Chroma 클라이언트와 임베딩 함수를 차례로 탐색합니다.",
-          "probe_question": "함수가 시작될 때 VectorService 객체는 어떻게 가져오나요?"
+          "text": "get_vector_service 함수 유무를 확인한 뒤 이를 호출하여 VectorService 인스턴스를 얻는 것으로 시작함을 설명한다.",
+          "probe_question": "VectorService 인스턴스를 가져오기 위해 처음에 어떤 검사와 호출을 수행하나요?"
         },
         {
           "point_id": "p2",
-          "text": "Chroma 클라이언트는 사전에 정의된 속성 이름을 먼저 살피고, 없으면 객체의 전체 속성을 순회하며 클래스 이름을 대조해 찾습니다.",
-          "probe_question": "Chroma 클라이언트를 찾지 못했을 때 어떤 방식으로 다시 탐색하나요?"
+          "text": "지정된 속성 이름 후보를 먼저 보고, 없으면 dir()로 모든 속성을 돌며 클래스 이름이 Client 등인지로 ChromaDB 클라이언트를 찾으려 한다.",
+          "probe_question": "ChromaDB 클라이언트는 어떤 방식으로 VectorService 내부에서 탐색하나요?"
         },
         {
           "point_id": "p3",
-          "text": "임베딩 모델은 후보 속성 중 embed_query와 embed_documents 메서드를 가진 객체를 찾아 어댑터 클래스로 감싸서 반환합니다.",
-          "probe_question": "추출한 임베딩 모델은 어떤 처리를 거쳐 반환되나요?"
+          "text": "embed_query와 embed_documents 메서드를 가진 임베딩 속성을 찾으면 LangChainEmbeddingAdapter로 감싸서 반환하려 한다.",
+          "probe_question": "임베딩 모델 속성을 찾으면 어떤 처리를 거쳐 반환하나요?"
+        },
+        {
+          "point_id": "p4",
+          "text": "VectorService에는 _collection만 있어 클라이언트와 임베딩 함수를 찾지 못하고 (None, None)을 돌려주므로, build_github_repo가 매번 새 PersistentClient를 만든다는 것을 안다.",
+          "probe_question": "VectorService에서 _client나 embeddings 같은 속성을 찾지 못했는데, 이 함수가 실제로 정상 동작하나요?"
         }
       ],
       "prepared_followups": [
         {
-          "question": "임베딩 모델을 LangChainEmbeddingAdapter로 한 번 더 감싸서 반환하는 이유는 무엇인가요?",
+          "question": "임베딩 모델을 LangChainEmbeddingAdapter로 감싸서 반환하는 이유는 무엇인가요?",
           "symbol_id": "app/agents/builder.py::LangChainEmbeddingAdapter"
         },
         {
-          "question": "build_github_repo 함수에서는 이렇게 추출된 DB 자원을 구체적으로 어떻게 활용하나요?",
-          "symbol_id": "app/agents/builder.py::build_github_repo"
+          "question": "클라이언트 검색 시 특정 속성명을 먼저 확인하고 dir()로 다시 탐색하는 이유는 무엇인가요?",
+          "symbol_id": null
         }
       ],
-      "hint": "함수 내부에서 get_vector_service 호출 후 진행되는 for 루프들과 반환값을 살펴보세요.",
+      "hint": "VectorService 인스턴스를 가져온 뒤 ChromaDB 클라이언트와 임베딩 모델을 각각 찾는 과정을 살펴보세요.",
       "commits": [
         "29b7748b3e4ab466b4c35b0d4c69787cb6ba7d47",
         "957bb5b7e6998e0b76005be78ae94375f5f2c845",

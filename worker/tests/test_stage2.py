@@ -236,6 +236,31 @@ async def test_reference_facts_are_server_text_without_symbol_names(tmp_path: Pa
     assert "부르는 곳을 찾지 못했다" in service_call.messages[0]["content"]
 
 
+async def test_external_definitions_go_only_into_untrusted_block(tmp_path: Path) -> None:
+    # main.py의 run_all은 다른 파일(util.py)의 helper를 부릅니다. 그 정의 요약이 프롬프트에 붙습니다.
+    body = [f"    v{i} = helper() + {i}" for i in range(8)]
+    caller = "\n".join(
+        ["from app.util import helper", "", "", "def run_all():", *body, "    return v0", ""]
+    )
+    write_repo(tmp_path, {**REPO_FILES, "app/main.py": caller})
+    stage1 = analyze_tree(tmp_path, SHA)
+    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+
+    await generate_topics(tmp_path, stage1, llm, target=4)
+
+    [call] = [
+        c for c in llm.calls_for(TOPIC_PURPOSE) if '"name": "run_all"' in user_text(c.messages)
+    ]
+    user = user_text(call.messages)
+    assert '<untrusted_data kind="external_definitions">\n# app/util.py\ndef helper(): ...' in user
+    # 정의 이름과 경로는 레포에서 온 값이라 서버 문장에는 나오지 않습니다.
+    assert "helper" not in server_text(call.messages)
+    assert "external_definitions" in call.messages[0]["content"]
+    # 다른 파일 정의를 쓰지 않는 주제에는 붙지 않습니다.
+    others = [c for c in llm.calls_for(TOPIC_PURPOSE) if c is not call]
+    assert others and all("external_definitions" not in user_text(c.messages) for c in others)
+
+
 def test_no_reference_facts_without_counts(tmp_path: Path) -> None:
     write_repo(tmp_path)
     _, candidates = stage1_and_candidates(tmp_path)
