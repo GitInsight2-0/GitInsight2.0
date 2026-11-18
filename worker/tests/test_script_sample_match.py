@@ -126,3 +126,12 @@ def test_blame_and_candidate_selection_work_on_script_symbols(result: Stage1Resu
         "handleSave",
         "handleImageUpload",
     ]
+    # 컴포넌트와 API 라우트를 번갈아 놓아, 앞의 여섯 후보에 라우트가 셋 들어갑니다.
+    assert [c.symbol.symbol_id.removeprefix("app/") for c in candidates[:6]] == [
+        "components/MyProfile.tsx::MyProfile",
+        "api/layers/[id]/comments/route.ts::POST",
+        "components/MyCanvas.tsx::MyCanvas",
+        "api/profile/route.ts::POST",
+        "components/StudioFeed.tsx::StudioFeed",
+        "api/profile/route.ts::PATCH",
+    ]

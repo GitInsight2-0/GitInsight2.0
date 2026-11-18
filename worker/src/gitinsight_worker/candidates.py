@@ -4,9 +4,10 @@ LLM은 여기서 고른 후보마다 질문 재료를 쓰기만 하고, 어떤 �
 """
 
 import re
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from itertools import groupby
 
 from gitinsight_contracts.analysis import ContributionLabel
 from gitinsight_contracts.common import SymbolRef
@@ -184,7 +185,39 @@ def select_candidates(symbols: list[SymbolRef], label_of: LabelOf = _unverified)
             continue
         chosen.append(symbol)
         per_file[symbol.path] += 1
-    return [Candidate(symbol=s, related_choices=_related(s, symbols)) for s in chosen]
+    ordered = _alternate_markup(chosen, label_of)
+    return [Candidate(symbol=s, related_choices=_related(s, symbols)) for s in ordered]
+
+
+# 화면 마크업(JSX)을 함께 담는 파일입니다. 컴포넌트는 마크업 때문에 줄 수가 많습니다.
+_MARKUP_SUFFIXES = (".tsx", ".jsx")
+
+
+def is_markup_path(path: str) -> bool:
+    return path.lower().endswith(_MARKUP_SUFFIXES)
+
+
+def _alternate_markup(chosen: list[SymbolRef], label_of: LabelOf) -> list[SymbolRef]:
+    """화면 컴포넌트 파일(.tsx, .jsx)의 후보와 나머지 파일의 후보를 번갈아 놓습니다 (#72).
+
+    줄 수가 많은 순으로만 고르면 마크업이 긴 컴포넌트가 앞자리를 다 차지해서,
+    API 라우트나 서버 로직처럼 짧지만 동작이 있는 코드가 주제가 되지 못합니다.
+    기여 라벨 순서는 그대로 두고, 같은 라벨 안에서만 번갈아 놓습니다. 각 묶음 안의 순서(줄 수 순)도 그대로입니다.
+    .tsx, .jsx가 없는 레포(Python 레포 등)는 순서가 바뀌지 않습니다.
+    """
+    ordered: list[SymbolRef] = []
+    for _, group in groupby(chosen, key=lambda s: _LABEL_RANK[label_of(s)]):
+        items = list(group)
+        # 가장 앞선 후보가 속한 쪽부터 시작해 맨 앞 후보는 바뀌지 않습니다.
+        first_is_markup = is_markup_path(items[0].path)
+        first = deque(s for s in items if is_markup_path(s.path) == first_is_markup)
+        second = deque(s for s in items if is_markup_path(s.path) != first_is_markup)
+        while first or second:
+            if first:
+                ordered.append(first.popleft())
+            if second:
+                ordered.append(second.popleft())
+    return ordered
 
 
 def _related(main: SymbolRef, symbols: list[SymbolRef]) -> tuple[SymbolRef, ...]:

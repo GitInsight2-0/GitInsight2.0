@@ -219,6 +219,53 @@ def test_working_script_function_has_enough_logic() -> None:
     assert has_enough_logic(WORKING_SCRIPT_FUNCTION, "src/items.ts")
 
 
+def test_components_and_other_code_alternate_so_routes_become_topics() -> None:
+    # 줄 수만 보면 컴포넌트 넷이 앞자리를 다 차지합니다.
+    symbols = [
+        sym("app/components/Profile.tsx", "Profile", 1, 300),
+        sym("app/components/Feed.tsx", "Feed", 1, 250),
+        sym("app/components/Canvas.jsx", "Canvas", 1, 200),
+        sym("app/components/Modal.tsx", "Modal", 1, 150),
+        sym("app/api/items/route.ts", "POST", 1, 40),
+        sym("lib/db.js", "connect", 1, 30),
+    ]
+
+    assert ids(symbols) == [
+        "app/components/Profile.tsx::Profile",
+        "app/api/items/route.ts::POST",
+        "app/components/Feed.tsx::Feed",
+        "lib/db.js::connect",
+        "app/components/Canvas.jsx::Canvas",
+        "app/components/Modal.tsx::Modal",
+    ]
+
+
+def test_alternation_starts_with_the_biggest_and_keeps_label_order() -> None:
+    route = sym("app/api/route.ts", "handler", 1, 400)
+    big = sym("app/Big.tsx", "Big", 1, 300)
+    mine = sym("app/Mine.tsx", "Mine", 1, 20)
+    other = sym("app/Other.tsx", "Other", 1, 100)
+    labels = {mine.symbol_id: ContributionLabel.VERIFIED}
+
+    candidates = select_candidates(
+        [route, big, mine, other],
+        lambda s: labels.get(s.symbol_id, ContributionLabel.UNVERIFIED),
+    )
+
+    # 기여 근거가 있는 코드가 먼저이고, 그 뒤는 가장 큰 후보(라우트)부터 번갈아 놓습니다.
+    assert [c.symbol.name for c in candidates] == ["Mine", "handler", "Big", "Other"]
+
+
+def test_repo_without_component_files_keeps_size_order() -> None:
+    symbols = [
+        sym("app/a.py", "small", 1, 10),
+        sym("src/b.ts", "big", 1, 120),
+        sym("app/c.py", "mid", 1, 60),
+    ]
+
+    assert ids(symbols) == ["src/b.ts::big", "app/c.py::mid", "app/a.py::small"]
+
+
 def test_logic_rules_follow_the_file_language() -> None:
     # 경로가 없거나 Python이면 지금까지의 Python 기준을 그대로 씁니다.
     assert has_enough_logic(WORKING_FUNCTION) == has_enough_logic(WORKING_FUNCTION, "app/a.py")
