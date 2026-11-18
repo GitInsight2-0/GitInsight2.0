@@ -90,6 +90,12 @@ class Settings(BaseSettings):
     report_timeout_s: float = 30.0
     # 리포트 생성 시 빈 판단을 다시 판단할 때의 제한 시간(초)입니다.
     rejudge_timeout_s: float = 10.0
+    # 리포트에 AI 청자 테스트를 넣습니다 (#111). 코드를 모르는 LLM이 답변만 읽고 객관식 문제를 풉니다.
+    # 리포트 생성과 동시에 돌고 LLM을 세 번 더 부릅니다. 끄면 리포트에서 그 영역만 빠집니다.
+    listener_test_enabled: bool = True
+    # 청자 테스트 전체(문제 만들기 1번, 청자 호출 2번) 제한 시간(초)입니다. 넘으면 청자 테스트만 뺍니다.
+    # 리포트 제한 시간(report_timeout_s)보다 길게 잡으면 리포트가 그만큼 늦게 나옵니다.
+    listener_timeout_s: float = 25.0
     # 인용문 비교 방식입니다. fuzzy는 음성 인식 오차를 유사도로 허용합니다 (brain/quotes.py).
     quote_match: QuoteMatchMode = "exact"
     # fuzzy에서 통과로 보는 유사도 하한(0~100)입니다.

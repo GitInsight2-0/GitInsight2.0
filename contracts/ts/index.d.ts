@@ -363,6 +363,59 @@ export interface PointCoverage {
 }
 /**
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "ListenerAnswer".
+ */
+export interface ListenerAnswer {
+  choice: number;
+  number: number;
+}
+/**
+ * 코드를 모르는 청자 LLM의 답안입니다. 맞았는지는 서버가 정합니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "ListenerAnswers".
+ */
+export interface ListenerAnswers {
+  answers: ListenerAnswer[];
+}
+/**
+ * AI 청자 테스트의 객관식 문제 하나와 청자가 고른 보기입니다. 보기 번호는 0부터 셉니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "ListenerQuestion".
+ */
+export interface ListenerQuestion {
+  blind_index: number;
+  /**
+   * @minItems 3
+   */
+  choices: string[];
+  correct_index: number;
+  informed_index: number;
+  point_id: string;
+  question: string;
+  topic_id: string;
+}
+/**
+ * AI 청자 테스트입니다 (#111). 설명이 전달된 정도를 봅니다.
+ *
+ * 코드를 본 적 없는 LLM(청자)이 지원자의 답변 기록만 읽고 그 코드에 대한 객관식 문제를 풉니다.
+ * 문제는 면접에서 물어본 주제의 기대 요점으로 만들고, 맞았는지는 서버가 보기 번호를 비교해 정합니다.
+ * 역량 수준(점수)과는 따로입니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "ListenerTest".
+ */
+export interface ListenerTest {
+  blind_correct: number;
+  informed_correct: number;
+  /**
+   * @minItems 1
+   */
+  questions: ListenerQuestion[];
+}
+/**
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
  * via the `definition` "Me".
  */
 export interface Me {
@@ -395,6 +448,28 @@ export interface ProgressEntry {
 }
 /**
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "QuizDraft".
+ */
+export interface QuizDraft {
+  items: QuizItemDraft[];
+}
+/**
+ * AI 청자 테스트의 객관식 문제 초안입니다 (#111). 기대 요점 하나에 문제 하나입니다.
+ *
+ * 보기 순서와 "알 수 없음" 보기는 서버가 정합니다. 그래서 정답과 오답을 따로 받습니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "QuizItemDraft".
+ */
+export interface QuizItemDraft {
+  correct: string;
+  distractors: string[];
+  point_id: string;
+  question: string;
+  topic_id: string;
+}
+/**
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
  * via the `definition` "Repo".
  */
 export interface Repo {
@@ -412,6 +487,7 @@ export interface Report {
   competencies: CompetencyScore[];
   improvements: string[];
   kind: ReportKind;
+  listener_test: ListenerTest | null;
   next_topics: string[];
   report_id: string;
   session_id: string;

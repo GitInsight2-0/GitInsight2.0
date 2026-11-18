@@ -22,6 +22,7 @@ from gitinsight_api.llm import LiteLLMClient, LLMTimeoutError
 from gitinsight_api.llm.fake import FakeLLM, FakeStep
 from gitinsight_api.main import create_app
 from gitinsight_api.report.builder import REPORT_PURPOSE
+from gitinsight_api.report.listener import QUIZ_PURPOSE
 from gitinsight_api.settings import Settings
 from gitinsight_contracts.analysis import AnalysisResult
 from gitinsight_contracts.fixtures import load_analysis
@@ -61,6 +62,8 @@ class Users:
 def real_app(
     metrics_path: Path, llm: FakeLLM | None = None, **settings: Any
 ) -> tuple[FastAPI, InterviewBrain, Users]:
+    # AI 청자 테스트(#111)는 LLM을 더 부르므로 여기서는 끕니다. 켠 흐름은 따로 확인합니다.
+    settings.setdefault("listener_test_enabled", False)
     config = Settings(lab_enabled=False, metrics_path=metrics_path, **settings)
     fake = llm if llm is not None else FakeLLM()
     forced = llm is None
@@ -188,6 +191,31 @@ async def test_full_flow_with_llm_failure_returns_turn_table(
     assert report.kind is ReportKind.TURN_TABLE
     assert report.competencies == []
     assert len(report.turns) == 1
+
+
+async def test_default_wiring_tries_listener_test_and_reports_without_it_on_failure(
+    client_for: ClientFactory, metrics_path: Path
+) -> None:
+    # 기본 설정은 AI 청자 테스트를 켭니다 (#111). 문제 만들기가 실패해도 리포트는 그대로 나옵니다.
+    llm = FakeLLM()
+    turn_id = uuid4()
+    llm.push(JUDGE_PURPOSE, FakeStep(value=judged()))
+    llm.push(REPORT_PURPOSE, FakeStep(value=report_draft(turn_id)))
+    llm.push(QUIZ_PURPOSE, FakeStep(error=LLMTimeoutError("t")))
+    assert Settings(metrics_path=metrics_path).listener_test_enabled
+    app, _, _ = real_app(metrics_path, llm, listener_test_enabled=True)
+    async with client_for(app) as client:
+        created = await create(client)
+        response = await client.post(
+            f"/api/sessions/{created.session_id}/turns", json=turn(GOOD, turn_id)
+        )
+        assert response.status_code == 200, response.text
+        ended = await end(client, created.session_id)
+        report = await get_report(client, ended.report_id)
+
+    assert len(llm.calls_for(QUIZ_PURPOSE)) == 1
+    assert report.kind is ReportKind.FULL
+    assert report.listener_test is None
 
 
 async def test_end_is_idempotent(client_for: ClientFactory, metrics_path: Path) -> None:

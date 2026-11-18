@@ -8,6 +8,8 @@
   가장 잘한 답변 하나만 보고 높은 점수를 주지 않게 하기 위해서입니다.
 - 근거의 코드 위치는 면접 중 화면에 띄운 코드일 때만 붙입니다.
 - 질문받은 함수별 상태(코드 지도)는 LLM 없이 턴 기록으로 집계합니다 (report/code_map.py, #107).
+- AI 청자 테스트는 리포트 초안과 동시에 돌립니다 (report/listener.py, #111).
+  실패하면 청자 테스트만 빠지고, 역량 수준에는 쓰지 않습니다.
 """
 
 import asyncio
@@ -23,6 +25,7 @@ from gitinsight_api.brain.state import SessionState, TurnRecord
 from gitinsight_api.llm import LLMClient, LLMError, Message
 from gitinsight_api.llm.untrusted import UNTRUSTED_NOTICE, untrusted_block
 from gitinsight_api.report.code_map import after_hint_turn_ids, build_code_map, permalink
+from gitinsight_api.report.listener import run_listener_test
 from gitinsight_api.report.rubric import rubric_text
 from gitinsight_contracts.analysis import AnalysisResult, Topic
 from gitinsight_contracts.llm import CompetencyDraft, CoverageStatus, Intent, ReportDraft
@@ -31,6 +34,7 @@ from gitinsight_contracts.report import (
     CodeMap,
     CompetencyScore,
     Evidence,
+    ListenerTest,
     Report,
     ReportKind,
     TopicReport,
@@ -236,6 +240,12 @@ class ReportBuilder:
     force_prepared: bool = False
     # 판단 검증과 같은 인용문 비교 방식을 씁니다.
     quote_matcher: QuoteMatcher = EXACT
+    # true면 AI 청자 테스트를 리포트 초안과 동시에 돌립니다 (#111). force_prepared면 돌리지 않습니다.
+    listener_test: bool = False
+    # 문제 만들기와 청자 호출 두 번을 합친 전체 제한 시간(초)입니다.
+    listener_timeout_s: float = 25.0
+    # 청자 모델입니다. 문제는 report_model로 만듭니다.
+    listener_model: str | None = None
 
     async def rejudge_missing(
         self, analysis: AnalysisResult, state: SessionState, turns: list[TurnRecord]
@@ -278,18 +288,13 @@ class ReportBuilder:
         answered = [t for t in turns if t.transcript.strip()]
         if not answered:
             return self._turn_table(analysis, state, topic_ids, turns, previous_code_maps)
-        try:
-            result = await self.llm.complete_structured(
-                ReportDraft,
-                build_report_messages(analysis, topic_ids, turns),
-                purpose=REPORT_PURPOSE,
-                timeout_s=self.report_timeout_s,
-                model=self.report_model,
-            )
-        except LLMError as error:
-            logger.info("report_fallback reason=%s", type(error).__name__)
-            return self._turn_table(analysis, state, topic_ids, turns, previous_code_maps)
-        draft = result.value
+        # 청자 테스트는 리포트 초안과 서로 기다리지 않습니다. 한쪽이 실패해도 다른 쪽 결과는 씁니다.
+        draft, listener = await asyncio.gather(
+            self._draft(analysis, topic_ids, turns),
+            self._listener_test(analysis, state, topic_ids, answered),
+        )
+        if draft is None:
+            return self._turn_table(analysis, state, topic_ids, turns, previous_code_maps, listener)
         allowed = set(topic_ids)
         model_answers = {t.topic_id: t.model_answer for t in draft.topics if t.topic_id in allowed}
         return Report(
@@ -305,6 +310,44 @@ class ReportBuilder:
             next_topics=_clean_list(draft.next_topics),
             turns=turn_rows(turns),
             code_map=build_code_map(analysis, state, turns, previous_code_maps),
+            listener_test=listener,
+        )
+
+    async def _draft(
+        self, analysis: AnalysisResult, topic_ids: list[str], turns: list[TurnRecord]
+    ) -> ReportDraft | None:
+        try:
+            result = await self.llm.complete_structured(
+                ReportDraft,
+                build_report_messages(analysis, topic_ids, turns),
+                purpose=REPORT_PURPOSE,
+                timeout_s=self.report_timeout_s,
+                model=self.report_model,
+            )
+        except LLMError as error:
+            logger.info("report_fallback reason=%s", type(error).__name__)
+            return None
+        return result.value
+
+    async def _listener_test(
+        self,
+        analysis: AnalysisResult,
+        state: SessionState,
+        topic_ids: list[str],
+        answered: list[TurnRecord],
+    ) -> ListenerTest | None:
+        if not self.listener_test:
+            return None
+        return await run_listener_test(
+            self.llm,
+            analysis,
+            topic_ids,
+            # 청자에게는 지원자의 답변만 줍니다. 면접관의 질문과 힌트는 주지 않습니다.
+            [t.transcript for t in answered],
+            seed=str(state.session_id),
+            timeout_s=self.listener_timeout_s,
+            quiz_model=self.report_model,
+            listener_model=self.listener_model,
         )
 
     def _turn_table(
@@ -314,6 +357,7 @@ class ReportBuilder:
         topic_ids: list[str],
         turns: list[TurnRecord],
         previous_code_maps: Sequence[CodeMap],
+        listener: ListenerTest | None = None,
     ) -> Report:
         return Report(
             report_id=uuid4(),
@@ -327,4 +371,5 @@ class ReportBuilder:
             turns=turn_rows(turns),
             # 판단이 있는 답변만 집계하므로, 판단 없이 진행한 면접이면 질문받은 함수 목록은 비어 있습니다.
             code_map=build_code_map(analysis, state, turns, previous_code_maps),
+            listener_test=listener,
         )

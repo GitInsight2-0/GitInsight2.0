@@ -95,3 +95,32 @@ class ReportDraft(LLMOutput):
     strengths: list[str]
     improvements: list[str]
     next_topics: list[str]
+
+
+class QuizItemDraft(LLMOutput):
+    """AI 청자 테스트의 객관식 문제 초안입니다 (#111). 기대 요점 하나에 문제 하나입니다.
+
+    보기 순서와 "알 수 없음" 보기는 서버가 정합니다. 그래서 정답과 오답을 따로 받습니다.
+    """
+
+    topic_id: str
+    point_id: str
+    question: str
+    correct: str
+    distractors: list[str]
+
+
+class QuizDraft(LLMOutput):
+    items: list[QuizItemDraft]
+
+
+class ListenerAnswer(LLMOutput):
+    # 문제 번호와 고른 보기 번호입니다. 둘 다 1부터 셉니다. 서버가 범위를 확인합니다.
+    number: int
+    choice: int
+
+
+class ListenerAnswers(LLMOutput):
+    """코드를 모르는 청자 LLM의 답안입니다. 맞았는지는 서버가 정합니다."""
+
+    answers: list[ListenerAnswer]

@@ -42,6 +42,8 @@ RESPONSE_MODELS: list[type[BaseModel]] = [
     llm.Judgment,
     llm.InterviewPlanOutput,
     llm.ReportDraft,
+    llm.QuizDraft,
+    llm.ListenerAnswers,
 ]
 
 

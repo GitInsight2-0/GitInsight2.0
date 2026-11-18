@@ -71,6 +71,10 @@ def build_report_service(
             judge_model=settings.llm_judge_model,
             force_prepared=force_prepared or settings.brain_force_prepared or llm is None,
             quote_matcher=settings.quote_matcher(),
+            listener_test=settings.listener_test_enabled,
+            listener_timeout_s=settings.listener_timeout_s,
+            # 청자는 문제를 만든 모델(리포트 모델)과 다른, 빠른 판단 모델을 씁니다.
+            listener_model=settings.llm_judge_model,
         ),
     )
 

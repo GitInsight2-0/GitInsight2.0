@@ -112,6 +112,15 @@ export const EXPLAIN_STATUS_LABEL: Record<ExplainStatus, string> = {
   stuck: "막힘",
 };
 
+/** AI 청자가 내 답변을 읽고 한 문제를 어떻게 풀었는지 (#111) */
+export type ListenerResult = "correct" | "unknown" | "wrong";
+
+export const LISTENER_RESULT_LABEL: Record<ListenerResult, string> = {
+  correct: "맞힘",
+  unknown: "알 수 없음",
+  wrong: "틀림",
+};
+
 /** 면접 중에 이 답변을 판단하지 못한 까닭 */
 export const FALLBACK_LABEL: Record<FallbackReason, string> = {
   timeout: "면접 중에는 판단이 시간 안에 끝나지 않았어요",

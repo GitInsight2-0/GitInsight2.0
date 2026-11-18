@@ -4,6 +4,8 @@ import type {
   CodeMap,
   CompetencyScore,
   ExplainStatus,
+  ListenerQuestion,
+  ListenerTest,
   ProgressEntry,
   Report,
   SymbolRef,
@@ -24,6 +26,8 @@ import {
   fetchProgress,
   fetchReport,
   isGithubLink,
+  LISTENER_RESULT_LABEL,
+  type ListenerResult,
   previousEntry,
 } from "@/lib/reports";
 import styles from "./report.module.css";
@@ -156,6 +160,8 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
 
       {report.code_map && <CodeMapSection codeMap={report.code_map} />}
 
+      {report.listener_test && <ListenerTestSection test={report.listener_test} />}
+
       {(report.strengths.length > 0 || report.improvements.length > 0 || report.next_topics.length > 0) && (
         <section aria-label="총평" className={styles.columns}>
           <Bullets title="잘한 점" items={report.strengths} />
@@ -263,6 +269,12 @@ function SymbolTag({ symbol }: { symbol: SymbolRef }) {
   );
 }
 
+const LISTENER_RESULT_CLASS: Record<ListenerResult, string> = {
+  correct: styles.statusExplained,
+  unknown: styles.statusAfterHint,
+  wrong: styles.statusStuck,
+};
+
 const STATUS_CLASS: Record<ExplainStatus, string> = {
   explained: styles.statusExplained,
   explained_after_hint: styles.statusAfterHint,
@@ -354,6 +366,69 @@ function CodeMapSection({ codeMap }: { codeMap: CodeMap }) {
         </p>
       </div>
     </section>
+  );
+}
+
+/**
+ * AI 청자 테스트 (#111).
+ * 문제, 정답, 청자가 고른 보기, 맞힌 수는 모두 서버가 준 값입니다. 화면에서는 고른 보기가 정답과 같은지만 봅니다.
+ */
+function ListenerTestSection({ test }: { test: ListenerTest }) {
+  const total = test.questions.length;
+  return (
+    <section aria-labelledby="listener-test" className={styles.section}>
+      <h2 id="listener-test">AI 청자 테스트</h2>
+      <p className={styles.muted}>
+        이 코드를 본 적 없는 AI가 내 답변만 읽고, 내 코드에 대한 객관식 문제를 풀었어요. 면접관의 질문과 힌트는 보여 주지 않았고,
+        답변에 근거가 없으면 &ldquo;알 수 없음&rdquo;을 고르게 했어요. 문제는 면접에서 다룬 주제의 기대한 요점으로 만들었어요.
+      </p>
+      <div className={styles.card}>
+        <p className={styles.mapHeadline}>
+          내 답변을 읽고 {total}문제 중 <strong>{test.informed_correct}문제</strong>를 맞혔어요.
+        </p>
+        <div className={styles.mapBar} aria-hidden="true">
+          {test.informed_correct > 0 && <span className={styles.mapExplained} style={{ flexGrow: test.informed_correct }} />}
+          {total - test.informed_correct > 0 && (
+            <span className={styles.mapNotAsked} style={{ flexGrow: total - test.informed_correct }} />
+          )}
+        </div>
+        <p className={styles.muted}>
+          답변 없이 같은 문제를 풀었을 때는 {test.blind_correct}문제를 맞혔어요. 이 결과는 역량별 수준에 반영하지 않아요.
+        </p>
+      </div>
+      <ol className={styles.listenerQuestions}>
+        {test.questions.map((q, i) => (
+          <ListenerQuestionItem key={`${q.topic_id}-${q.point_id}`} question={q} index={i + 1} />
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function ListenerQuestionItem({ question, index }: { question: ListenerQuestion; index: number }) {
+  const unknownIndex = question.choices.length - 1;
+  const picked = question.informed_index;
+  const result = picked === question.correct_index ? "correct" : picked === unknownIndex ? "unknown" : "wrong";
+  return (
+    <li>
+      <div className={styles.listenerHead}>
+        <span className={LISTENER_RESULT_CLASS[result]}>{LISTENER_RESULT_LABEL[result]}</span>
+        <span>
+          {index}. {question.question}
+        </span>
+      </div>
+      <p className={styles.listenerLine}>
+        <span className={styles.label}>정답</span> {question.choices[question.correct_index]}
+      </p>
+      {result === "wrong" && (
+        <p className={styles.listenerLine}>
+          <span className={styles.label}>청자가 고른 답</span> {question.choices[picked]}
+        </p>
+      )}
+      {question.blind_index === question.correct_index && (
+        <p className={styles.muted}>답변 없이 풀었을 때도 맞힌 문제예요.</p>
+      )}
+    </li>
   );
 }
 

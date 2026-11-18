@@ -518,6 +518,45 @@
   color: var(--gi-notice-ink);
 }
 
+/* ── AI 청자 테스트 (#111) ── */
+
+.listenerQuestions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.listenerQuestions > li {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--gi-line);
+  border-radius: var(--gi-radius);
+  font-size: 14.5px;
+  line-height: 1.6;
+  word-break: keep-all;
+}
+
+.listenerHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  font-weight: 600;
+}
+
+.listenerLine {
+  margin: 0;
+}
+
+.listenerLine .label {
+  margin-right: 6px;
+}
+
 /* ── 답변 기록 ── */
 
 .turn {

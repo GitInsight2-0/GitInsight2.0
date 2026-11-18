@@ -2,10 +2,10 @@
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Self
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from gitinsight_contracts.base import Contract
 from gitinsight_contracts.common import SymbolRef
@@ -106,6 +106,46 @@ class CodeMap(Contract):
     stuck_count: Annotated[int, Field(ge=0)]
 
 
+class ListenerQuestion(Contract):
+    """AI 청자 테스트의 객관식 문제 하나와 청자가 고른 보기입니다. 보기 번호는 0부터 셉니다."""
+
+    topic_id: str
+    # 이 문제가 확인하는 기대 요점입니다.
+    point_id: str
+    question: str
+    # 마지막 보기는 항상 "알 수 없음"입니다.
+    choices: Annotated[list[str], Field(min_length=3)]
+    correct_index: Annotated[int, Field(ge=0)]
+    # 청자가 답변 기록 없이 고른 보기입니다 (대조군). 근거가 없으면 "알 수 없음"을 고르게 합니다.
+    blind_index: Annotated[int, Field(ge=0)]
+    # 청자가 지원자의 답변 기록만 읽고 고른 보기입니다.
+    informed_index: Annotated[int, Field(ge=0)]
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        # "알 수 없음"은 정답이 될 수 없습니다.
+        if self.correct_index >= len(self.choices) - 1:
+            raise ValueError("correct_index가 보기 범위를 벗어났습니다")
+        if max(self.blind_index, self.informed_index) >= len(self.choices):
+            raise ValueError("청자가 고른 보기가 보기 범위를 벗어났습니다")
+        return self
+
+
+class ListenerTest(Contract):
+    """AI 청자 테스트입니다 (#111). 설명이 전달된 정도를 봅니다.
+
+    코드를 본 적 없는 LLM(청자)이 지원자의 답변 기록만 읽고 그 코드에 대한 객관식 문제를 풉니다.
+    문제는 면접에서 물어본 주제의 기대 요점으로 만들고, 맞았는지는 서버가 보기 번호를 비교해 정합니다.
+    역량 수준(점수)과는 따로입니다.
+    """
+
+    questions: Annotated[list[ListenerQuestion], Field(min_length=1)]
+    # 답변 기록 없이 맞힌 문제 수입니다 (대조군). 설명 없이도 답이 드러나는 문제의 수라서 0에 가까워야 합니다.
+    blind_correct: Annotated[int, Field(ge=0)]
+    # 답변 기록을 읽고 맞힌 문제 수입니다.
+    informed_correct: Annotated[int, Field(ge=0)]
+
+
 class Report(Contract):
     report_id: UUID
     session_id: UUID
@@ -118,6 +158,8 @@ class Report(Contract):
     turns: list[TurnRow]
     # 이 필드가 생기기 전에 저장한 리포트에는 없어서 null입니다.
     code_map: CodeMap | None = None
+    # 청자 테스트를 하지 못했거나 이 필드가 생기기 전에 저장한 리포트에서는 null입니다.
+    listener_test: ListenerTest | None = None
 
 
 class CompetencyLevel(Contract):

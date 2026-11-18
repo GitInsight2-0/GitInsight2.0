@@ -663,6 +663,113 @@
       "title": "LanguageStat",
       "type": "object"
     },
+    "ListenerAnswer": {
+      "additionalProperties": false,
+      "properties": {
+        "choice": {
+          "type": "integer"
+        },
+        "number": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "number",
+        "choice"
+      ],
+      "title": "ListenerAnswer",
+      "type": "object"
+    },
+    "ListenerAnswers": {
+      "additionalProperties": false,
+      "description": "코드를 모르는 청자 LLM의 답안입니다. 맞았는지는 서버가 정합니다.",
+      "properties": {
+        "answers": {
+          "items": {
+            "$ref": "#/$defs/ListenerAnswer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "answers"
+      ],
+      "title": "ListenerAnswers",
+      "type": "object"
+    },
+    "ListenerQuestion": {
+      "additionalProperties": false,
+      "description": "AI 청자 테스트의 객관식 문제 하나와 청자가 고른 보기입니다. 보기 번호는 0부터 셉니다.",
+      "properties": {
+        "blind_index": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "choices": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 3,
+          "type": "array"
+        },
+        "correct_index": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "informed_index": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "point_id": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "topic_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic_id",
+        "point_id",
+        "question",
+        "choices",
+        "correct_index",
+        "blind_index",
+        "informed_index"
+      ],
+      "title": "ListenerQuestion",
+      "type": "object"
+    },
+    "ListenerTest": {
+      "additionalProperties": false,
+      "description": "AI 청자 테스트입니다 (#111). 설명이 전달된 정도를 봅니다.\n\n코드를 본 적 없는 LLM(청자)이 지원자의 답변 기록만 읽고 그 코드에 대한 객관식 문제를 풉니다.\n문제는 면접에서 물어본 주제의 기대 요점으로 만들고, 맞았는지는 서버가 보기 번호를 비교해 정합니다.\n역량 수준(점수)과는 따로입니다.",
+      "properties": {
+        "blind_correct": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "informed_correct": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/$defs/ListenerQuestion"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "questions",
+        "blind_correct",
+        "informed_correct"
+      ],
+      "title": "ListenerTest",
+      "type": "object"
+    },
     "Me": {
       "additionalProperties": false,
       "properties": {
@@ -872,6 +979,55 @@
       "title": "ProgressEntry",
       "type": "object"
     },
+    "QuizDraft": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/QuizItemDraft"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "QuizDraft",
+      "type": "object"
+    },
+    "QuizItemDraft": {
+      "additionalProperties": false,
+      "description": "AI 청자 테스트의 객관식 문제 초안입니다 (#111). 기대 요점 하나에 문제 하나입니다.\n\n보기 순서와 \"알 수 없음\" 보기는 서버가 정합니다. 그래서 정답과 오답을 따로 받습니다.",
+      "properties": {
+        "correct": {
+          "type": "string"
+        },
+        "distractors": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "point_id": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "topic_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic_id",
+        "point_id",
+        "question",
+        "correct",
+        "distractors"
+      ],
+      "title": "QuizItemDraft",
+      "type": "object"
+    },
     "Repo": {
       "additionalProperties": false,
       "properties": {
@@ -926,6 +1082,17 @@
         "kind": {
           "$ref": "#/$defs/ReportKind"
         },
+        "listener_test": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ListenerTest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "next_topics": {
           "items": {
             "type": "string"
@@ -969,7 +1136,8 @@
         "improvements",
         "next_topics",
         "turns",
-        "code_map"
+        "code_map",
+        "listener_test"
       ],
       "title": "Report",
       "type": "object"

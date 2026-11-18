@@ -26,7 +26,7 @@ README.md의 "전체 구조"를 따릅니다.
 | `contracts/schema/contracts.json`, `contracts/ts/index.d.ts` | 계약에서 자동 생성한 JSON Schema와 TS 타입. 직접 고치지 않습니다 | 자동 생성 |
 | `api/src/gitinsight_api/` | FastAPI 서버. `brain/`(면접 두뇌), `llm/`(LLMClient), `routes/` | B, D |
 | `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출, git blame 기여 라벨과 최근 커밋, 이름 기준 레포 안 참조 수), 2단계(규칙으로 주제 후보 선택, 참조 수를 서버 사실로, 주제 코드가 쓰는 다른 파일 정의 요약(`definitions`)을 신뢰하지 않는 입력으로 넣어 LLM으로 주제 재료 생성과 서버 검증), 전체 흐름 `pipeline.run_analysis`, 분석 기록 저장소와 연결해 실행하는 `jobs`(같은 프로세스 Launcher), 분석까지 여는 서버 진입점 `server` | A |
-| `web/` | Next.js 웹. 첫 화면(`/`, GitHub 로그인과 면접 시작), 실제 모드 면접 화면(`/interview/[analysisId]`, 음성·텍스트, 도중 전환, 음성 끊김 시 텍스트 자동 전환, 끝내기와 리포트 요청), 리포트 화면(`/reports/[reportId]`, 역량별 수준과 근거 인용문, 코드 지도, 주제별 내용, 답변 기록, 이전 면접과 비교), 음성 토큰 라우트(`/voice-token`, 실험 모드가 아니면 로그인 필요), 실험 화면(`/lab/voice`, `/lab/interview`)이 있습니다 | C |
+| `web/` | Next.js 웹. 첫 화면(`/`, GitHub 로그인과 면접 시작), 실제 모드 면접 화면(`/interview/[analysisId]`, 음성·텍스트, 도중 전환, 음성 끊김 시 텍스트 자동 전환, 끝내기와 리포트 요청), 리포트 화면(`/reports/[reportId]`, 역량별 수준과 근거 인용문, 코드 지도, AI 청자 테스트, 주제별 내용, 답변 기록, 이전 면접과 비교), 음성 토큰 라우트(`/voice-token`, 실험 모드가 아니면 로그인 필요), 실험 화면(`/lab/voice`, `/lab/interview`)이 있습니다 | C |
 | `fixtures/analysis/` | 데모 레포 분석 결과 샘플(`gitinsight_agent`, 손으로 만듦)과 실제 워커로 만든 데모 스냅샷(`gitinsight_agent_live`) | B |
 | `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |
 | `scripts/` | 계약 생성, 샘플 데이터 도구, 데모 스냅샷 넣기, 수동 LLM 평가 스크립트 | |
@@ -81,6 +81,7 @@ uv run python -m gitinsight_contracts.fixtures show                # 샘플 분�
 uv run python -m gitinsight_api.brain.cli [--real-llm]             # 터미널 텍스트 면접
 uv run python scripts/llm_latency.py --n 20                        # 판단 LLM 지연 측정 (수동, 비용 발생)
 uv run python scripts/eval_brain.py                                # 골든 대화 실제 LLM 평가 (수동, 비용 발생)
+uv run python scripts/eval_listener.py [--runs 2]                  # 골든 대화 AI 청자 테스트 실제 LLM 평가 (수동, 비용 발생)
 uv run python scripts/eval_stage2.py                               # 샘플 레포 2단계 분석 실제 LLM 평가 (수동, 비용 발생)
                                    # --requester-email <커밋 이메일> --save-json <경로>: 그 사람 기준 기여 라벨로 분석하고 스냅샷용 JSON 저장
                                    # --out <경로>: 평가 기록 경로 (기본 docs/evals/stage2-<날짜>.md, 같은 날 기록은 덮어씀)
@@ -112,6 +113,9 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 같은 조건에서 리포트도 `reports` 테이블에 둡니다(`report/postgres.py`의 `PostgresReportStore`, #75). 세션 하나에 리포트는 하나이고, 서버를 다시 시작해도 같은 `report_id`로 다시 엽니다.
 이전 면접 비교는 `GET /api/me/progress`입니다(#77). 로그인한 사용자의 리포트에 적힌 역량 수준을 면접별로, 오래된 것부터 최근 20건까지 돌려줍니다. 역량 평가가 없는 리포트(턴별 판단 표)는 빠집니다.
 리포트에는 질문받은 함수별 상태(설명함, 힌트 받고 설명함, 막힘)를 담은 코드 지도(`Report.code_map`)가 들어갑니다(#107, `report/code_map.py`). LLM 없이 턴 기록으로 집계하고, 누적 숫자는 같은 사용자가 같은 레포로 본 리포트를 합쳐 냅니다.
+리포트에는 AI 청자 테스트(`Report.listener_test`)도 들어갑니다(#111, `report/listener.py`). 코드를 본 적 없는 LLM(청자)이 지원자의 답변 자막만 읽고, 면접에서 물어본 주제의 기대 요점으로 만든 객관식 문제를 풉니다.
+청자에게는 코드, 주제 자료, 면접관의 질문과 힌트를 주지 않고, 근거가 없으면 "알 수 없음"을 고르게 합니다. 보기 순서와 채점은 서버가 정하고, 역량 수준에는 쓰지 않습니다.
+리포트 초안과 동시에 LLM을 세 번(문제 만들기, 답변 없이 풀기, 답변 읽고 풀기) 부르고, 실패하거나 `LISTENER_TIMEOUT_S`(기본 25초)를 넘으면 그 영역만 빠집니다. `LISTENER_TEST_ENABLED=false`로 끕니다. 평가 기록은 `docs/evals/listener-2026-11-18.md`에 있습니다.
 같은 레포로 다시 면접을 시작하면(`POST /api/sessions`) 지난 코드 지도에서 막혔던 함수의 주제, 지난 면접 이후 커밋이 들어온 함수의 주제, 나머지 순서로 묻습니다. 새 API나 테이블은 없고 `reports` 테이블의 리포트를 읽습니다.
 세션 API가 DB에 연결하지 못하면 503을 돌려줍니다. 턴은 `turn_id`로 한 번만 처리하므로 같은 요청을 다시 보내면 됩니다.
 DB 연결과 테이블 정의는 `api/src/gitinsight_api/db.py`, `tables.py`, 마이그레이션은 `api/migrations/versions/`에 있습니다. 새 테이블은 두 곳을 같이 바꾸고 `alembic check`로 맞는지 확인합니다.
