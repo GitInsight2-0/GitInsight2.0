@@ -108,6 +108,7 @@ async def test_metrics_route_writes_to_postgres(
         metrics_path=tmp_path / "m.jsonl", database_url=SecretStr(test_database_url)
     )
     app = create_app(settings)
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser("u1", "u1")
     async with client_for(app) as client:
         response = await client.post("/api/metrics", json={"name": "barge_in", "at_ms": 5})
     await app.state.db_engine.dispose()

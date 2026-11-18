@@ -14,6 +14,7 @@ from alembic.config import Config
 from pydantic import SecretStr
 
 from gitinsight_api import event_loop
+from gitinsight_api.auth import CurrentUser, get_current_user
 from gitinsight_api.db import (
     CONNECT_TIMEOUT_S,
     DRIVER,
@@ -125,6 +126,7 @@ async def test_metrics_route_returns_503_when_store_fails(
     client_for: ClientFactory, metrics_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     app = create_app(Settings(metrics_path=metrics_path, database_url=SecretStr(UNREACHABLE)))
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser("u1", "u1")
     with caplog.at_level(logging.WARNING):
         async with client_for(app) as client:
             response = await client.post(
@@ -133,6 +135,15 @@ async def test_metrics_route_returns_503_when_store_fails(
     await app.state.db_engine.dispose()
     assert response.status_code == 503
     assert "metrics_store_failed error=OperationalError" in caplog.text
+
+
+async def test_metrics_route_requires_login(client_for: ClientFactory, metrics_path: Path) -> None:
+    # 공개 주소에서 아무나 측정 이벤트를 쌓지 못하게 합니다 (#19).
+    app = create_app(Settings(metrics_path=metrics_path))
+    async with client_for(app) as client:
+        response = await client.post("/api/metrics", json={"name": "barge_in", "at_ms": 5})
+    assert response.status_code == 401
+    assert not metrics_path.exists()
 
 
 def test_alembic_ini_is_ascii() -> None:

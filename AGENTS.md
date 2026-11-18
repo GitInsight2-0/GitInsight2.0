@@ -30,7 +30,8 @@ README.md의 "전체 구조"를 따릅니다.
 | `fixtures/analysis/` | 데모 레포 분석 결과 샘플(`gitinsight_agent`, 손으로 만듦)과 실제 워커로 만든 데모 스냅샷(`gitinsight_agent_live`) | B |
 | `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |
 | `scripts/` | 계약 생성, 샘플 데이터 도구, 데모 스냅샷 넣기, 수동 LLM 평가 스크립트 | |
-| `docs/` | 루브릭, 평가 기록(`docs/evals/`), 결정 기록 | |
+| `docs/` | 루브릭, 평가 기록(`docs/evals/`), 결정 기록, 배포 방법(`docs/deploy.md`) | |
+| `Dockerfile`, `railway.json` | Railway API 서버 이미지와 배포 설정 (API와 분석 워커 한 프로세스, 인스턴스 1개) | D |
 
 ## 설계 원칙
 
@@ -99,7 +100,7 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 테스트는 `app.dependency_overrides`로 `get_current_user`를 바꿔 로그인 사용자를 넣습니다. 로그인 흐름 자체는 `api/tests/test_auth.py`가 가짜 GitHub(`httpx.MockTransport`)로 확인합니다.
 로그인 쿠키의 사용자 토큰을 쓰는 라우트는 `GET /api/repos`(App을 설치한 레포 중 사용자가 읽을 수 있는 것, 계약 `Repo` 배열)와 `GET /api/code?analysis_id=&path=`(본인 분석의 주제 심볼 파일만, `text/plain`)입니다 (`routes/github.py`, GitHub 호출은 `github_api.py`). 실험 모드에서는 둘 다 404입니다.
 
-`DATABASE_URL`이 있으면 서버는 Postgres를 쓰고(`/api/metrics` → `metric_events` 테이블), 없으면 DB 없이 돌며 측정 이벤트를 `METRICS_PATH`(JSONL)에 쌓습니다.
+`DATABASE_URL`이 있으면 서버는 Postgres를 쓰고(`/api/metrics` → `metric_events` 테이블, 실험 모드가 아니면 로그인 필요), 없으면 DB 없이 돌며 측정 이벤트를 `METRICS_PATH`(JSONL)에 쌓습니다.
 분석 기록과 결과는 `analyses` 테이블에 둡니다(`gitinsight_api.analyses.postgres.PostgresAnalysisStore`, 규칙은 `analyses/store.py`의 `AnalysisStore`).
 `DATABASE_URL`이 있고 `LAB_ENABLED=false`이면 면접 두뇌와 리포트도 샘플 파일 대신 이 테이블의 분석 결과를 읽습니다(`analyses/source.py`의 `StoredAnalysisSource`).
 이때 `POST /api/sessions`는 분석을 요청한 본인만 쓸 수 있고, 다른 사람의 분석과 없는 분석은 같은 404입니다. 샘플 분석도 `scripts/seed_demo_analysis.py`로 넣은 계정만 씁니다.
