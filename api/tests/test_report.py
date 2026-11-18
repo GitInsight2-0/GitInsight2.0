@@ -17,6 +17,7 @@ from gitinsight_api.report.builder import (
     ReportBuilder,
     build_report_messages,
     permalink,
+    validate_competencies,
 )
 from gitinsight_api.report.rubric import RUBRIC
 from gitinsight_api.report.service import InMemoryReportStore, ReportService
@@ -328,6 +329,89 @@ async def test_highlighted_related_symbol_gets_code_link() -> None:
 
     urls = [link.url for link in report.topics[0].code_links]
     assert urls[1] == permalink(ANALYSIS.repo_full_name, related)
+
+
+async def test_report_prompt_marks_dont_know_and_after_hint_answers() -> None:
+    # 리포트 LLM이 가장 잘한 답변 하나만 보고 점수를 주지 않게, 서버가 아는 사실을 답변마다 붙입니다 (#82).
+    fake = FakeLLM()
+    fake.push(
+        JUDGE_PURPOSE,
+        FakeStep(value=Judgment(intent=Intent.DONT_KNOW, coverage=[], followup=None)),
+        FakeStep(value=judged(("bgr-1", "커밋 SHA를 컬렉션 이름에 넣어서"))),
+    )
+    repository = InMemorySessionRepository()
+    brain = InterviewBrain(
+        analyses=FixtureAnalysisSource(ANALYSIS), repository=repository, llm=fake
+    )
+    session_id, _ = await brain.start(
+        SessionCreate(analysis_id=ANALYSIS.analysis_id, mode=InterviewMode.TEXT)
+    )
+    for transcript in ("잘 모르겠습니다.", GOOD):
+        await brain.handle_turn(
+            session_id, TurnRequest(turn_id=uuid4(), transcript=transcript, source=TurnSource.TEXT)
+        )
+    turns = await repository.list_turns(session_id)
+    assert turns[0].reply.action.value == "HINT"
+
+    content = build_report_messages(ANALYSIS, ["build-github-repo"], turns)[1]["content"]
+    system = build_report_messages(ANALYSIS, ["build-github-repo"], turns)[0]["content"]
+
+    # 첫 답변은 모르겠다고 한 답변이고, 둘째 답변은 힌트를 받은 뒤의 답변입니다.
+    assert content.count('"dont_know": true, "after_hint": false') == 1
+    assert content.count('"dont_know": false, "after_hint": true') == 1
+    assert "dont_know" in system and "after_hint" in system
+
+
+async def test_report_prompt_marks_plain_answers_as_neither() -> None:
+    session_id, repository, _ = await run_interview()
+    turns = await repository.list_turns(session_id)
+
+    content = build_report_messages(ANALYSIS, ["build-github-repo"], turns)[1]["content"]
+
+    assert content.count('"dont_know": false, "after_hint": false') == len(turns)
+
+
+async def test_evidence_keeps_code_location_only_for_code_shown_in_interview() -> None:
+    # 면접 중 화면에 띄운 적 없는 코드는 근거의 코드 위치로 붙이지 않습니다. 인용문은 남깁니다 (#82).
+    topic = ANALYSIS.topic("build-github-repo")
+    related = topic.related_symbols[0]
+    session_id, repository, turn_ids = await run_interview()
+    turns = await repository.list_turns(session_id)
+    assert all(
+        t.reply.highlight is None or t.reply.highlight.symbol_id != related.symbol_id for t in turns
+    )
+    drafts = [
+        CompetencyDraft(
+            name=Competency.CODE_UNDERSTANDING,
+            level=3,
+            rationale="흐름을 맞게 설명",
+            evidence=[
+                EvidenceDraft(
+                    turn_id=str(turn_ids[0]),
+                    quote="커밋 SHA를 컬렉션 이름에 넣어서",
+                    symbol_id=topic.symbol.symbol_id,
+                )
+            ],
+        ),
+        CompetencyDraft(
+            name=Competency.DESIGN_JUDGMENT,
+            level=3,
+            rationale="선택 이유를 설명",
+            evidence=[
+                EvidenceDraft(
+                    turn_id=str(turn_ids[0]),
+                    quote="커밋 단위로 캐시합니다",
+                    symbol_id=related.symbol_id,
+                )
+            ],
+        ),
+    ]
+
+    shown, not_shown = validate_competencies(drafts, turns, ANALYSIS)
+
+    assert shown.evidence[0].symbol == topic.symbol
+    assert not_shown.evidence[0].quote == "커밋 단위로 캐시합니다"
+    assert not_shown.evidence[0].symbol is None
 
 
 async def test_end_session_returns_report_another_server_saved_first() -> None:
