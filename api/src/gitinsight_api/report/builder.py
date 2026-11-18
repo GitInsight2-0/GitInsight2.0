@@ -7,27 +7,28 @@
 - 답변마다 서버가 기록한 사실(모르겠다고 답함, 힌트를 받은 뒤의 답변)을 프롬프트에 같이 넘깁니다 (#82).
   가장 잘한 답변 하나만 보고 높은 점수를 주지 않게 하기 위해서입니다.
 - 근거의 코드 위치는 면접 중 화면에 띄운 코드일 때만 붙입니다.
+- 질문받은 함수별 상태(코드 지도)는 LLM 없이 턴 기록으로 집계합니다 (report/code_map.py, #107).
 """
 
 import asyncio
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
-from itertools import pairwise
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from gitinsight_api.brain.judge import judge_answer
 from gitinsight_api.brain.quotes import EXACT, QuoteMatcher
 from gitinsight_api.brain.state import SessionState, TurnRecord
 from gitinsight_api.llm import LLMClient, LLMError, Message
 from gitinsight_api.llm.untrusted import UNTRUSTED_NOTICE, untrusted_block
+from gitinsight_api.report.code_map import after_hint_turn_ids, build_code_map, permalink
 from gitinsight_api.report.rubric import rubric_text
 from gitinsight_contracts.analysis import AnalysisResult, Topic
-from gitinsight_contracts.common import SymbolRef
-from gitinsight_contracts.interview import Action
 from gitinsight_contracts.llm import CompetencyDraft, CoverageStatus, Intent, ReportDraft
 from gitinsight_contracts.report import (
     CodeLink,
+    CodeMap,
     CompetencyScore,
     Evidence,
     Report,
@@ -62,26 +63,10 @@ REPORT_SYSTEM_PROMPT = f"""당신은 한국어 기술 모의면접의 평가 리
 {UNTRUSTED_NOTICE}"""
 
 
-def permalink(repo_full_name: str, symbol: SymbolRef) -> str:
-    return (
-        f"https://github.com/{repo_full_name}/blob/{symbol.commit_sha}/{symbol.path}"
-        f"#L{symbol.start_line}-L{symbol.end_line}"
-    )
-
-
 def asked_topic_ids(state: SessionState, turns: list[TurnRecord]) -> list[str]:
     """면접에서 실제로 물어본 주제를 순서대로 돌려줍니다."""
     asked = {t.topic_id for t in turns if t.topic_id} | {state.current_topic_id}
     return [topic_id for topic_id in state.topic_order if topic_id in asked]
-
-
-def after_hint_turn_ids(turns: list[TurnRecord]) -> set[UUID]:
-    """힌트를 받은 뒤에 한 답변의 turn_id입니다. 바로 앞 턴에서 면접관이 같은 주제로 힌트를 준 경우입니다."""
-    hinted: set[UUID] = set()
-    for before, after in pairwise(turns):
-        if before.reply.action is Action.HINT and before.topic_id == after.topic_id:
-            hinted.add(after.turn_id)
-    return hinted
 
 
 def shown_symbol_ids(turns: list[TurnRecord], topic: Topic) -> set[str]:
@@ -279,15 +264,20 @@ class ReportBuilder:
         return list(await asyncio.gather(*(rejudge(t) for t in turns)))
 
     async def build(
-        self, analysis: AnalysisResult, state: SessionState, turns: list[TurnRecord]
+        self,
+        analysis: AnalysisResult,
+        state: SessionState,
+        turns: list[TurnRecord],
+        previous_code_maps: Sequence[CodeMap] = (),
     ) -> Report:
+        """previous_code_maps는 같은 사용자가 같은 레포로 본 지난 면접의 코드 지도입니다 (오래된 것부터, #107)."""
         topic_ids = asked_topic_ids(state, turns)
         if self.force_prepared:
-            return self._turn_table(analysis, state, topic_ids, turns)
+            return self._turn_table(analysis, state, topic_ids, turns, previous_code_maps)
         turns = await self.rejudge_missing(analysis, state, turns)
         answered = [t for t in turns if t.transcript.strip()]
         if not answered:
-            return self._turn_table(analysis, state, topic_ids, turns)
+            return self._turn_table(analysis, state, topic_ids, turns, previous_code_maps)
         try:
             result = await self.llm.complete_structured(
                 ReportDraft,
@@ -298,7 +288,7 @@ class ReportBuilder:
             )
         except LLMError as error:
             logger.info("report_fallback reason=%s", type(error).__name__)
-            return self._turn_table(analysis, state, topic_ids, turns)
+            return self._turn_table(analysis, state, topic_ids, turns, previous_code_maps)
         draft = result.value
         allowed = set(topic_ids)
         model_answers = {t.topic_id: t.model_answer for t in draft.topics if t.topic_id in allowed}
@@ -314,6 +304,7 @@ class ReportBuilder:
             improvements=_clean_list(draft.improvements),
             next_topics=_clean_list(draft.next_topics),
             turns=turn_rows(turns),
+            code_map=build_code_map(analysis, state, turns, previous_code_maps),
         )
 
     def _turn_table(
@@ -322,6 +313,7 @@ class ReportBuilder:
         state: SessionState,
         topic_ids: list[str],
         turns: list[TurnRecord],
+        previous_code_maps: Sequence[CodeMap],
     ) -> Report:
         return Report(
             report_id=uuid4(),
@@ -333,4 +325,6 @@ class ReportBuilder:
             improvements=[],
             next_topics=[],
             turns=turn_rows(turns),
+            # 판단이 있는 답변만 집계하므로, 판단 없이 진행한 면접이면 질문받은 함수 목록은 비어 있습니다.
+            code_map=build_code_map(analysis, state, turns, previous_code_maps),
         )
