@@ -1,0 +1,459 @@
+/* 리포트 화면 (#20). 색과 글꼴은 app/globals.css의 값을 씁니다. */
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  padding: 16px 36px;
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  color: var(--gi-ink);
+  text-decoration: none;
+}
+
+.main {
+  width: 100%;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 16px 24px 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+.head h1 {
+  margin: 0 0 12px;
+  font-size: clamp(28px, 3vw, 38px);
+  line-height: 1.25;
+  letter-spacing: -0.03em;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.section > h2,
+.card > h2 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+
+.muted {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--gi-muted);
+  word-break: keep-all;
+}
+
+.label {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gi-muted);
+}
+
+.notice {
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: var(--gi-radius);
+  background: var(--gi-notice-bg);
+  color: var(--gi-notice-ink);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.problem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--gi-line);
+  border-radius: var(--gi-radius);
+  background: var(--gi-surface);
+}
+
+.problem p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* ── 버튼 ── */
+
+.secondary,
+.ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--gi-radius-pill);
+  border: 1px solid var(--gi-line);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.secondary {
+  min-height: 44px;
+  padding: 0 20px;
+  background: var(--gi-bg);
+  color: var(--gi-ink);
+  font-size: 15px;
+}
+
+.ghost {
+  min-height: 40px;
+  padding: 0 16px;
+  background: transparent;
+  color: var(--gi-muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ── 카드 ── */
+
+.cards,
+.stack,
+.evidence,
+.links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  gap: 16px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 16px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--gi-line);
+  border-radius: var(--gi-radius);
+  background: var(--gi-bg);
+}
+
+.card h3 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+  word-break: keep-all;
+}
+
+.cardHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+/* ── 수준 ── */
+
+.level {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.levelBars {
+  display: flex;
+  gap: 4px;
+}
+
+.barOn,
+.barOff {
+  width: 22px;
+  height: 8px;
+  border-radius: 4px;
+}
+
+.barOn {
+  background: var(--gi-accent);
+}
+
+.barOff {
+  background: var(--gi-line);
+}
+
+.levelText {
+  font-family: var(--gi-font-mono);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.change,
+.changeUp,
+.changeDown {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--gi-muted);
+}
+
+.changeUp {
+  color: var(--gi-accent-text);
+  font-weight: 600;
+}
+
+.changeDown {
+  color: var(--gi-ink);
+  font-weight: 600;
+}
+
+/* ── 근거 ── */
+
+.evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.evidence blockquote {
+  margin: 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--gi-accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--gi-accent-softer);
+  font-size: 15px;
+  line-height: 1.6;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.source a,
+.links a {
+  color: var(--gi-accent-text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.symbol {
+  font-family: var(--gi-font-mono);
+  font-size: 12.5px;
+  color: var(--gi-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ── 총평 ── */
+
+.bullets {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 15px;
+  line-height: 1.6;
+  word-break: keep-all;
+}
+
+/* ── 주제 ── */
+
+.points {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 16px;
+}
+
+.pointsOn,
+.pointsOff {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14.5px;
+  line-height: 1.6;
+  word-break: keep-all;
+}
+
+.pointsOn li,
+.pointsOff li {
+  position: relative;
+  padding-left: 22px;
+}
+
+.pointsOn li::before,
+.pointsOff li::before {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-weight: 700;
+}
+
+.pointsOn li::before {
+  content: "✓";
+  color: var(--gi-accent-text);
+}
+
+.pointsOff li::before {
+  content: "–";
+  color: var(--gi-muted);
+}
+
+.pointsOff li {
+  color: var(--gi-muted);
+}
+
+.model {
+  padding: 14px 16px;
+  border-radius: var(--gi-radius);
+  background: var(--gi-surface);
+}
+
+.model p:last-child {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.7;
+  word-break: keep-all;
+}
+
+.links {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.links a {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  text-decoration: none;
+}
+
+.out {
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ── 모르겠다고 답한 질문 ── */
+
+.stuck {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14.5px;
+  line-height: 1.6;
+  word-break: keep-all;
+}
+
+.stuck li {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px;
+  border-radius: var(--gi-radius);
+  background: var(--gi-notice-bg);
+  color: var(--gi-notice-ink);
+}
+
+.stuck .source {
+  margin-top: 4px;
+}
+
+.stuckNote {
+  color: var(--gi-notice-ink);
+}
+
+/* ── 답변 기록 ── */
+
+.turn {
+  padding: 16px 20px;
+  border: 1px solid var(--gi-line);
+  border-radius: var(--gi-radius);
+  /* 근거의 "N번째 답변" 링크로 왔을 때 위쪽이 가려지지 않게 합니다 */
+  scroll-margin-top: 16px;
+}
+
+.turn:target {
+  border-color: var(--gi-accent);
+  background: var(--gi-accent-softest);
+}
+
+.turnQuestion {
+  margin: 0 0 8px;
+  font-weight: 600;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+
+.turnAnswer {
+  margin: 0 0 10px;
+  font-size: 15px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.turnMeta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 13px;
+  color: var(--gi-muted);
+}
+
+.turnMeta span {
+  padding: 2px 10px;
+  border-radius: var(--gi-radius-pill);
+  background: var(--gi-surface);
+}
+
+@media (max-width: 720px) {
+  .topbar {
+    padding: 12px 16px;
+  }
+
+  .main {
+    padding: 8px 16px 72px;
+    gap: 32px;
+  }
+}

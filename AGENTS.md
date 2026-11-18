@@ -26,7 +26,7 @@ README.md의 "전체 구조"를 따릅니다.
 | `contracts/schema/contracts.json`, `contracts/ts/index.d.ts` | 계약에서 자동 생성한 JSON Schema와 TS 타입. 직접 고치지 않습니다 | 자동 생성 |
 | `api/src/gitinsight_api/` | FastAPI 서버. `brain/`(면접 두뇌), `llm/`(LLMClient), `routes/` | B, D |
 | `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출, git blame 기여 라벨과 최근 커밋, 이름 기준 레포 안 참조 수), 2단계(규칙으로 주제 후보 선택, 참조 수를 서버 사실로 넣어 LLM으로 주제 재료 생성과 서버 검증), 전체 흐름 `pipeline.run_analysis`, 분석 기록 저장소와 연결해 실행하는 `jobs`(같은 프로세스 Launcher), 분석까지 여는 서버 진입점 `server` | A |
-| `web/` | Next.js 웹. 첫 화면(`/`, GitHub 로그인과 면접 시작), 실제 모드 면접 화면(`/interview/[analysisId]`, 음성·텍스트, 도중 전환, 음성 끊김 시 텍스트 자동 전환, 끝내기와 리포트 요청), 음성 토큰 라우트(`/voice-token`, 실험 모드가 아니면 로그인 필요), 실험 화면(`/lab/voice`, `/lab/interview`)이 있습니다 | C |
+| `web/` | Next.js 웹. 첫 화면(`/`, GitHub 로그인과 면접 시작), 실제 모드 면접 화면(`/interview/[analysisId]`, 음성·텍스트, 도중 전환, 음성 끊김 시 텍스트 자동 전환, 끝내기와 리포트 요청), 리포트 화면(`/reports/[reportId]`, 역량별 수준과 근거 인용문, 주제별 내용, 답변 기록, 이전 면접과 비교), 음성 토큰 라우트(`/voice-token`, 실험 모드가 아니면 로그인 필요), 실험 화면(`/lab/voice`, `/lab/interview`)이 있습니다 | C |
 | `fixtures/analysis/` | 데모 레포 분석 결과 샘플(`gitinsight_agent`, 손으로 만듦)과 실제 워커로 만든 데모 스냅샷(`gitinsight_agent_live`) | B |
 | `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |
 | `scripts/` | 계약 생성, 샘플 데이터 도구, 데모 스냅샷 넣기, 수동 LLM 평가 스크립트 | |
@@ -108,7 +108,8 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 서버는 로그인 쿠키의 GitHub 사용자 토큰으로 레포 이름과 기본 브랜치의 최신 커밋을 확인하고(`github_repos.py`), 같은 토큰으로 레포를 내려받습니다. 토큰은 분석 작업의 메모리에만 있고, git에는 환경 변수로만 넘깁니다.
 분석 실행기는 워커 패키지에 있어서 `gitinsight_worker.server:app_factory`로 띄울 때만 붙습니다. `DATABASE_URL`이 없거나 실험 모드이거나 `gitinsight_api.main:app_factory`로 띄우면 분석 요청 API는 503입니다.
 같은 조건에서 면접 세션과 턴 기록도 메모리 대신 `interview_sessions`, `interview_turns` 테이블에 둡니다(`brain/postgres.py`의 `PostgresSessionRepository`). 서버를 다시 시작해도 면접이 이어집니다.
-리포트는 아직 메모리에만 있어서(#20), 재시작 뒤에는 세션 종료를 다시 불러 새로 만듭니다.
+같은 조건에서 리포트도 `reports` 테이블에 둡니다(`report/postgres.py`의 `PostgresReportStore`, #75). 세션 하나에 리포트는 하나이고, 서버를 다시 시작해도 같은 `report_id`로 다시 엽니다.
+이전 면접 비교는 `GET /api/me/progress`입니다(#77). 로그인한 사용자의 리포트에 적힌 역량 수준을 면접별로, 오래된 것부터 최근 20건까지 돌려줍니다. 역량 평가가 없는 리포트(턴별 판단 표)는 빠집니다.
 세션 API가 DB에 연결하지 못하면 503을 돌려줍니다. 턴은 `turn_id`로 한 번만 처리하므로 같은 요청을 다시 보내면 됩니다.
 DB 연결과 테이블 정의는 `api/src/gitinsight_api/db.py`, `tables.py`, 마이그레이션은 `api/migrations/versions/`에 있습니다. 새 테이블은 두 곳을 같이 바꾸고 `alembic check`로 맞는지 확인합니다.
 기본 `pytest`는 DB 없이 돕니다(`api/tests/conftest.py`가 `DATABASE_URL`을 비웁니다). 실제 Postgres 테스트는 `postgres` 표시로 따로 돌립니다. 공용 픽스처 `test_database_url`, `pg_engine`(마이그레이션 적용 후 모든 테이블을 비움)도 `conftest.py`에 있습니다.

@@ -3,7 +3,16 @@
 import type { Action, BrainReply } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import CodeViewer from "@/components/CodeViewer";
-import { ApiError, TRANSCRIPT_MAX, createSession, endSession, isAbort, postTurn } from "@/lib/voice/api";
+import { reportHref } from "@/lib/reports";
+import {
+  ApiError,
+  TRANSCRIPT_MAX,
+  createSession,
+  endSession,
+  isAbort,
+  isReportUnavailable,
+  postTurn,
+} from "@/lib/voice/api";
 import { DEFAULT_VAD } from "@/lib/voice/config";
 import { explainError, isLoginError } from "@/lib/voice/errors";
 import { connectGemini } from "@/lib/voice/gemini";
@@ -79,12 +88,9 @@ const noop = () => undefined;
 export default function InterviewScreen({
   analysisId,
   repo,
-  reportHref,
 }: {
   analysisId: string;
   repo: string | null;
-  /** 리포트 화면 주소. 리포트 화면(#20)이 생기기 전에는 주지 않습니다 */
-  reportHref?: (reportId: string) => string;
 }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [reply, setReply] = useState<BrainReply | null>(null);
@@ -169,7 +175,8 @@ export default function InterviewScreen({
       setReport({ kind: "ready", reportId: ended.report_id });
     } catch (e) {
       if (ac.signal.aborted) return;
-      if (e instanceof ApiError && e.status === 503) {
+      // 리포트를 만들지 않는 서버일 때만 안내하고 끝냅니다. DB 장애 같은 다른 503은 아래에서 "다시 시도"를 보여 줍니다.
+      if (isReportUnavailable(e)) {
         setReport({ kind: "unavailable" });
         return;
       }
@@ -649,23 +656,21 @@ function ReportStatus({
   onRetry,
 }: {
   report: ReportState;
-  href?: (reportId: string) => string;
+  /** 리포트 화면 주소 (/reports/{id}) */
+  href: (reportId: string) => string;
   onRetry: () => void;
 }) {
   return (
     <div role="status" aria-live="polite" className={styles.reportBox}>
       <p className={styles.done}>수고하셨습니다.</p>
       {(report.kind === "idle" || report.kind === "making") && (
-        <p className={styles.reportNote}>리포트를 만들고 있어요. 30초쯤 걸릴 수 있어요.</p>
+        <p className={styles.reportNote}>리포트를 만들고 있어요. 길면 1분쯤 걸릴 수 있어요.</p>
       )}
-      {report.kind === "ready" &&
-        (href ? (
-          <a className={styles.primary} href={href(report.reportId)}>
-            리포트 보기
-          </a>
-        ) : (
-          <p className={styles.reportNote}>리포트가 준비됐어요. 리포트 화면이 연결되면 여기서 열 수 있어요.</p>
-        ))}
+      {report.kind === "ready" && (
+        <a className={styles.primary} href={href(report.reportId)}>
+          리포트 보기
+        </a>
+      )}
       {report.kind === "unavailable" && (
         <p className={styles.reportNote}>실험용 서버(LAB_ENABLED)에서는 리포트를 만들지 않아요.</p>
       )}

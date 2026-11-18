@@ -118,6 +118,16 @@ export const connectGemini: Connect = async (token, hooks, { signal }) => {
     // 도구 호출 뒤 AI 답변 소리가 오기 전에 도착한 받아쓰기 조각은 닫힌 턴(이전 번호)의 늦은 결과로 표시합니다.
     let userTurn = 1;
     let awaitingReply = false;
+    /**
+     * 도구 결과를 보낸 뒤 Gemini가 무엇을 보냈는지 (#86 진단).
+     * 소리 없이 턴이 끝나거나 끊기면 측정 기록에 그 종류를 남깁니다.
+     */
+    let afterTool: { audio: boolean; text: boolean; at: number } | null = null;
+    const reportAfterTool = (how: string) => {
+      if (!afterTool || afterTool.audio) return;
+      const ms = Math.round(performance.now() - afterTool.at);
+      hooks.onError(`tool_reply_${how}`, `도구 결과 뒤 소리 없음: ${how} (${ms}ms, 글자 ${afterTool.text ? "있음" : "없음"})`);
+    };
     const keyOf = (n: number) => `g${n}`;
     const flushUser = () => {
       const t = userText.trim();
@@ -164,6 +174,16 @@ export const connectGemini: Connect = async (token, hooks, { signal }) => {
             hooks.onUserPartial?.(userText.trim());
           }
           if (sc.outputTranscription?.text) aiText += sc.outputTranscription.text;
+          if (afterTool) {
+            if (hasAudio) afterTool.audio = true;
+            if (sc.outputTranscription?.text) afterTool.text = true;
+            if (sc.interrupted) reportAfterTool("interrupted");
+            else if (sc.turnComplete && !afterTool.audio) {
+              reportAfterTool("empty_turn");
+              hooks.onToolReplyEmpty?.();
+            }
+            if (sc.interrupted || sc.turnComplete) afterTool = null;
+          }
           if (sc.turnComplete || sc.interrupted) {
             flushUser();
             if (aiText.trim()) hooks.onAiTranscript(aiText.trim(), !!sc.interrupted);
@@ -172,6 +192,9 @@ export const connectGemini: Connect = async (token, hooks, { signal }) => {
         }
 
         for (const call of m.toolCall?.functionCalls ?? []) {
+          // 앞선 도구 결과를 말하기 전에 새 도구 호출이 왔습니다.
+          reportAfterTool("new_call");
+          afterTool = null;
           // 이 시점까지 모인 받아쓰기를 먼저 넘겨, 진행기가 도구 인자보다 받아쓰기를 쓰게 합니다.
           flushUser();
           hooks.onToolCall(call.id, call.name, call.args ?? {}, keyOf(userTurn));
@@ -196,6 +219,7 @@ export const connectGemini: Connect = async (token, hooks, { signal }) => {
         send({ clientContent: { turns: [{ role: "user", parts: [{ text }] }], turnComplete: true } });
       },
       respondTool(callId, name, output) {
+        afterTool = { audio: false, text: false, at: performance.now() };
         send({ toolResponse: { functionResponses: [{ id: callId, name, response: output }] } });
       },
       userAnalyser: () => user,
