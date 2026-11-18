@@ -266,7 +266,7 @@
       ],
       "contribution_label": "verified",
       "difficulty": 1,
-      "summary": "기존에 실행 중인 VectorService에서 ChromaDB 클라이언트와 임베딩 함수를 찾아 튜플로 반환합니다. 클라이언트는 특정 속성 이름이나 인스턴스 전체 속성을 탐색하여 클래스 타입으로 판별합니다. 임베딩 모델의 경우 embed_query와 embed_documents 메서드를 갖춘 속성을 찾아 LangChainEmbeddingAdapter로 감싸서 반환합니다.",
+      "summary": "기존에 실행 중인 VectorService에서 ChromaDB 클라이언트와 임베딩 함수를 찾아 튜플로 반환하려 합니다. 클라이언트는 속성 이름 후보와 인스턴스 전체 속성을 돌며 클래스 이름으로, 임베딩 모델은 embed_query와 embed_documents 메서드를 갖춘 속성으로 찾고 LangChainEmbeddingAdapter로 감쌉니다. 찾지 못하면 (None, None)을 돌려주며, 이 레포의 VectorService에는 _collection만 있어 실제로는 늘 이 경우가 됩니다.",
       "base_question": "extract_active_db_resources 함수는 어떤 순서로 동작하나요?",
       "question_intent": "이 함수가 자원을 가져오기 위해 어떤 과정을 거치는지 단계별 흐름을 묻는 질문입니다.",
       "expected_points": [
