@@ -24,7 +24,7 @@ from gitinsight_api.brain import utterance
 from gitinsight_api.brain.analysis_source import AnalysisSource
 from gitinsight_api.brain.config import InterviewConfig
 from gitinsight_api.brain.judge import judge_answer
-from gitinsight_api.brain.planner import plan_interview
+from gitinsight_api.brain.planner import NO_REVISIT, RevisitSource, plan_interview
 from gitinsight_api.brain.protocol import (
     AnalysisNotFoundError,
     SessionClosedError,
@@ -85,8 +85,11 @@ class InterviewBrain:
         quote_matcher: QuoteMatcher = EXACT,
         clock: Clock = utc_now,
         perf_counter: Callable[[], float] = time.perf_counter,
+        revisit: RevisitSource | None = None,
     ) -> None:
         self._analyses = analyses
+        # 지난 면접 기록입니다. 없으면 항상 기본 순서로 묻습니다.
+        self._revisit = revisit
         self._repository = repository
         self._llm = llm
         self._config = config or InterviewConfig()
@@ -120,6 +123,12 @@ class InterviewBrain:
         self, request: SessionCreate, owner_id: str | None = None
     ) -> tuple[UUID, BrainReply]:
         analysis = await self._analysis(request.analysis_id)
+        # 같은 레포로 본 지난 면접이 있으면 막혔던 함수와 그 뒤 커밋이 들어온 함수부터 묻습니다 (#107).
+        revisit = (
+            await self._revisit.targets(owner_id, analysis)
+            if self._revisit is not None
+            else NO_REVISIT
+        )
         plan = await plan_interview(
             analysis,
             None if self._force_prepared else request.jd_text,
@@ -127,8 +136,15 @@ class InterviewBrain:
             config=self._config,
             timeout_s=self._plan_timeout_s,
             model=self._plan_model,
+            revisit=revisit,
         )
         topic = analysis.topic(plan.topic_order[0])
+        if topic.topic_id in revisit.stuck:
+            intro = utterance.FIRST_INTRO_STUCK
+        elif topic.topic_id in revisit.changed:
+            intro = utterance.FIRST_INTRO_CHANGED
+        else:
+            intro = utterance.topic_intro(topic.contribution_label, first=True)
         now = self._clock()
         state = SessionState(
             session_id=uuid4(),
@@ -150,9 +166,7 @@ class InterviewBrain:
         reply = BrainReply(
             turn_id=None,
             action=Action.ASK,
-            utterance=utterance.join(
-                utterance.topic_intro(topic.contribution_label, first=True), topic.base_question
-            ),
+            utterance=utterance.join(intro, topic.base_question),
             highlight=topic.symbol,
             topic_id=topic.topic_id,
             depth=0,
