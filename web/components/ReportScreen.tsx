@@ -1,11 +1,22 @@
 "use client";
 
-import type { CompetencyScore, ProgressEntry, Report, SymbolRef, TopicReport, TurnRow } from "@gitinsight/contracts";
+import type {
+  CodeMap,
+  CompetencyScore,
+  ExplainStatus,
+  ProgressEntry,
+  Report,
+  SymbolRef,
+  TopicReport,
+  TurnRow,
+} from "@gitinsight/contracts";
 import { useEffect, useState } from "react";
+import { interviewHref } from "@/lib/analyses";
 import {
   ACTION_LABEL,
   COMPETENCY_LABEL,
   COMPETENCY_ORDER,
+  EXPLAIN_STATUS_LABEL,
   FALLBACK_LABEL,
   INTENT_LABEL,
   MAX_LEVEL,
@@ -143,6 +154,8 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
         </section>
       )}
 
+      {report.code_map && <CodeMapSection codeMap={report.code_map} />}
+
       {(report.strengths.length > 0 || report.improvements.length > 0 || report.next_topics.length > 0) && (
         <section aria-label="총평" className={styles.columns}>
           <Bullets title="잘한 점" items={report.strengths} />
@@ -247,6 +260,100 @@ function SymbolTag({ symbol }: { symbol: SymbolRef }) {
     <span className={styles.symbol}>
       {symbol.path} {symbol.start_line}–{symbol.end_line}줄 · {symbol.name}
     </span>
+  );
+}
+
+const STATUS_CLASS: Record<ExplainStatus, string> = {
+  explained: styles.statusExplained,
+  explained_after_hint: styles.statusAfterHint,
+  stuck: styles.statusStuck,
+};
+
+/**
+ * 설명 못 한 코드 지도 (#107).
+ * 상태와 숫자는 서버가 턴 기록으로 정한 값입니다. 화면에서는 더하기만 합니다.
+ */
+function CodeMapSection({ codeMap }: { codeMap: CodeMap }) {
+  const total = codeMap.key_function_count;
+  const explained = codeMap.explained_count + codeMap.after_hint_count;
+  const notAsked = Math.max(0, total - explained - codeMap.stuck_count);
+  const bar: { key: string; count: number; className: string }[] = [
+    { key: "explained", count: codeMap.explained_count, className: styles.mapExplained },
+    { key: "after_hint", count: codeMap.after_hint_count, className: styles.mapAfterHint },
+    { key: "stuck", count: codeMap.stuck_count, className: styles.mapStuck },
+    { key: "not_asked", count: notAsked, className: styles.mapNotAsked },
+  ];
+
+  return (
+    <section aria-labelledby="code-map" className={styles.section}>
+      <h2 id="code-map">코드 지도</h2>
+      {total > 0 && (
+        <div className={styles.card}>
+          <p className={styles.mapHeadline}>
+            핵심 함수 {total}개 중 <strong>{explained}개</strong>를 설명했어요.
+          </p>
+          <div className={styles.mapBar} aria-hidden="true">
+            {bar
+              .filter((part) => part.count > 0)
+              .map((part) => (
+                <span key={part.key} className={part.className} style={{ flexGrow: part.count }} />
+              ))}
+          </div>
+          <ul className={styles.mapLegend}>
+            <li>
+              <span className={styles.mapExplained} aria-hidden="true" />
+              {EXPLAIN_STATUS_LABEL.explained} {codeMap.explained_count}개
+            </li>
+            <li>
+              <span className={styles.mapAfterHint} aria-hidden="true" />
+              {EXPLAIN_STATUS_LABEL.explained_after_hint} {codeMap.after_hint_count}개
+            </li>
+            <li>
+              <span className={styles.mapStuck} aria-hidden="true" />
+              {EXPLAIN_STATUS_LABEL.stuck} {codeMap.stuck_count}개
+            </li>
+            <li>
+              <span className={styles.mapNotAsked} aria-hidden="true" />
+              아직 묻지 않음 {notAsked}개
+            </li>
+          </ul>
+          <p className={styles.muted}>
+            이 레포로 본 면접을 모두 합친 숫자예요. 여러 번 질문받은 함수는 가장 최근 면접의 상태로 세요.
+          </p>
+        </div>
+      )}
+
+      <div>
+        <p className={styles.label}>이번 면접에서 질문받은 함수</p>
+        {codeMap.entries.length === 0 ? (
+          <p className={styles.muted}>이번 면접에서는 설명했는지 확인할 수 있는 답변이 없었어요.</p>
+        ) : (
+          <ul className={styles.mapEntries}>
+            {codeMap.entries.map((entry) => (
+              <li key={entry.symbol.symbol_id}>
+                <span className={STATUS_CLASS[entry.status]}>{EXPLAIN_STATUS_LABEL[entry.status]}</span>
+                <SymbolTag symbol={entry.symbol} />
+                {isGithubLink(entry.url) && (
+                  <a className={styles.out} href={entry.url} target="_blank" rel="noopener noreferrer">
+                    GitHub에서 열기
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className={styles.mapAgain}>
+        <a className={styles.secondary} href={interviewHref(codeMap.analysis_id, codeMap.repo_full_name)}>
+          이 레포로 다시 면접 보기
+        </a>
+        <p className={styles.muted}>
+          다시 면접을 보면 막혔던 함수부터 물어봐요. 이번 면접 뒤에 커밋을 올렸다면 첫 화면에서 레포를 다시 분석해 주세요. 그러면
+          커밋이 들어온 함수도 먼저 물어봐요.
+        </p>
+      </div>
+    </section>
   );
 }
 

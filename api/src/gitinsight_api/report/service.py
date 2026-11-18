@@ -16,6 +16,7 @@ from gitinsight_api.brain.analysis_source import AnalysisSource
 from gitinsight_api.brain.protocol import AnalysisNotFoundError
 from gitinsight_api.brain.repository import SessionRepository
 from gitinsight_api.report.builder import ReportBuilder
+from gitinsight_api.report.code_map import ReportHistory
 from gitinsight_contracts.report import CompetencyLevel, ProgressEntry, Report
 
 # 이전 면접 비교에 돌려주는 최대 면접 수입니다. 가장 최근 것부터 이만큼만 봅니다.
@@ -111,7 +112,11 @@ class ReportService:
             if analysis is None:
                 raise AnalysisNotFoundError(state.analysis_id)
             turns = await self._sessions.list_turns(session_id)
-            report = await self._builder.build(analysis, state, turns)
+            # 같은 사용자가 같은 레포로 본 지난 면접의 코드 지도입니다. 누적 숫자에 씁니다 (#107).
+            previous = await ReportHistory(self._store, self._analyses).code_maps(
+                state.owner_id, analysis.repo_full_name
+            )
+            report = await self._builder.build(analysis, state, turns, previous)
             try:
                 await self._store.save(report, state.owner_id)
             except ReportAlreadyExistsError:

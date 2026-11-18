@@ -1,5 +1,13 @@
 /** 리포트와 이전 면접 비교 불러오기 (계약 Report, ProgressEntry). 서버: GET /api/reports/{id}, GET /api/me/progress */
-import type { Action, Competency, FallbackReason, Intent, ProgressEntry, Report } from "@gitinsight/contracts";
+import type {
+  Action,
+  Competency,
+  ExplainStatus,
+  FallbackReason,
+  Intent,
+  ProgressEntry,
+  Report,
+} from "@gitinsight/contracts";
 
 /** 리포트 화면 주소 */
 export function reportHref(reportId: string): string {
@@ -95,6 +103,13 @@ export const INTENT_LABEL: Record<Intent, string> = {
   CLARIFY: "질문 뜻을 되물음",
   REPEAT: "다시 말해 달라고 함",
   OFF_TOPIC: "질문과 다른 이야기",
+};
+
+/** 질문받은 함수를 얼마나 설명했는지 (코드 지도, #107) */
+export const EXPLAIN_STATUS_LABEL: Record<ExplainStatus, string> = {
+  explained: "설명함",
+  explained_after_hint: "힌트 받고 설명함",
+  stuck: "막힘",
 };
 
 /** 면접 중에 이 답변을 판단하지 못한 까닭 */

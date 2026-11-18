@@ -261,6 +261,77 @@
       "title": "CodeLink",
       "type": "object"
     },
+    "CodeMap": {
+      "additionalProperties": false,
+      "description": "설명 못 한 코드 지도입니다 (#107). LLM 없이 턴 기록을 집계해 만듭니다.\n\nentries는 이번 면접에서 질문받은 함수입니다.\n숫자 네 개는 같은 사용자가 이 레포로 본 면접을 모두 합친 값이고, 함수마다 가장 최근 상태로 셉니다.",
+      "properties": {
+        "after_hint_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "analysis_id": {
+          "type": "string"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/CodeMapEntry"
+          },
+          "type": "array"
+        },
+        "explained_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key_function_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "repo_full_name": {
+          "type": "string"
+        },
+        "stuck_count": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "analysis_id",
+        "repo_full_name",
+        "entries",
+        "key_function_count",
+        "explained_count",
+        "after_hint_count",
+        "stuck_count"
+      ],
+      "title": "CodeMap",
+      "type": "object"
+    },
+    "CodeMapEntry": {
+      "additionalProperties": false,
+      "description": "이번 면접에서 질문받은 함수 하나와 그 상태입니다. 코드 위치는 분석 결과에서 가져옵니다.",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/ExplainStatus"
+        },
+        "symbol": {
+          "$ref": "#/$defs/SymbolRef"
+        },
+        "topic_id": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol",
+        "url",
+        "topic_id",
+        "status"
+      ],
+      "title": "CodeMapEntry",
+      "type": "object"
+    },
     "Competency": {
       "enum": [
         "code_understanding",
@@ -452,6 +523,16 @@
       ],
       "title": "ExpectedPoint",
       "type": "object"
+    },
+    "ExplainStatus": {
+      "description": "질문받은 함수를 얼마나 설명했는지입니다. 서버 규칙이 턴 기록으로 정하고, 점수와는 따로입니다.",
+      "enum": [
+        "explained",
+        "explained_after_hint",
+        "stuck"
+      ],
+      "title": "ExplainStatus",
+      "type": "string"
     },
     "FallbackReason": {
       "enum": [
@@ -819,6 +900,17 @@
     "Report": {
       "additionalProperties": false,
       "properties": {
+        "code_map": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodeMap"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "competencies": {
           "items": {
             "$ref": "#/$defs/CompetencyScore"
@@ -876,7 +968,8 @@
         "strengths",
         "improvements",
         "next_topics",
-        "turns"
+        "turns",
+        "code_map"
       ],
       "title": "Report",
       "type": "object"

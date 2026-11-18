@@ -24,6 +24,13 @@ export type ContributionLabel = "verified" | "shared" | "unverified";
  */
 export type SymbolKind = "function" | "method" | "class";
 /**
+ * 질문받은 함수를 얼마나 설명했는지입니다. 서버 규칙이 턴 기록으로 정하고, 점수와는 따로입니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "ExplainStatus".
+ */
+export type ExplainStatus = "explained" | "explained_after_hint" | "stuck";
+/**
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema
  * via the `definition` "Competency".
  */
@@ -241,6 +248,36 @@ export interface CodeLink {
   url: string;
 }
 /**
+ * 설명 못 한 코드 지도입니다 (#107). LLM 없이 턴 기록을 집계해 만듭니다.
+ *
+ * entries는 이번 면접에서 질문받은 함수입니다.
+ * 숫자 네 개는 같은 사용자가 이 레포로 본 면접을 모두 합친 값이고, 함수마다 가장 최근 상태로 셉니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "CodeMap".
+ */
+export interface CodeMap {
+  after_hint_count: number;
+  analysis_id: string;
+  entries: CodeMapEntry[];
+  explained_count: number;
+  key_function_count: number;
+  repo_full_name: string;
+  stuck_count: number;
+}
+/**
+ * 이번 면접에서 질문받은 함수 하나와 그 상태입니다. 코드 위치는 분석 결과에서 가져옵니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "CodeMapEntry".
+ */
+export interface CodeMapEntry {
+  status: ExplainStatus;
+  symbol: SymbolRef;
+  topic_id: string;
+  url: string;
+}
+/**
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema
  * via the `definition` "CompetencyDraft".
  */
@@ -371,6 +408,7 @@ export interface Repo {
  * via the `definition` "Report".
  */
 export interface Report {
+  code_map: CodeMap | null;
   competencies: CompetencyScore[];
   improvements: string[];
   kind: ReportKind;
