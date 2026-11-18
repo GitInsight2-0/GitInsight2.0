@@ -20,9 +20,14 @@ logger = logging.getLogger(__name__)
 AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 TOKEN_URL = "https://github.com/login/oauth/access_token"
 USER_URL = "https://api.github.com/user"
+# 사용자 토큰 하나를 폐기합니다. App 설치와 사용자 승인은 그대로 둡니다.
+# GitHub 문서: https://docs.github.com/rest/apps/oauth-applications#delete-an-app-token
+REVOKE_URL_TEMPLATE = "https://api.github.com/applications/{client_id}/token"
 API_VERSION = "2026-03-10"
 # GitHub 호출 하나의 제한 시간(초)입니다. 넘으면 로그인 실패로 웹에 돌려보냅니다.
 HTTP_TIMEOUT_S = 10.0
+# 로그아웃은 이 시간만 기다립니다. 폐기가 늦어도 쿠키는 지우고 바로 응답합니다.
+REVOKE_TIMEOUT_S = 3.0
 
 
 class GitHubAuthError(Exception):
@@ -153,6 +158,31 @@ class GitHubOAuth:
         # 웹이 <img src>로 쓰므로 https 주소만 넘깁니다.
         avatar = user.avatar_url if user.avatar_url.startswith("https://") else ""
         return GitHubUser(user_id=str(user.id), login=user.login, avatar_url=avatar)
+
+    async def revoke_token(self, token: SecretStr) -> bool:
+        """사용자 토큰을 폐기합니다. 실패해도 예외를 내지 않고 False를 돌려줍니다.
+
+        이미 만료됐거나 폐기된 토큰은 GitHub가 404로 답합니다. 쓸 수 없는 토큰이므로 성공으로 봅니다.
+        """
+        try:
+            response = await self._client.request(
+                "DELETE",
+                REVOKE_URL_TEMPLATE.format(client_id=self._client_id),
+                json={"access_token": token.get_secret_value()},
+                auth=(self._client_id, self._client_secret.get_secret_value()),
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": API_VERSION,
+                },
+                timeout=REVOKE_TIMEOUT_S,
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("GitHub 토큰 폐기 요청 실패: %s", type(exc).__name__)
+            return False
+        if response.status_code in (204, 404):
+            return True
+        logger.warning("GitHub 토큰 폐기 응답 오류: HTTP %s", response.status_code)
+        return False
 
 
 def _json_object(response: httpx.Response) -> dict[str, object] | None:

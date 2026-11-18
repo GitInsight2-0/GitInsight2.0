@@ -1,5 +1,6 @@
 """GitHub 로그인(#18 1단계) 테스트. GitHub는 httpx.MockTransport로 흉내 내고 실제로 부르지 않습니다."""
 
+import base64
 import json
 import logging
 import time
@@ -16,7 +17,12 @@ from fastapi import FastAPI
 from pydantic import SecretStr, ValidationError
 
 from gitinsight_api.brain.factory import build_fixture_brain, build_report_service
-from gitinsight_api.github_oauth import TOKEN_URL, USER_URL, code_challenge
+from gitinsight_api.github_oauth import (
+    REVOKE_URL_TEMPLATE,
+    TOKEN_URL,
+    USER_URL,
+    code_challenge,
+)
 from gitinsight_api.llm.fake import FakeLLM
 from gitinsight_api.login_cookie import (
     OAUTH_COOKIE,
@@ -41,6 +47,7 @@ CLIENT_SECRET = "test-client-secret-value"
 SESSION_SECRET = "s" * 40
 CODE = "test-oauth-code-1234"
 TOKEN = "ghu_TestUserAccessToken0000000000000000"
+REVOKE_URL = REVOKE_URL_TEMPLATE.format(client_id=CLIENT_ID)
 GITHUB_USER: dict[str, Any] = {
     "id": 4242,
     "login": "octo",
@@ -81,6 +88,7 @@ class FakeGitHub:
         self.user_response: Callable[[], httpx.Response] = lambda: httpx.Response(
             200, json=GITHUB_USER
         )
+        self.revoke_response: Callable[[], httpx.Response] = lambda: httpx.Response(204)
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -91,7 +99,12 @@ class FakeGitHub:
             if request.headers.get("Authorization") != f"Bearer {TOKEN}":
                 return httpx.Response(401, json={"message": "Bad credentials"})
             return self.user_response()
+        if request.method == "DELETE" and url == REVOKE_URL:
+            return self.revoke_response()
         return httpx.Response(404)
+
+    def revoke_requests(self) -> list[httpx.Request]:
+        return [r for r in self.requests if r.method == "DELETE"]
 
     def client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(transport=httpx.MockTransport(self.handler))
@@ -550,9 +563,67 @@ async def test_logout_clears_login_cookie(metrics_path: Path) -> None:
 
 
 async def test_logout_without_login_is_204(metrics_path: Path) -> None:
-    async with browser(build_app(auth_settings(metrics_path), FakeGitHub())) as client:
+    github = FakeGitHub()
+    async with browser(build_app(auth_settings(metrics_path), github)) as client:
         response = await client.post("/api/auth/logout")
     assert response.status_code == 204
+    assert github.requests == []
+
+
+async def test_logout_revokes_github_token(metrics_path: Path) -> None:
+    github = FakeGitHub()
+    async with browser(build_app(auth_settings(metrics_path), github)) as client:
+        await login(client)
+        response = await client.post("/api/auth/logout")
+
+    assert response.status_code == 204
+    (revoke,) = github.revoke_requests()
+    assert str(revoke.url) == REVOKE_URL
+    # App Client ID와 secret으로 Basic 인증하고, 폐기할 토큰은 본문에 넣습니다.
+    basic = base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
+    assert revoke.headers["Authorization"] == f"Basic {basic}"
+    assert json.loads(revoke.content) == {"access_token": TOKEN}
+    assert TOKEN not in str(revoke.url)
+
+
+@pytest.mark.parametrize(
+    "make_response",
+    [
+        lambda: httpx.Response(404, json={"message": "Not Found"}),
+        lambda: httpx.Response(422, json={"message": "Validation Failed"}),
+        lambda: httpx.Response(500, text="oops"),
+        _raise_connect_error,
+    ],
+)
+async def test_logout_clears_cookie_even_if_revoke_fails(
+    metrics_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    make_response: Callable[[], httpx.Response],
+) -> None:
+    github = FakeGitHub()
+    github.revoke_response = make_response
+    caplog.set_level(logging.DEBUG)
+    async with browser(build_app(auth_settings(metrics_path), github)) as client:
+        await login(client)
+        response = await client.post("/api/auth/logout")
+        me = await client.get("/api/me")
+
+    assert response.status_code == 204
+    (header,) = set_cookie_headers(response, SESSION_COOKIE)
+    assert cookie_attrs(header)["max-age"] == "0"
+    assert me.status_code == 401
+    assert len(github.revoke_requests()) == 1
+    for secret in (CODE, TOKEN, CLIENT_SECRET, SESSION_SECRET):
+        assert secret not in caplog.text
+
+
+async def test_logout_with_invalid_cookie_does_not_call_github(metrics_path: Path) -> None:
+    github = FakeGitHub()
+    async with browser(build_app(auth_settings(metrics_path), github)) as client:
+        client.cookies.set(SESSION_COOKIE, "not-a-cookie")
+        response = await client.post("/api/auth/logout")
+    assert response.status_code == 204
+    assert github.requests == []
 
 
 async def test_logged_in_user_owns_sessions_and_others_get_403(metrics_path: Path) -> None:
