@@ -643,7 +643,7 @@ export default function InterviewScreen({
           )}
         </section>
 
-        <CodeViewer repo={repo} target={reply?.highlight ?? null} />
+        <CodeViewer analysisId={analysisId} repo={repo} target={reply?.highlight ?? null} />
       </main>
     </div>
   );

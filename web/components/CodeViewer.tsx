@@ -19,20 +19,30 @@ type State =
  * 서버가 준 highlight(경로, 줄 범위, 커밋)만 강조합니다. 줄 번호를 화면에서 바꾸지 않습니다.
  * 코드를 못 받으면 위치만 보여 줍니다 (런북 "코드 뷰어" 1차 대비책).
  */
-export default function CodeViewer({ repo, target }: { repo: string | null; target: SymbolRef | null }) {
+export default function CodeViewer({
+  analysisId,
+  repo,
+  target,
+}: {
+  /** 서버 /api/code에 넘길 분석 id (비공개 레포도 됨) */
+  analysisId: string | null;
+  /** 공개 레포 대비책(raw.githubusercontent.com)에 쓸 레포 이름 */
+  repo: string | null;
+  target: SymbolRef | null;
+}) {
   const [state, setState] = useState<State>({ kind: "idle" });
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const firstLineRef = useRef<HTMLDivElement | null>(null);
-  const key = target ? `${repo}@${target.commit_sha}:${target.path}` : "";
+  const key = target ? `${analysisId}|${repo}@${target.commit_sha}:${target.path}` : "";
 
   useEffect(() => {
-    if (!target || !repo) {
+    if (!target || (!repo && !analysisId)) {
       setState({ kind: "idle" });
       return;
     }
     let alive = true;
     setState({ kind: "loading" });
-    fetchFileLines(repo, target.commit_sha, target.path)
+    fetchFileLines({ analysisId, repo }, target.commit_sha, target.path)
       .then((lines) => alive && setState({ kind: "ok", key, lines }))
       .catch((e: unknown) => alive && setState({ kind: "error", message: String((e as Error).message ?? e) }));
     return () => {
@@ -57,7 +67,7 @@ export default function CodeViewer({ repo, target }: { repo: string | null; targ
       </Panel>
     );
   }
-  if (!repo || state.kind === "error") {
+  if ((!repo && !analysisId) || state.kind === "error") {
     return (
       <Panel target={target} status="코드를 불러오지 못해 위치만 보여 줍니다">
         <p className={styles.codeMessage}>
