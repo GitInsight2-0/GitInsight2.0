@@ -39,24 +39,31 @@ def line_count(symbol: SymbolRef) -> int:
     return symbol.end_line - symbol.start_line + 1
 
 
+# TypeScript·JavaScript 테스트 관례입니다 (#72). 폴더 이름과 `이름.test.ts`, `이름.spec.js` 같은 파일 이름입니다.
+_SCRIPT_TEST_DIRS = frozenset({"__tests__", "__mocks__"})
+_SCRIPT_TEST_NAME = re.compile(r"\.(?:test|spec)\.[cm]?[jt]sx?$")
+
+
 def is_test_path(path: str) -> bool:
     parts = path.split("/")
     name = parts[-1]
     return (
-        any(p in {"test", "tests", "testing"} for p in parts[:-1])
+        any(p in {"test", "tests", "testing"} or p in _SCRIPT_TEST_DIRS for p in parts[:-1])
         or name.startswith("test_")
         or name.endswith("_test.py")
         or name == "conftest.py"
+        or _SCRIPT_TEST_NAME.search(name) is not None
     )
 
 
 # 경로 조각에 이 단어가 들어 있으면 지금 쓰는 코드가 아니거나 자동 생성 코드로 봅니다.
 _INACTIVE_WORDS = ("legacy", "deprecated", "backup", "archive", "migration", "example", "sample")
 _INACTIVE_PARTS = frozenset({"old", "bak"})
+_SOURCE_SUFFIX = re.compile(r"\.(?:py|[cm]?[jt]sx?)$")
 
 
 def is_inactive_path(path: str) -> bool:
-    parts = [p.lower().removesuffix(".py") for p in path.split("/")]
+    parts = [_SOURCE_SUFFIX.sub("", p.lower()) for p in path.split("/")]
     return any(p in _INACTIVE_PARTS or any(w in p for w in _INACTIVE_WORDS) for p in parts)
 
 
@@ -117,8 +124,40 @@ def logic_line_count(code: str) -> int:
     return count
 
 
-def has_enough_logic(code: str) -> bool:
-    return logic_line_count(code) >= MIN_LOGIC_LINES
+_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+_SCRIPT_HEADER = re.compile(
+    r"(?:export\s+)?(?:default\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\b|class\s)"
+)
+_SCRIPT_NO_OP = frozenset({"}", "};", "})", "});", "},", ")", ");", "]", "];", "return;", "{"})
+
+
+def script_logic_line_count(code: str) -> int:
+    """TypeScript·JavaScript 심볼 코드에서 실제로 동작하는 줄 수를 셉니다 (#72).
+
+    빈 줄, 주석, 함수·클래스 머리줄, 데코레이터, console 같은 로그 호출, 닫는 괄호만 있는 줄은 빼고 셉니다.
+    변수에 담은 화살표 함수의 머리줄과 메서드 머리줄은 그대로 세므로, 많게 셀 수는 있어도 적게 세지는 않습니다.
+    문자열 안의 주석 모양(`"/* */"`)은 가리지 않습니다.
+    """
+    count = 0
+    for raw in _BLOCK_COMMENT.sub("", code).splitlines():
+        line = raw.strip()
+        if (
+            not line
+            or line.startswith(("//", "@"))
+            or _SCRIPT_HEADER.match(line)
+            or _LOG_CALL.match(line)
+            or line in _SCRIPT_NO_OP
+        ):
+            continue
+        count += 1
+    return count
+
+
+def has_enough_logic(code: str, path: str = "") -> bool:
+    """`path`의 확장자가 TypeScript·JavaScript면 그 문법 기준으로, 아니면 Python 기준으로 셉니다."""
+    script = _SOURCE_SUFFIX.search(path.lower()) is not None and not path.lower().endswith(".py")
+    count = script_logic_line_count(code) if script else logic_line_count(code)
+    return count >= MIN_LOGIC_LINES
 
 
 def overlaps(a: SymbolRef, b: SymbolRef) -> bool:

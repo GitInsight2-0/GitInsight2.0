@@ -7,6 +7,7 @@ from gitinsight_worker.candidates import (
     is_inactive_path,
     is_test_path,
     logic_line_count,
+    script_logic_line_count,
     select_candidates,
 )
 
@@ -158,3 +159,67 @@ def test_string_value_lines_are_counted_not_skipped() -> None:
     return text
 '''
     assert logic_line_count(code) == 4
+
+
+# ---- TypeScript·JavaScript (#72) ----
+
+
+def test_script_test_and_inactive_paths() -> None:
+    assert is_test_path("web/lib/api.test.ts")
+    assert is_test_path("web/components/Button.spec.tsx")
+    assert is_test_path("src/__tests__/util.js")
+    assert is_test_path("src/__mocks__/client.mjs")
+    assert not is_test_path("web/lib/latest.ts")
+    assert not is_test_path("web/lib/spec.ts")
+    assert is_inactive_path("src/old.ts")
+    assert is_inactive_path("examples/demo.jsx")
+    assert not is_inactive_path("src/models.ts")
+
+
+HOLLOW_SCRIPT_CLASS = """export class AuditLogger {
+  /**
+   * 시작을 기록합니다.
+   * @param name 작업 이름
+   */
+  start(name: string) {
+    console.log("start", name);
+  }
+
+  // 끝을 기록합니다.
+  finish(name: string) {
+    this.logger.info("finish", name);
+  }
+
+  reset() {
+    return;
+  }
+}
+"""
+
+WORKING_SCRIPT_FUNCTION = """export async function loadItems(client: Client, limit = 10): Promise<Item[]> {
+  const response = await client.get("/items", { limit });
+  if (!response.ok) {
+    throw new Error("failed");
+  }
+  const items = response.data.filter((item) => item.active);
+  return items.slice(0, limit);
+}
+"""
+
+
+def test_hollow_script_class_has_little_logic() -> None:
+    # 메서드 머리줄 3개만 남습니다. 주석, 로그 호출, 빈 return, 닫는 괄호는 세지 않습니다.
+    assert script_logic_line_count(HOLLOW_SCRIPT_CLASS) == 3
+    assert not has_enough_logic(HOLLOW_SCRIPT_CLASS, "src/audit.ts")
+
+
+def test_working_script_function_has_enough_logic() -> None:
+    # 함수 머리줄과 닫는 괄호를 뺀 다섯 줄입니다.
+    assert script_logic_line_count(WORKING_SCRIPT_FUNCTION) == 5
+    assert has_enough_logic(WORKING_SCRIPT_FUNCTION, "src/items.ts")
+
+
+def test_logic_rules_follow_the_file_language() -> None:
+    # 경로가 없거나 Python이면 지금까지의 Python 기준을 그대로 씁니다.
+    assert has_enough_logic(WORKING_FUNCTION) == has_enough_logic(WORKING_FUNCTION, "app/a.py")
+    assert has_enough_logic(HOLLOW_CLASS) == has_enough_logic(HOLLOW_CLASS, "app/a.py")

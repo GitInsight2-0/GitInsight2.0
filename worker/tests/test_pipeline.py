@@ -136,10 +136,15 @@ async def test_without_requester_label_is_unverified_but_commits_remain(
 
 # ---- 지원하지 않는 언어 (#70) ----
 
-NO_PYTHON_REPOS = {
-    # TypeScript만 있는 레포 (통합 점검에서 Stage2Error로 끝나던 경우)
-    "typescript": {
-        "src/index.ts": "export function handle(x: number): number {\n  return x + 1;\n}\n",
+NO_SUPPORTED_CODE_REPOS = {
+    # 지원하지 않는 언어만 있는 레포
+    "go": {
+        "main.go": "package main\n\nfunc main() {\n\tprintln(1)\n}\n",
+        "go.mod": "module demo\n",
+    },
+    # TypeScript 파일은 있지만 타입 선언뿐인 레포
+    "typescript-without-definitions": {
+        "src/types.ts": "export interface Item {\n  id: string;\n}\n\nexport type Id = string;\n",
         "package.json": '{"name": "demo"}\n',
     },
     # Python 파일은 있지만 함수·클래스가 없는 레포
@@ -150,7 +155,9 @@ NO_PYTHON_REPOS = {
 }
 
 
-@pytest.mark.parametrize("files", NO_PYTHON_REPOS.values(), ids=NO_PYTHON_REPOS.keys())
+@pytest.mark.parametrize(
+    "files", NO_SUPPORTED_CODE_REPOS.values(), ids=NO_SUPPORTED_CODE_REPOS.keys()
+)
 async def test_repo_without_supported_code_fails_before_llm(
     files: dict[str, str], tmp_path: Path
 ) -> None:
@@ -169,3 +176,44 @@ async def test_repo_without_supported_code_fails_before_llm(
     assert AnalysisStatus.STAGE2 not in {s.status for s in recorder.states}
     # 내려받은 레포는 지웁니다.
     assert list((tmp_path / "work").iterdir()) == []
+
+
+# ---- TypeScript·JavaScript 레포 (#72) ----
+
+
+def _script_body(prefix: str, n: int = 8) -> str:
+    return "".join(f"  const {prefix}{i} = {i};\n" for i in range(n))
+
+
+SCRIPT_REPO = {
+    "src/service.ts": (
+        "export class Service {\n"
+        "  run(): number {\n" + _script_body("a") + "    return a0;\n  }\n"
+        "}\n"
+    ),
+    "src/handler.tsx": (
+        "export const handle = (request: Request) => {\n" + _script_body("c") + "  return c0;\n};\n"
+    ),
+    "lib/util.js": "function helper() {\n" + _script_body("d") + "  return d0;\n}\n",
+}
+
+
+async def test_typescript_and_javascript_repo_produces_topics(tmp_path: Path) -> None:
+    path = tmp_path / "origin"
+    origin = (path, make_origin(path, SCRIPT_REPO))
+    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+
+    result = await analyze(origin, tmp_path / "work", llm, Recorder())
+
+    AnalysisResult.model_validate(result.model_dump())
+    lines = {rel: text.splitlines() for rel, text in SCRIPT_REPO.items()}
+    located = {
+        t.symbol.symbol_id: lines[t.symbol.path][t.symbol.start_line - 1 : t.symbol.end_line]
+        for t in result.topics
+    }
+    # 줄 범위가 실제 코드의 정의 첫 줄과 닫는 줄을 가리킵니다.
+    assert {symbol_id: (code[0], code[-1]) for symbol_id, code in located.items()} == {
+        "src/service.ts::Service": ("export class Service {", "}"),
+        "src/handler.tsx::handle": ("export const handle = (request: Request) => {", "};"),
+        "lib/util.js::helper": ("function helper() {", "}"),
+    }

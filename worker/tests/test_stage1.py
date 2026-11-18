@@ -231,3 +231,37 @@ def test_reference_counts_cover_the_whole_repo(tmp_path: Path) -> None:
     assert references["app/service.py::Service.search"] == 0
     # 특수 메서드는 언어가 부르므로 참조 수를 알 수 없음으로 둡니다.
     assert "app/service.py::Service.__init__" not in references
+
+
+def test_typescript_and_javascript_symbols_are_extracted_without_references(
+    tmp_path: Path,
+) -> None:
+    files = {
+        "app/main.py": "def main():\n    return helper()\n\n\ndef helper():\n    return 1\n",
+        "web/lib/api.ts": "export function fetchItems() {\n  return helper();\n}\n",
+        "web/app/page.tsx": "export const Page = () => <main />;\n",
+        "web/server.cjs": "exports.start = function () {\n  return 1;\n};\n",
+        # 압축한 배포용 파일과 의존성 폴더는 사람이 쓴 코드가 아닙니다.
+        "web/public/app.min.js": "function a(){return 1}\n",
+        "node_modules/pkg/index.js": "function vendored() {}\n",
+    }
+    write_tree(tmp_path, files)
+
+    result = analyze_tree(tmp_path, SHA)
+
+    assert {s.symbol_id for s in result.symbols} == {
+        "app/main.py::main",
+        "app/main.py::helper",
+        "web/lib/api.ts::fetchItems",
+        "web/app/page.tsx::Page",
+        "web/server.cjs::start",
+    }
+    assert result.symbol_count == 5
+    assert set(result.contributions) == {s.symbol_id for s in result.symbols}
+    # 참조는 Python 파일에서만 셉니다. TS/JS 심볼은 0곳이 아니라 알 수 없음(없는 키)입니다.
+    assert result.references == {"app/main.py::main": 0, "app/main.py::helper": 1}
+    assert [(s.language, s.file_count) for s in result.languages] == [
+        ("JavaScript", 2),
+        ("TypeScript", 2),
+        ("Python", 1),
+    ]

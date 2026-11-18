@@ -503,7 +503,7 @@ def _prepare(
             code = read_symbol_code(root, candidate)
         except OSError:
             continue
-        if not has_enough_logic(code):
+        if not has_enough_logic(code, candidate.symbol.path):
             # 실제 동작이 거의 없는 껍데기 코드는 LLM이 없는 설계 의도를 지어내기 쉬워 건너뜁니다.
             hollow += 1
             continue
