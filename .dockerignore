@@ -1,0 +1,15 @@
+# Docker 빌드에 넣지 않는 것들 (Dockerfile 참고)
+.git
+.venv
+node_modules
+web
+docs
+scripts
+.data
+.claude
+.github
+**/__pycache__
+**/.pytest_cache
+.ruff_cache
+.env
+.env.*
