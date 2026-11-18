@@ -248,6 +248,8 @@ export async function startVoiceSession(
       },
       aiEnd: () => {
         ui.speaking?.("ai", false);
+        // 맞장구 소리 때문에 미뤄 둔 다시 보내기가 있으면, 소리가 끝난 뒤부터 다시 기다립니다 (#86).
+        if (speakFallbackNow && !speakFallbackTimer) speakFallbackTimer = setTimeout(speakFallbackNow, SPEAK_FALLBACK_MS);
         // 마지막 발화의 소리가 끝나고 한동안 조용하면 면접을 정리합니다.
         if (!endAfterSpeech || replyPending) return;
         if (endQuietTimer) clearTimeout(endQuietTimer);
@@ -335,7 +337,12 @@ export async function startVoiceSession(
       clearSpeakFallback();
       const fire = () => {
         clearSpeakFallback();
-        if (closed || m.aiSpeaking || m.userSpeaking) return;
+        if (closed || m.userSpeaking) return;
+        // 앞서 나던 소리(맞장구 등)가 아직 재생 중이면 버리지 않고, 그 소리가 끝날 때(aiEnd) 다시 기다립니다.
+        if (m.aiSpeaking) {
+          speakFallbackNow = fire;
+          return;
+        }
         ui.log("system", "음성 AI가 도구 결과를 말하지 않아 같은 문장을 다시 보냅니다");
         metric("error", { error_code: "tool_reply_silent" });
         resentUtterance = utterance;
@@ -352,6 +359,8 @@ export async function startVoiceSession(
     }
 
     async function delegate(callId: string, name: string, args: Record<string, unknown>, key: TurnKey | null) {
+      // 앞 발화의 다시 보내기가 남아 있으면 지웁니다. 질문 두 개가 이어서 들리지 않게 합니다 (#86).
+      clearSpeakFallback();
       userSpokeSinceTool = false;
       // 이 턴의 질문 측정 기준: 도구 호출을 받은 시점의 마지막 사용자 말 끝
       const baseEnd = m.lastUserEnd;
