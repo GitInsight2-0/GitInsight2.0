@@ -67,8 +67,11 @@ export const TOOL_DESCRIPTION = "사용자의 답변을 면접 서버에 보내�
 /** 위임 도구의 transcript 인자 설명 */
 export const TRANSCRIPT_DESCRIPTION = "사용자가 방금 한 말 전체";
 
+/** 서버 발화를 말하게 하는 메시지의 머리. 음성 AI가 이 글을 도구 인자로 넘기면 사용자 답변이 아닙니다 (#86) */
+export const SAY_MARKER = "[면접 서버]";
+
 /** 음성 AI에 서버 발화를 말하게 할 때 보내는 메시지 */
-export const sayMessage = (utterance: string) => `[면접 서버] 다음 문장을 말하세요: "${utterance}"`;
+export const sayMessage = (utterance: string) => `${SAY_MARKER} 다음 문장을 말하세요: "${utterance}"`;
 
 /** 측정 대본. docs/evals/voice-g1.md와 같습니다. */
 export const TEST_SCRIPT = [

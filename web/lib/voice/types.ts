@@ -24,6 +24,11 @@ export interface AdapterHooks {
   /** 음성 AI 발화 자막 (완성된 한 덩어리) */
   onAiTranscript(text: string, interrupted: boolean): void;
   onError(code: string, message: string): void;
+  /**
+   * 도구 결과를 보냈는데 음성 AI가 소리 없이 턴을 끝냈습니다 (#86).
+   * 진행기는 기다리지 않고 같은 발화를 다시 보냅니다.
+   */
+  onToolReplyEmpty?(): void;
   /** 제공사 쪽에서 연결이 닫혔습니다. 진행기는 면접을 끝냅니다. */
   onClosed(reason: string): void;
 }
