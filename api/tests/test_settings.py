@@ -19,14 +19,18 @@ from gitinsight_contracts.interview import (
 )
 from gitinsight_contracts.report import FallbackReason, ReportKind
 
+# 이 파일이 기본값을 확인하는 환경 변수입니다. 테스트마다 지우고 시작합니다.
+# litellm을 import하면 로컬 .env를 환경 변수로 읽어 오므로, 개인 .env에 넣어 둔 값이 기본값 확인을 깨뜨릴 수 있습니다.
 MODEL_ENV = (
     "LLM_PROVIDER",
     "LLM_JUDGE_MODEL",
     "LLM_ANALYSIS_MODEL",
     "LLM_REPORT_MODEL",
     "BRAIN_FORCE_PREPARED",
+    "LLM_JUDGE_REASONING_EFFORT",
     "LLM_ANALYSIS_REASONING_EFFORT",
     "LLM_REPORT_REASONING_EFFORT",
+    "JUDGE_TIMEOUT_S",
 )
 
 

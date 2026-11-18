@@ -66,7 +66,8 @@ async def test_lab_delay_is_applied(client_for: ClientFactory, metrics_path: Pat
         elapsed = time.perf_counter() - began
 
     assert response.status_code == 200
-    assert elapsed >= 0.3
+    # 지연은 300ms입니다. Windows에서는 타이머 정밀도 때문에 0.2985초처럼 조금 짧게 재질 때가 있어 여유를 둡니다.
+    assert elapsed >= 0.28
 
 
 async def test_lab_delay_is_rejected_when_lab_disabled(
