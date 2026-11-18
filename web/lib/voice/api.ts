@@ -119,7 +119,8 @@ export async function postTurn(
 const END_TIMEOUT_MS = 45_000;
 /**
  * 리포트 요청을 보내는 최대 횟수.
- * Next 중계(rewrites)는 30초에 끊고 본문 없는 500을 돌려주는데, 서버는 하던 리포트를 마저 만들어 저장합니다 (#78).
+ * 로컬(next dev/start)의 Next 중계(rewrites)는 30초에 끊고 본문 없는 500을 돌려주는데, 서버는 하던 리포트를 마저 만들어 저장합니다 (#78).
+ * Vercel 배포에는 30초 제한이 없고(외부 중계 최대 120초), 대신 END_TIMEOUT_MS에서 끊고 다시 보냅니다.
  * 그래서 다시 부르면 만들어 둔 리포트를 받거나, 아직 만드는 중이면 끝날 때까지 기다렸다 받습니다.
  */
 const END_ATTEMPTS = 3;
