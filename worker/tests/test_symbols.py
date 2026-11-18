@@ -146,3 +146,52 @@ def test_very_deep_expression_does_not_hit_recursion_limit() -> None:
 def test_invalid_commit_sha_is_rejected_by_contract(bad_sha: str) -> None:
     with pytest.raises(ValueError, match="commit_sha"):
         extract_python(b"def f():\n    pass\n", "a.py", bad_sha)
+
+
+# ---- 레포 안 참조 세기 (#58) ----
+
+REFERENCES = textwrap.dedent(
+    """\
+    from app.other import helper, unused_import
+
+
+    def walk(n):
+        return walk(n - 1) if n else helper()
+
+
+    class Store:
+        def __init__(self):
+            self.items = []
+
+        def save(self, item):
+            self.items.append(item)
+
+        @route("/x")
+        def handler(self):
+            return self.save(1)
+    """
+).encode()
+
+
+def test_references_skip_definition_names_and_imports() -> None:
+    result = extract_python(REFERENCES, "app/mod.py", SHA)
+
+    # import 문 안의 이름은 세지 않고, 실제로 부른 곳만 셉니다.
+    assert result.references["helper"] == 1
+    assert result.references["unused_import"] == 0
+    # 정의 자신의 이름은 세지 않습니다. save는 handler 안에서 한 번 부릅니다.
+    assert result.references["save"] == 1
+    assert result.references["Store"] == 0
+    # 재귀 호출은 자기 범위 안의 참조라 따로 기록해 레포 전체 수에서 뺍니다.
+    assert result.references["walk"] == 1
+    assert result.self_references["app/mod.py::walk"] == 1
+    assert result.self_references["app/mod.py::Store.save"] == 0
+
+
+def test_decorated_and_dunder_symbols_are_implicitly_called() -> None:
+    result = extract_python(REFERENCES, "app/mod.py", SHA)
+
+    assert result.implicitly_called == {
+        "app/mod.py::Store.__init__",
+        "app/mod.py::Store.handler",
+    }

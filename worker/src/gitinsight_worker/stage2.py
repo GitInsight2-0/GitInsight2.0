@@ -5,13 +5,15 @@
 - LLM이 고르는 ID는 관련 심볼뿐이고, 후보마다 정해 둔 허용 목록 안에 있어야 합니다.
 - 코드와 README는 untrusted_block 안에만 넣고, 메모리에서만 쓰고 저장하지 않습니다.
 - 검증에 실패하면 문제를 알려 주고 한 번 다시 요청합니다. 그래도 실패하면 그 후보를 버리고 다음 후보로 채웁니다.
+- 1단계가 센 레포 안 참조 수는 서버가 만든 사실로 untrusted_block 밖에 넣습니다 (#58).
+  심볼 이름은 레포에서 온 값이라 그 밖에 쓰지 않고, 블록 안 목록의 순서로만 가리킵니다.
 """
 
 import asyncio
 import json
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -76,7 +78,10 @@ TOPIC_SYSTEM_PROMPT = f"""당신은 한국어 기술 모의면접의 질문 재�
 - question_intent는 지원자가 질문 뜻을 되물을 때 면접관이 말하는 문장입니다. 무엇을 묻는지 쉬운 말로 풀어 주되, 답이 되는 내용(코드의 구체적인 동작, 조건, 값, 이름)은 쓰지 않습니다.
 - 줄 번호나 "몇 번째 줄" 같은 위치 표현을 쓰지 않습니다. 코드는 함수, 클래스, 변수 이름으로 가리킵니다.
 - summary는 이 코드가 실제로 하는 일을 3문장 이하로 설명합니다.
-- expected_points는 좋은 답변이라면 다뤄야 할 요점 {MIN_POINTS}~{MAX_POINTS}개입니다. target_code에서 직접 확인할 수 있는 내용만 쓰고, 코드에 없는 내용을 지어내지 않습니다.
+- expected_points는 좋은 답변이라면 다뤄야 할 요점 {MIN_POINTS}~{MAX_POINTS}개입니다. target_code나 서버가 알려 준 사실에서 직접 확인할 수 있는 내용만 쓰고, 코드에 없는 내용을 지어내지 않습니다.
+- 서버가 알려 준 레포 안 참조 수가 0이면 레포에서 그 코드를 부르는 곳을 찾지 못했다는 뜻입니다. 주제 코드가 그렇다면 그 사실을 다루는 요점을 하나 넣습니다. 관련 심볼이 그렇다면 그 심볼을 가리키는 꼬리질문으로 물을 수 있습니다.
+- 이 요점도 다른 요점처럼 좋은 답변이 말해야 할 내용으로 씁니다. 예: "레포 안에 이 코드를 부르는 곳이 없다는 것을 알고, 어디에 연결하려던 것인지 말한다". "~확인 필요", "~설명"처럼 과제나 메모로 쓰지 않습니다.
+- 이 사실을 묻는 질문은 코드가 어딘가에서 불린다고 전제하지 않습니다. 예: "레포 안에서 부르는 곳을 찾지 못했는데, 지금 실제로 쓰이고 있나요?". "쓰이지 않는다", "0곳으로 확인된다"처럼 단정하지 말고 "부르는 곳을 찾지 못했다"처럼 씁니다.
 - 각 요점의 probe_question은 지원자가 그 요점을 빠뜨렸을 때 그대로 묻는 질문입니다. 요점의 답을 질문에 넣지 않습니다.
 - prepared_followups는 1~{MAX_FOLLOWUPS}개의 꼬리질문입니다. 특정 관련 심볼을 보여 주며 물을 때만 symbol_id에 related_symbols의 symbol_id를 쓰고, 아니면 null로 둡니다.
 - related_symbol_ids에는 related_symbols 중 이 주제와 관련 깊은 것을 최대 {MAX_RELATED}개 고릅니다. 목록에 없는 ID는 쓰지 않습니다.
@@ -206,8 +211,34 @@ def read_readme(root: Path) -> str:
 # ---- 프롬프트 ----
 
 
+def _reference_text(count: int | None) -> str:
+    return "알 수 없음" if count is None else f"{count}곳"
+
+
+def reference_facts(candidate: Candidate, references: Mapping[str, int]) -> str | None:
+    """레포 안 참조 수를 서버 사실 문장으로 만듭니다. 심볼 이름은 넣지 않습니다. 아는 값이 없으면 None입니다."""
+    target = references.get(candidate.symbol.symbol_id)
+    related = [references.get(s.symbol_id) for s in candidate.related_choices]
+    if target is None and all(r is None for r in related):
+        return None
+    lines = [
+        "서버가 레포 전체에서 이름으로 찾은 참조 수입니다(정의 자신과 import 문 제외).",
+        "같은 이름의 다른 코드나 문자열로 부르는 동적 호출 때문에 정확하지 않을 수 있습니다.",
+        "데코레이터가 붙었거나 특수 메서드라 프레임워크가 부를 수 있는 코드는 알 수 없음으로 둡니다.",
+        f"- 주제 코드(target_symbol): {_reference_text(target)}",
+    ]
+    if related:
+        joined = ", ".join(f"{i}번 {_reference_text(r)}" for i, r in enumerate(related, 1))
+        lines.append(f"- 관련 심볼(related_symbols 목록 순서): {joined}")
+    return "\n".join(lines)
+
+
 def build_topic_messages(
-    candidate: Candidate, code: str, readme: str, difficulty: int = 1
+    candidate: Candidate,
+    code: str,
+    readme: str,
+    difficulty: int = 1,
+    references: Mapping[str, int] | None = None,
 ) -> list[Message]:
     symbol = candidate.symbol
     target = {"symbol_id": symbol.symbol_id, "name": symbol.name, "kind": symbol.kind.value}
@@ -224,6 +255,9 @@ def build_topic_messages(
         "관련 심볼 목록입니다. related_symbol_ids와 symbol_id는 이 안에서만 고르세요.",
         untrusted_block("related_symbols", json.dumps(related, ensure_ascii=False)),
     ]
+    facts = reference_facts(candidate, references or {})
+    if facts is not None:
+        parts.append(facts)
     if readme:
         parts += [
             "레포 README 앞부분입니다. 코드의 목적을 이해하는 데만 참고하세요.",
@@ -433,7 +467,9 @@ class _Prepared:
     messages: list[Message]
 
 
-def _prepare(root: Path, candidates: list[Candidate]) -> list[_Prepared]:
+def _prepare(
+    root: Path, candidates: list[Candidate], references: Mapping[str, int] | None = None
+) -> list[_Prepared]:
     readme = read_readme(root)
     prepared: list[_Prepared] = []
     hollow = 0
@@ -447,7 +483,7 @@ def _prepare(root: Path, candidates: list[Candidate]) -> list[_Prepared]:
             hollow += 1
             continue
         difficulty = DIFFICULTY_CYCLE[len(prepared) % len(DIFFICULTY_CYCLE)]
-        messages = build_topic_messages(candidate, code, readme, difficulty)
+        messages = build_topic_messages(candidate, code, readme, difficulty, references)
         prepared.append(_Prepared(candidate, messages))
     if hollow:
         logger.info("stage2_hollow_candidates skipped=%d", hollow)
@@ -469,7 +505,9 @@ async def generate_topics(
     # 기여 근거를 넘기지 않으면 모두 "확인 불가"로 둡니다.
     contribution = contribution_of or _no_contribution
     candidates = select_candidates(stage1.symbols, lambda s: contribution(s.symbol_id)[0])
-    prepared = await asyncio.to_thread(_prepare, root, candidates[:MAX_CANDIDATES])
+    prepared = await asyncio.to_thread(
+        _prepare, root, candidates[:MAX_CANDIDATES], stage1.references
+    )
     semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
     used_slugs: set[str] = set()
     breaker = _QuotaBreaker()

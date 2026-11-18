@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -26,7 +27,7 @@ from gitinsight_worker.stage2 import (
     validate_material,
 )
 
-from worker_test_support import material, write_repo
+from worker_test_support import REPO_FILES, material, write_repo
 
 SHA = "d" * 40
 CTX = TopicContext("handle", ContributionLabel.SHARED, ["e" * 40])
@@ -177,6 +178,48 @@ def test_code_and_readme_go_only_into_untrusted_blocks(tmp_path: Path) -> None:
     assert user.count("</untrusted_data>") == user.count("<untrusted_data ")
     # 줄 번호를 붙여 보내지 않습니다.
     assert code.splitlines()[0].startswith("def ") or code.splitlines()[0].startswith("class ")
+
+
+_UNTRUSTED = re.compile(r"<untrusted_data [^>]*>.*?</untrusted_data>", re.S)
+
+
+def server_text(messages: list[Message]) -> str:
+    """사용자 메시지에서 신뢰하지 않는 블록을 뺀, 서버가 쓴 부분입니다."""
+    return _UNTRUSTED.sub("", user_text(messages))
+
+
+async def test_reference_facts_are_server_text_without_symbol_names(tmp_path: Path) -> None:
+    caller = "\n".join(["from app.service import Service", "", "Service().run()", ""])
+    write_repo(tmp_path, {**REPO_FILES, "app/main.py": caller})
+    stage1 = analyze_tree(tmp_path, SHA)
+    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+
+    await generate_topics(tmp_path, stage1, llm, target=3)
+
+    [service_call] = [
+        c for c in llm.calls_for(TOPIC_PURPOSE) if '"name": "Service"' in user_text(c.messages)
+    ]
+    facts = server_text(service_call.messages)
+    # 주제 코드는 main.py에서 한 번, 관련 심볼은 목록 순서(run, stop)대로 1곳, 0곳입니다.
+    assert "주제 코드(target_symbol): 1곳" in facts
+    assert "관련 심볼(related_symbols 목록 순서): 1번 1곳, 2번 0곳" in facts
+    # 심볼 이름은 레포에서 온 값이라 서버 문장에 넣지 않습니다.
+    for name in ("Service", "run", "stop"):
+        assert name not in facts
+    assert "부르는 곳을 찾지 못했다" in service_call.messages[0]["content"]
+
+
+def test_no_reference_facts_without_counts(tmp_path: Path) -> None:
+    write_repo(tmp_path)
+    _, candidates = stage1_and_candidates(tmp_path)
+    candidate = candidates[0]
+    code = read_symbol_code(tmp_path, candidate)
+
+    without = build_topic_messages(candidate, code, "")
+    unknown = build_topic_messages(candidate, code, "", references={"other::x": 0})
+
+    assert "참조 수" not in user_text(without)
+    assert "참조 수" not in user_text(unknown)
 
 
 def test_long_code_is_truncated(tmp_path: Path) -> None:

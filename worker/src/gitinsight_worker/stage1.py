@@ -12,6 +12,7 @@ import os
 import shutil
 import stat
 import time
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,6 +55,9 @@ class Stage1Result:
     symbols: list[SymbolRef]
     # symbol_id별 기여 라벨과 최근 커밋입니다. 작성자 정보는 들어가지 않습니다.
     contributions: dict[str, Contribution] = field(default_factory=dict)
+    # symbol_id별로 레포 안 다른 곳에서 이름으로 참조한 횟수입니다 (#58). 2단계 프롬프트에만 쓰고 저장하지 않습니다.
+    # 데코레이터가 붙었거나 특수 메서드라 프레임워크가 부를 수 있는 심볼은 넣지 않습니다(알 수 없음).
+    references: dict[str, int] = field(default_factory=dict)
 
 
 class StatusReporter(Protocol):
@@ -102,6 +106,9 @@ def analyze_tree(
     paths = iter_repo_files(root)
     symbols: list[SymbolRef] = []
     contributions: dict[str, Contribution] = {}
+    name_references: Counter[str] = Counter()
+    self_references: dict[str, int] = {}
+    implicit: set[str] = set()
     symbol_count = 0
     for path in paths:
         if language_of(path) != PYTHON:
@@ -109,6 +116,9 @@ def analyze_tree(
         extracted = extract_python((root / path).read_bytes(), path, commit_sha)
         symbols.extend(extracted.symbols)
         symbol_count += extracted.definition_count
+        name_references.update(extracted.references)
+        self_references.update(extracted.self_references)
+        implicit.update(extracted.implicitly_called)
         if not extracted.symbols:
             continue
         blame = _blame_or_none(root, path, commit_sha, deadline)
@@ -124,6 +134,11 @@ def analyze_tree(
         symbol_count=symbol_count,
         symbols=symbols,
         contributions=contributions,
+        references={
+            s.symbol_id: name_references[s.name] - self_references.get(s.symbol_id, 0)
+            for s in symbols
+            if s.symbol_id not in implicit
+        },
     )
 
 

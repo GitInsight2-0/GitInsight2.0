@@ -144,7 +144,7 @@ async def run(args: argparse.Namespace) -> int:
         repo_full_name=sample.repo_full_name,
         requester=requester,
     )
-    out = ROOT / "docs" / "evals" / f"stage2-{datetime.now(UTC):%Y-%m-%d}.md"
+    out = args.out or ROOT / "docs" / "evals" / f"stage2-{datetime.now(UTC):%Y-%m-%d}.md"
     lines = [*render(result, recorder, label), *compare(result, sample)]
     out.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     print(f"{len(result.topics)}개 주제, 비용 ${recorder.total_usd():.4f} → {out}")
@@ -186,6 +186,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--analysis-id", default="eval-stage2", help="결과에 넣을 analysis_id (스냅샷용)"
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="평가 기록 경로 (기본: docs/evals/stage2-<날짜>.md, 같은 날 기록은 덮어씁니다)",
     )
     # 주제 생성 실패 원인(시간 초과, 검증 실패)을 보려고 정보 로그를 켭니다. 본문은 로그에 남지 않습니다.
     logging.basicConfig(level=logging.WARNING, format="  %(levelname)s %(message)s")
