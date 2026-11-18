@@ -49,6 +49,34 @@ def test_migrations_round_trip(test_database_url: str) -> None:
     command.check(config)
 
 
+def test_owner_migration_fills_existing_reports_from_their_sessions(
+    test_database_url: str,
+) -> None:
+    # 0005는 이미 저장된 리포트의 owner_id를 세션 상태의 소유자로 채웁니다 (#77).
+    import psycopg
+
+    config = alembic_config(test_database_url)
+    command.downgrade(config, "base")
+    command.upgrade(config, "0004")
+    owned, unowned = uuid4(), uuid4()
+    with psycopg.connect(test_database_url, autocommit=True) as conn:
+        for session_id, state in ((owned, '{"owner_id": "alice"}'), (unowned, "{}")):
+            conn.execute(
+                "INSERT INTO interview_sessions (session_id, state) VALUES (%s, %s::jsonb)",
+                (session_id, state),
+            )
+            conn.execute(
+                "INSERT INTO reports (report_id, session_id, report) VALUES (%s, %s, '{}'::jsonb)",
+                (uuid4(), session_id),
+            )
+
+        command.upgrade(config, "head")
+
+        rows = conn.execute("SELECT session_id, owner_id FROM reports").fetchall()
+        conn.execute("TRUNCATE reports, interview_sessions CASCADE")
+    assert dict(rows) == {owned: "alice", unowned: None}
+
+
 async def test_postgres_store_saves_event(pg_engine: AsyncEngine) -> None:
     session_id, turn_id = uuid4(), uuid4()
     await PostgresMetricsStore(pg_engine).append(

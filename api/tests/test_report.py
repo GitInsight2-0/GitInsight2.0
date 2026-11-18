@@ -344,10 +344,10 @@ async def test_end_session_returns_report_another_server_saved_first() -> None:
     class SharedStore(InMemoryReportStore):
         """이 서버가 리포트를 만드는 사이에 다른 서버가 먼저 저장한 상황입니다."""
 
-        async def save(self, report: Report) -> None:
+        async def save(self, report: Report, owner_id: str | None = None) -> None:
             if await self.get_by_session(report.session_id) is None:
-                await super().save(first)
-            await super().save(report)
+                await super().save(first, owner_id)
+            await super().save(report, owner_id)
 
     service = ReportService(
         analyses=FixtureAnalysisSource(ANALYSIS),

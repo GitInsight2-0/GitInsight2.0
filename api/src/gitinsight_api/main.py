@@ -186,6 +186,7 @@ def create_app(
     app.include_router(sessions.router)
     app.include_router(analyses_routes.router)
     app.include_router(reports.router)
+    app.include_router(reports.progress_router)
     app.include_router(metrics.router)
     return app
 

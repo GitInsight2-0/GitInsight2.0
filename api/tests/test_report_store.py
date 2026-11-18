@@ -60,14 +60,14 @@ def store_and_session(request: pytest.FixtureRequest) -> tuple[ReportStore, NewS
     return PostgresReportStore(engine), stored_session
 
 
-def make_report(session_id: UUID) -> Report:
+def make_report(session_id: UUID, strength: str = "흐름 설명이 정확함") -> Report:
     return Report(
         report_id=uuid4(),
         session_id=session_id,
         kind=ReportKind.TURN_TABLE,
         competencies=[],
         topics=[],
-        strengths=["흐름 설명이 정확함"],
+        strengths=[strength],
         improvements=[],
         next_topics=[],
         turns=[
@@ -130,3 +130,38 @@ async def test_reports_of_different_sessions_do_not_mix(
 
     assert await store.get_by_session(one.session_id) == one
     assert await store.get_by_session(other.session_id) == other
+
+
+async def test_list_by_owner_returns_only_that_owners_reports_oldest_first(
+    store_and_session: tuple[ReportStore, NewSession],
+) -> None:
+    # 이전 면접 비교(#77)는 본인 리포트만, 오래된 면접부터 봅니다.
+    store, new_session = store_and_session
+    first = make_report(await new_session(), "첫 번째")
+    others = make_report(await new_session(), "다른 사람")
+    no_owner = make_report(await new_session(), "소유자 없음")
+    second = make_report(await new_session(), "두 번째")
+    await store.save(first, "alice")
+    await store.save(others, "bob")
+    await store.save(no_owner)
+    await store.save(second, "alice")
+
+    mine = await store.list_by_owner("alice", 10)
+
+    assert [item.report for item in mine] == [first, second]
+    assert mine[0].created_at <= mine[1].created_at
+    assert mine[0].created_at.tzinfo is not None
+    assert await store.list_by_owner("carol", 10) == []
+
+
+async def test_list_by_owner_keeps_the_most_recent_when_limited(
+    store_and_session: tuple[ReportStore, NewSession],
+) -> None:
+    store, new_session = store_and_session
+    saved = [make_report(await new_session(), f"{i}번째") for i in range(3)]
+    for report in saved:
+        await store.save(report, "alice")
+
+    recent = await store.list_by_owner("alice", 2)
+
+    assert [item.report for item in recent] == saved[1:]
