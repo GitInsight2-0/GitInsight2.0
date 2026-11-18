@@ -7,6 +7,8 @@
   uv run python scripts/eval_stage2.py --requester-login <GitHub 로그인> --save-json .data/analysis.json
       # 그 계정 기준 기여 라벨을 붙이고, 결과를 데모 스냅샷으로 넣을 수 있게 저장합니다
       # (uv run python scripts/seed_demo_analysis.py --file .data/analysis.json --user-id <id>)
+  uv run python scripts/eval_stage2.py --repo <owner/name> --commit <SHA> --out docs/evals/<이름>.md
+      # 데모 레포가 아닌 레포로 질문 품질을 봅니다 (동의받은 레포만). 샘플과의 비교 단락은 빠집니다
 
 API 키는 환경 변수로 받습니다. .env에 넣었다면 `uv run --env-file .env python ...`으로 실행합니다.
 진행 중 로그에는 오류 종류와 개수만 나오고, 코드와 응답 본문은 나오지 않습니다.
@@ -127,7 +129,13 @@ async def run(args: argparse.Namespace) -> int:
     client = LiteLLMClient(model, cost_recorder=recorder, reasoning_effort=effort)
     label = f"{model} (reasoning_effort={effort or '모델 기본값'})"
     sample = load_analysis()
-    url = f"https://github.com/{sample.repo_full_name}.git"
+    # 다른 레포를 주면 그 레포를 분석합니다. 손으로 만든 샘플과의 비교는 샘플 레포일 때만 씁니다.
+    repo = args.repo or sample.repo_full_name
+    commit = args.commit or (sample.commit_sha if repo == sample.repo_full_name else None)
+    if commit is None:
+        print("--repo로 다른 레포를 줄 때는 --commit(40자리 SHA)도 줘야 합니다", file=sys.stderr)
+        return 2
+    url = f"https://github.com/{repo}.git"
     requester = (
         Requester.of(
             emails=args.requester_email, login=args.requester_login, user_id=args.requester_id
@@ -136,16 +144,18 @@ async def run(args: argparse.Namespace) -> int:
         else None
     )
     result = await run_analysis(
-        git_cloner(url, sample.commit_sha),
-        sample.commit_sha,
+        git_cloner(url, commit),
+        commit,
         PrintReporter(),
         client,
         analysis_id=args.analysis_id,
-        repo_full_name=sample.repo_full_name,
+        repo_full_name=repo,
         requester=requester,
     )
     out = args.out or ROOT / "docs" / "evals" / f"stage2-{datetime.now(UTC):%Y-%m-%d}.md"
-    lines = [*render(result, recorder, label), *compare(result, sample)]
+    lines = render(result, recorder, label)
+    if repo == sample.repo_full_name and commit == sample.commit_sha:
+        lines += compare(result, sample)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     print(f"{len(result.topics)}개 주제, 비용 ${recorder.total_usd():.4f} → {out}")
     if args.save_json:
@@ -186,6 +196,14 @@ def main() -> int:
     )
     parser.add_argument(
         "--analysis-id", default="eval-stage2", help="결과에 넣을 analysis_id (스냅샷용)"
+    )
+    parser.add_argument(
+        "--repo",
+        default=None,
+        help="분석할 GitHub 공개 레포 owner/name (기본: 샘플 데이터의 데모 레포). 동의받은 레포만 씁니다",
+    )
+    parser.add_argument(
+        "--commit", default=None, help="--repo의 고정 커밋 SHA (40자리). 다른 레포면 필수"
     )
     parser.add_argument(
         "--out",
