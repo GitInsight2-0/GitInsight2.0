@@ -1,7 +1,8 @@
 """세션 종료와 리포트 보관.
 
 세션 종료는 멱등입니다. 같은 세션을 여러 번 종료해도 리포트는 한 번만 만들고 같은 report_id를 돌려줍니다.
-리포트 저장소는 메모리 구현만 있습니다. Postgres 저장과 화면은 D(T14)가 붙입니다.
+리포트 저장소는 메모리 구현(여기)과 Postgres 구현(report/postgres.py, #75)이 있습니다.
+세션 하나에 리포트는 하나입니다. 이미 리포트가 있는 세션에 다시 저장하면 ReportAlreadyExistsError입니다.
 """
 
 import asyncio
@@ -13,6 +14,14 @@ from gitinsight_api.brain.protocol import AnalysisNotFoundError
 from gitinsight_api.brain.repository import SessionRepository
 from gitinsight_api.report.builder import ReportBuilder
 from gitinsight_contracts.report import Report
+
+
+class ReportAlreadyExistsError(ValueError):
+    """이미 리포트가 있는 세션입니다."""
+
+    def __init__(self, session_id: UUID) -> None:
+        super().__init__(f"이미 리포트가 있는 세션입니다: {session_id}")
+        self.session_id = session_id
 
 
 class ReportStore(Protocol):
@@ -30,7 +39,7 @@ class InMemoryReportStore:
 
     async def save(self, report: Report) -> None:
         if report.session_id in self._by_session:
-            raise ValueError(f"이미 리포트가 있는 세션입니다: {report.session_id}")
+            raise ReportAlreadyExistsError(report.session_id)
         self._reports[report.report_id] = report
         self._by_session[report.session_id] = report.report_id
 
@@ -75,7 +84,14 @@ class ReportService:
                 raise AnalysisNotFoundError(state.analysis_id)
             turns = await self._sessions.list_turns(session_id)
             report = await self._builder.build(analysis, state, turns)
-            await self._store.save(report)
+            try:
+                await self._store.save(report)
+            except ReportAlreadyExistsError:
+                # 다른 서버가 같은 세션의 리포트를 먼저 저장했습니다. 그 리포트를 돌려줘서 report_id가 하나로 유지됩니다.
+                saved = await self._store.get_by_session(session_id)
+                if saved is None:
+                    raise
+                return saved
             return report
 
     async def get(self, report_id: UUID) -> Report | None:

@@ -174,6 +174,16 @@ async def test_session_starts_from_seeded_snapshot_for_its_owner_only(
         forbidden = await client.post(f"/api/sessions/{session_id}/turns", json=turn)
     await restarted.state.db_engine.dispose()
 
+    # 한 번 더 다시 시작해도 같은 리포트를 다시 엽니다 (#75). 리포트도 DB에 있기 때문입니다.
+    third = create_app(settings)
+    third.dependency_overrides[get_current_user] = lambda: CurrentUser("demo", "demo")
+    async with client_for(third) as client:
+        reopened = await client.get(f"/api/reports/{ended.json()['report_id']}")
+        ended_again = await client.post(f"/api/sessions/{session_id}/end")
+        third.dependency_overrides[get_current_user] = lambda: CurrentUser("other", "other")
+        not_mine = await client.get(f"/api/reports/{ended.json()['report_id']}")
+    await third.state.db_engine.dispose()
+
     assert first.status_code == 200, first.text
     # 같은 turn_id는 저장된 응답을 그대로 돌려줍니다.
     assert again.json() == first.json()
@@ -181,6 +191,10 @@ async def test_session_starts_from_seeded_snapshot_for_its_owner_only(
     assert [t["turn_id"] for t in report.json()["turns"]] == [turn["turn_id"]]
     assert closed.status_code == 409
     assert forbidden.status_code == 403
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json() == report.json()
+    assert ended_again.json() == ended.json()
+    assert not_mine.status_code == 403
 
 
 async def test_turn_after_restart_needs_only_one_connection(
