@@ -69,7 +69,7 @@ uv sync                                    # Python 의존성 설치
 pnpm install                               # Node 의존성 설치 (pnpm이 없으면 corepack pnpm install)
 uv run ruff check; uv run ruff format --check; uv run pyright
 uv run pytest                              # 기본 테스트 (network, live_llm 제외)
-uv run pytest -m network                   # 샘플 데이터 줄 범위를 고정 커밋과 대조, 워커가 같은 심볼을 뽑는지 확인 (네트워크 필요)
+uv run pytest -m network                   # 샘플 데이터 줄 범위를 고정 커밋과 대조, 워커가 같은 심볼을 뽑는지 확인, TypeScript 샘플 레포 줄 범위 대조 (네트워크 필요)
 TEST_DATABASE_URL=postgresql://... uv run pytest -m postgres       # 실제 Postgres 테스트 (빈 테스트 전용 DB 사용)
 uv run alembic -c api/alembic.ini upgrade head                     # DATABASE_URL의 DB에 마이그레이션 적용
 uv run alembic -c api/alembic.ini revision --rev-id 0002 -m "설명"  # 새 마이그레이션 (api/src/gitinsight_api/tables.py도 같이 수정)
