@@ -101,6 +101,13 @@ def test_followup_symbol_is_added_to_related_symbols(tmp_path: Path) -> None:
         ({"title": "가" * 101}, "title"),
         ({"base_question": "가" * 119 + "요?"}, "120자"),
         ({"question_intent": "가" * 119 + "다."}, "120자"),
+        # 데모 스냅샷에 실제로 나왔던 힌트입니다 (#85).
+        (
+            {"hint": "함수 내부에서 [A]와 [B]로 나뉘어 진행되는 추출 절차를 살펴보세요."},
+            "코드 주석 표시",
+        ),
+        ({"base_question": "[1] 단계에서 무엇을 하나요?"}, "코드 주석 표시"),
+        ({"title": "[A] 클라이언트 추출"}, "코드 주석 표시"),
     ],
 )
 def test_invalid_material_is_rejected(tmp_path: Path, change: dict, problem: str) -> None:
@@ -128,6 +135,26 @@ def test_invalid_material_is_rejected(tmp_path: Path, change: dict, problem: str
 )
 def test_technical_terms_are_not_line_numbers(tmp_path: Path, question: str) -> None:
     # 기술 용어를 줄 번호로 잘못 잡으면 캐시·네트워크 코드 주제가 조용히 빠집니다(PR #36 리뷰).
+    write_repo(tmp_path)
+    _, candidates = stage1_and_candidates(tmp_path)
+
+    topic = validate_material(material(base_question=question), candidates[0], CTX)
+
+    assert topic.base_question == question
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "results[0]이 비어 있으면 어떻게 되나요?",
+        'results["documents"][0]을 꺼내는 이유는 무엇인가요?',
+        "chunks[i]와 metas[i]를 같은 순서로 맞추는 이유는요?",
+        "parts[A]처럼 키로 꺼내는 이유는 무엇인가요?",
+        "list[dict]를 돌려주는 이유는 무엇인가요?",
+    ],
+)
+def test_code_indexes_are_not_comment_markers(tmp_path: Path, question: str) -> None:
+    # 이름이나 괄호 바로 뒤의 인덱스는 코드 표현이라 막지 않습니다 (#85).
     write_repo(tmp_path)
     _, candidates = stage1_and_candidates(tmp_path)
 

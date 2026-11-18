@@ -68,6 +68,9 @@ MAX_CODE_CHARS = 8_000
 MAX_README_CHARS = 3_000
 
 _SLUG_INVALID = re.compile(r"[^a-z0-9]+")
+# 코드 주석의 단락 표시([A], [B], [1] 등)입니다 (#85). 지원자는 코드 주석을 보지 못하므로 무엇인지 알 수 없습니다.
+# 이름이나 괄호 바로 뒤의 인덱스(results[0], data["a"][1])는 코드 표현이라 잡지 않습니다.
+COMMENT_MARKER = re.compile(r"(?<![\w\]\)'\"])\[(?:[A-Z]|\d{1,2})\]")
 
 TOPIC_SYSTEM_PROMPT = f"""당신은 한국어 기술 모의면접의 질문 재료를 만듭니다.
 지원자 본인의 레포에 있는 코드 하나(target_code)를 보고, 그 코드에 대한 면접 주제 하나를 만드세요.
@@ -77,6 +80,7 @@ TOPIC_SYSTEM_PROMPT = f"""당신은 한국어 기술 모의면접의 질문 재�
 - base_question은 한 가지만 묻는 60자 안팎의 짧은 질문입니다. 코드의 동작이나 설명을 질문 안에 늘어놓지 않습니다.
 - question_intent는 지원자가 질문 뜻을 되물을 때 면접관이 말하는 문장입니다. 무엇을 묻는지 쉬운 말로 풀어 주되, 답이 되는 내용(코드의 구체적인 동작, 조건, 값, 이름)은 쓰지 않습니다.
 - 줄 번호나 "몇 번째 줄" 같은 위치 표현을 쓰지 않습니다. 코드는 함수, 클래스, 변수 이름으로 가리킵니다.
+- 코드 주석의 단락 표시([A], [B], [1] 같은 것)를 그대로 쓰지 않습니다. 지원자는 주석을 보지 못하므로 그 단락이 하는 일을 말로 풀어 씁니다. 예: "[A]와 [B]로 나뉜 절차" 대신 "클라이언트를 찾는 부분과 임베딩 모델을 찾는 부분".
 - summary는 이 코드가 실제로 하는 일을 3문장 이하로 설명합니다.
 - expected_points는 좋은 답변이라면 다뤄야 할 요점 {MIN_POINTS}~{MAX_POINTS}개입니다. target_code나 서버가 알려 준 사실에서 직접 확인할 수 있는 내용만 쓰고, 코드에 없는 내용을 지어내지 않습니다.
 - 서버가 알려 준 레포 안 참조 수가 0이면 레포에서 그 코드를 부르는 곳을 찾지 못했다는 뜻입니다. 주제 코드가 그렇다면 그 사실을 다루는 요점을 하나 넣습니다. 관련 심볼이 그렇다면 그 심볼을 가리키는 꼬리질문으로 물을 수 있습니다.
@@ -310,6 +314,11 @@ def validate_material(material: TopicMaterial, candidate: Candidate, ctx: TopicC
     }
     problems += [
         f"{f}: 줄 번호를 쓰면 안 됨" for f, t in every_text.items() if LINE_NUMBER.search(t)
+    ]
+    problems += [
+        f"{f}: [A] 같은 코드 주석 표시를 쓰면 안 됨 (가리키는 내용을 말로 풀어 쓰기)"
+        for f, t in every_text.items()
+        if COMMENT_MARKER.search(t)
     ]
 
     if not MIN_POINTS <= len(points) <= MAX_POINTS:
