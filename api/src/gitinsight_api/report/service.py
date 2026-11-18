@@ -113,7 +113,7 @@ class ReportService:
                 raise AnalysisNotFoundError(state.analysis_id)
             turns = await self._sessions.list_turns(session_id)
             # 같은 사용자가 같은 레포로 본 지난 면접의 코드 지도입니다. 누적 숫자에 씁니다 (#107).
-            previous = await ReportHistory(self._store, self._analyses).code_maps(
+            previous = await ReportHistory(self._store).code_maps(
                 state.owner_id, analysis.repo_full_name
             )
             report = await self._builder.build(analysis, state, turns, previous)

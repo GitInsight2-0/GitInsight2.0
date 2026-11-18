@@ -72,6 +72,8 @@ export interface AudioLevels {
 
 export interface SessionOptions {
   analysisId: string;
+  /** 다시 보기 면접: 지난 면접에서 답변이 부족했던 주제만 묻습니다 (#107) */
+  reviewOnly?: boolean;
   /** 판단 LLM 지연 흉내 (LAB_ENABLED 서버에서만) */
   labDelayMs: number;
   /** /api/metrics에 남길 시나리오 이름. 대본 줄마다 바뀌므로 그때그때 읽습니다. */
@@ -168,7 +170,10 @@ export async function startVoiceSession(
     ui.status("세션 만드는 중");
     const created = opts.existing
       ? { session_id: opts.existing.sessionId, first: opts.existing.current }
-      : await createSession({ analysis_id: opts.analysisId, mode: "voice" }, life.signal);
+      : await createSession(
+          { analysis_id: opts.analysisId, mode: "voice", review_only: opts.reviewOnly ?? false },
+          life.signal,
+        );
     ensureOpen();
     const sessionId = created.session_id;
     ui.started?.(sessionId, created.first);

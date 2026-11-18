@@ -36,6 +36,8 @@ class SessionCreate(Contract):
     jd_text: Annotated[str, Field(max_length=5000)] | None = None
     mode: InterviewMode
     duration_min: Annotated[int, Field(ge=3, le=15)] = 10
+    # 지난 면접에서 답변이 부족했던 주제만 다시 묻습니다 (#107). 그런 주제가 없으면 409입니다.
+    review_only: bool = False
 
 
 class BrainReply(Contract):

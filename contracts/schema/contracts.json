@@ -1055,6 +1055,10 @@
         },
         "mode": {
           "$ref": "#/$defs/InterviewMode"
+        },
+        "review_only": {
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": [
