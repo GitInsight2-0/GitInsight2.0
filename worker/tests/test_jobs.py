@@ -113,6 +113,23 @@ async def test_analysis_failure_is_saved_as_failed_with_last_progress(
     assert await store.get(created.analysis_id) is None
 
 
+async def test_repo_without_python_is_saved_with_unsupported_code_error(tmp_path: Path) -> None:
+    # 웹은 상태 조회의 error가 NoSupportedCodeError면 "Python 레포만 지원" 안내를 보여 줍니다 (#70, #71).
+    path = tmp_path / "ts-origin"
+    sha = make_origin(path, {"src/index.ts": "export const x = 1;\n"})
+    store = InMemoryAnalysisStore()
+    llm = ok_llm()
+    launcher = launcher_for(store, path, llm, tmp_path / "work")
+
+    created = await AnalysisService(store, launcher).request(REPO, sha, "u1")
+    await launcher.join()
+
+    state = await AnalysisService(store, launcher).state(created.analysis_id, "u1")
+    assert state is not None
+    assert (state.status, state.error) == (AnalysisStatus.FAILED, "NoSupportedCodeError")
+    assert llm.calls == []
+
+
 async def test_result_for_closed_record_is_dropped(
     origin: tuple[Path, str], tmp_path: Path
 ) -> None:

@@ -13,7 +13,7 @@ from gitinsight_contracts.interview import InterviewMode, SessionCreate
 from gitinsight_worker.contribution import Requester
 from gitinsight_worker.git import git_cloner
 from gitinsight_worker.pipeline import run_analysis
-from gitinsight_worker.stage1 import analyze_tree
+from gitinsight_worker.stage1 import NoSupportedCodeError, analyze_tree
 from gitinsight_worker.stage2 import Stage2Error
 
 from worker_test_support import Recorder, make_origin, material
@@ -132,3 +132,40 @@ async def test_without_requester_label_is_unverified_but_commits_remain(
 
     assert {t.contribution_label for t in result.topics} == {ContributionLabel.UNVERIFIED}
     assert {tuple(t.commits) for t in result.topics} == {(origin[1],)}
+
+
+# ---- 지원하지 않는 언어 (#70) ----
+
+NO_PYTHON_REPOS = {
+    # TypeScript만 있는 레포 (통합 점검에서 Stage2Error로 끝나던 경우)
+    "typescript": {
+        "src/index.ts": "export function handle(x: number): number {\n  return x + 1;\n}\n",
+        "package.json": '{"name": "demo"}\n',
+    },
+    # Python 파일은 있지만 함수·클래스가 없는 레포
+    "python-without-definitions": {
+        "settings.py": "DEBUG = True\nNAME = 'demo'\n",
+        "README.md": "# demo\n",
+    },
+}
+
+
+@pytest.mark.parametrize("files", NO_PYTHON_REPOS.values(), ids=NO_PYTHON_REPOS.keys())
+async def test_repo_without_supported_code_fails_before_llm(
+    files: dict[str, str], tmp_path: Path
+) -> None:
+    path = tmp_path / "origin"
+    origin = (path, make_origin(path, files))
+    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    recorder = Recorder()
+
+    with pytest.raises(NoSupportedCodeError):
+        await analyze(origin, tmp_path / "work", llm, recorder)
+
+    # LLM을 한 번도 부르지 않고, 화면이 고를 수 있게 예외 이름을 실패 사유로 보고합니다.
+    assert llm.calls == []
+    last = recorder.states[-1]
+    assert (last.status, last.error) == (AnalysisStatus.FAILED, "NoSupportedCodeError")
+    assert AnalysisStatus.STAGE2 not in {s.status for s in recorder.states}
+    # 내려받은 레포는 지웁니다.
+    assert list((tmp_path / "work").iterdir()) == []
