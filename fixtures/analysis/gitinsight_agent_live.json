@@ -277,17 +277,17 @@
         },
         {
           "point_id": "p2",
-          "text": "지정된 속성명 리스트와 dir() 전체 속성을 순회하며 ChromaDB 클라이언트 클래스 타입을 찾아낸다.",
+          "text": "지정된 속성 이름 후보를 먼저 보고, 없으면 dir()로 모든 속성을 돌며 클래스 이름이 Client 등인지로 ChromaDB 클라이언트를 찾으려 한다.",
           "probe_question": "ChromaDB 클라이언트는 어떤 방식으로 VectorService 내부에서 탐색하나요?"
         },
         {
           "point_id": "p3",
-          "text": "임베딩 모델 속성을 찾아 필요한 메서드 유무를 확인한 후 LangChainEmbeddingAdapter로 감싸 반환한다.",
-          "probe_question": "임베딩 모델을 찾아낸 뒤에는 어떤 처리를 거쳐 반환하나요?"
+          "text": "embed_query와 embed_documents 메서드를 가진 임베딩 속성을 찾으면 LangChainEmbeddingAdapter로 감싸서 반환하려 한다.",
+          "probe_question": "임베딩 모델 속성을 찾으면 어떤 처리를 거쳐 반환하나요?"
         },
         {
           "point_id": "p4",
-          "text": "VectorService 클래스에서 _client 등의 속성을 찾지 못했는데, 실제로 이 속성들이 존재하는지 인지하고 동작을 설명한다.",
+          "text": "VectorService에는 _collection만 있어 클라이언트와 임베딩 함수를 찾지 못하고 (None, None)을 돌려주므로, build_github_repo가 매번 새 PersistentClient를 만든다는 것을 안다.",
           "probe_question": "VectorService에서 _client나 embeddings 같은 속성을 찾지 못했는데, 이 함수가 실제로 정상 동작하나요?"
         }
       ],

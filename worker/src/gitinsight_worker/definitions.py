@@ -4,7 +4,8 @@
 그래서 주제 코드가 다른 파일 클래스의 속성 이름을 추측해서 찾는 것 같은 연결 결함을 LLM이 짚지 못했습니다.
 
 - 주제 코드 범위의 식별자 중 다른 파일의 최상위 함수·클래스 이름과 같은 것을 고릅니다 (이름 기준이라 틀릴 수 있음).
-- 함수의 반환 타입이 레포 클래스면 그 클래스도 한 단계 따라갑니다 (예: get_vector_service() -> VectorService).
+- 함수의 반환 타입이 다른 파일의 레포 클래스면 그 클래스도 한 단계 따라갑니다 (예: get_vector_service() -> VectorService).
+  Optional[...], 문자열 전방 참조 안의 클래스 이름도 찾습니다.
 - 요약에는 시그니처, 클래스의 self 속성 이름, 메서드 시그니처만 넣고 본문은 넣지 않습니다. 입력 토큰을 제한하기 위해서입니다.
 - 요약은 레포 코드에서 온 값이라 프롬프트에서 untrusted_block 안에만 넣습니다. 저장하지 않습니다.
 """
@@ -30,6 +31,7 @@ MAX_METHODS = 15
 
 _SPACES = re.compile(r"\s+")
 _OPEN_PAREN = re.compile(r"\(\s+")
+_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _CLOSE_PAREN = re.compile(r",?\s+\)|,\)")
 
 
@@ -132,12 +134,29 @@ def summarize(source: bytes, symbol: SymbolRef) -> str | None:
     return text if len(text) <= MAX_SUMMARY_CHARS else text[:MAX_SUMMARY_CHARS] + "\n# ... (생략)"
 
 
-def _return_class(source: bytes, symbol: SymbolRef) -> str | None:
-    """함수의 반환 타입 표기에 쓴 이름 중 첫 번째입니다 (예: -> VectorService)."""
+def _return_type_names(source: bytes, symbol: SymbolRef) -> list[str]:
+    """함수의 반환 타입 표기에 나오는 이름들입니다 (예: -> Optional["VectorService"]).
+
+    문자열로 쓴 전방 참조도 읽도록 표기 글자에서 이름 모양을 모두 뽑습니다.
+    Optional, list 같은 이름도 섞여 나오므로, 레포 클래스인지는 부르는 쪽이 색인으로 가립니다.
+    """
     node = _definition_node(parse_python(source).root_node, symbol)
     annotation = node.child_by_field_name("return_type") if node is not None else None
-    names = [name for name, _ in identifier_lines(annotation)] if annotation is not None else []
-    return names[0] if names else None
+    return _NAME.findall(_text(annotation))
+
+
+def _return_class(
+    root: Path, function: SymbolRef, index: dict[str, list[SymbolRef]], target_path: str
+) -> SymbolRef | None:
+    """함수의 반환 타입 중 다른 파일의 레포 클래스인 첫 번째입니다.
+
+    주제 코드와 같은 파일의 클래스는 관련 심볼로 이미 보이므로 붙이지 않습니다.
+    """
+    for name in _return_type_names((root / function.path).read_bytes(), function):
+        symbol = _unique(index, name, target_path)
+        if symbol is not None and symbol.kind is SymbolKind.CLASS:
+            return symbol
+    return None
 
 
 def external_definitions(
@@ -158,9 +177,8 @@ def external_definitions(
         found.append(symbol)
         if symbol.kind is SymbolKind.FUNCTION:
             # 반환 타입이 레포 클래스면 그 클래스의 속성과 메서드도 봐야 연결을 판단할 수 있습니다.
-            returned = _return_class((root / symbol.path).read_bytes(), symbol)
-            cls = _unique(index, returned, "") if returned else None
-            if cls is not None and cls.kind is SymbolKind.CLASS and cls not in found:
+            cls = _return_class(root, symbol, index, target.path)
+            if cls is not None and cls not in found:
                 found.append(cls)
     return found[:MAX_DEFINITIONS]
 

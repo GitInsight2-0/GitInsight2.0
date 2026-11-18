@@ -68,6 +68,64 @@ def test_used_function_and_its_return_class_are_found(tmp_path: Path) -> None:
     assert [s.symbol_id for s in found] == ["app/service.py::get_store", "app/service.py::Store"]
 
 
+def test_return_class_is_found_inside_optional_and_string_annotations(tmp_path: Path) -> None:
+    factories = "\n".join(
+        [
+            "from typing import Optional",
+            "",
+            "",
+            "def maybe_store() -> Optional['Store']:",
+            "    return None",
+            "",
+            "",
+            "def many_stores() -> list[Store]:",
+            "    return []",
+            "",
+        ]
+    )
+    caller = "def run():\n    return maybe_store(), many_stores()\n"
+    _, by_id, index = repo(tmp_path, {"app/factory.py": factories, "app/caller.py": caller})
+
+    found = external_definitions(tmp_path, by_id["app/caller.py::run"], index)
+
+    # Optional, list 같은 이름은 건너뛰고 레포 클래스인 첫 이름을 따라갑니다.
+    assert [s.symbol_id for s in found] == [
+        "app/factory.py::maybe_store",
+        "app/service.py::Store",
+        "app/factory.py::many_stores",
+    ]
+
+
+def test_return_class_in_the_topic_file_is_not_attached(tmp_path: Path) -> None:
+    # 주제 코드와 같은 파일의 클래스는 관련 심볼로 이미 보이므로 붙이지 않습니다.
+    caller = "\n".join(
+        [
+            "from app.service import get_store",
+            "",
+            "",
+            "class Store:",
+            "    pass",
+            "",
+            "",
+            "def run():",
+            "    return get_store()",
+            "",
+        ]
+    )
+    write_repo(
+        tmp_path,
+        {"app/service.py": "def get_store() -> Store:\n    return 1\n", "app/main.py": caller},
+    )
+    stage1 = analyze_tree(tmp_path, SHA, blame_budget_s=0)
+    by_id = {s.symbol_id: s for s in stage1.symbols}
+
+    found = external_definitions(
+        tmp_path, by_id["app/main.py::run"], top_level_index(stage1.symbols)
+    )
+
+    assert [s.symbol_id for s in found] == ["app/service.py::get_store"]
+
+
 def test_class_summary_has_attributes_and_signatures_but_no_body(tmp_path: Path) -> None:
     _, by_id, _ = repo(tmp_path)
 
