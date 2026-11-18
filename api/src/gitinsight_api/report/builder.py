@@ -4,13 +4,17 @@
 - 주제별 다룬 포인트와 빠진 포인트는 서버가 판단 기록에서 계산합니다.
 - 코드 위치는 분석 결과의 SymbolRef에서만 가져옵니다.
 - 기여 라벨은 프롬프트에 넣지 않습니다. 라벨이 점수에 영향을 줄 수 없게 하기 위해서입니다.
+- 답변마다 서버가 기록한 사실(모르겠다고 답함, 힌트를 받은 뒤의 답변)을 프롬프트에 같이 넘깁니다 (#82).
+  가장 잘한 답변 하나만 보고 높은 점수를 주지 않게 하기 위해서입니다.
+- 근거의 코드 위치는 면접 중 화면에 띄운 코드일 때만 붙입니다.
 """
 
 import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from uuid import uuid4
+from itertools import pairwise
+from uuid import UUID, uuid4
 
 from gitinsight_api.brain.judge import judge_answer
 from gitinsight_api.brain.quotes import EXACT, QuoteMatcher
@@ -18,9 +22,10 @@ from gitinsight_api.brain.state import SessionState, TurnRecord
 from gitinsight_api.llm import LLMClient, LLMError, Message
 from gitinsight_api.llm.untrusted import UNTRUSTED_NOTICE, untrusted_block
 from gitinsight_api.report.rubric import rubric_text
-from gitinsight_contracts.analysis import AnalysisResult
+from gitinsight_contracts.analysis import AnalysisResult, Topic
 from gitinsight_contracts.common import SymbolRef
-from gitinsight_contracts.llm import CompetencyDraft, CoverageStatus, ReportDraft
+from gitinsight_contracts.interview import Action
+from gitinsight_contracts.llm import CompetencyDraft, CoverageStatus, Intent, ReportDraft
 from gitinsight_contracts.report import (
     CodeLink,
     CompetencyScore,
@@ -48,6 +53,8 @@ REPORT_SYSTEM_PROMPT = f"""당신은 한국어 기술 모의면접의 평가 리
 - 점수는 지원자 답변 내용만으로 매깁니다. 누가 코드를 작성했는지는 고려하지 않습니다.
 - 역량마다 근거(evidence)를 하나 이상 답니다. turn_id는 답변 목록에 있는 값을 그대로 쓰고, quote는 그 턴의 답변에서 글자 그대로 옮깁니다.
 - 근거로 삼을 답변이 없는 역량은 competencies에 넣지 마세요. 근거가 없다고 낮은 점수를 주지 않습니다.
+- 역량의 점수는 가장 잘한 답변 하나가 아니라 그 역량에 해당하는 답변 전체를 보고 매깁니다. 잘한 답변과 못한 답변이 섞여 있으면 그만큼 낮춥니다.
+- 답변 목록의 dont_know와 after_hint는 서버가 기록한 사실입니다. dont_know가 true인 답변은 지원자가 그 질문에 모르겠다고 답한 것이고, 그 질문이 묻는 역량의 점수를 낮추는 근거입니다. after_hint가 true인 답변은 면접관의 힌트를 받은 뒤에 한 답변이라, 힌트 없이 한 같은 수준의 답변보다 낮게 봅니다. 힌트를 받은 뒤의 답변만 근거인 역량에는 4점을 주지 않습니다.
 - 근거가 코드와 관련 있으면 symbol_id에 주제 자료의 symbol_id를 쓰고, 아니면 null로 둡니다.
 - topics에는 면접에서 다룬 주제마다 model_answer(모범 답안)를 씁니다. 주제 요약과 기대 포인트를 근거로 하고, 코드에 없는 내용을 지어내지 마세요.
 - strengths, improvements, next_topics는 각각 {MAX_LIST_ITEMS}개 이하의 짧은 문장으로 씁니다.
@@ -66,6 +73,26 @@ def asked_topic_ids(state: SessionState, turns: list[TurnRecord]) -> list[str]:
     """면접에서 실제로 물어본 주제를 순서대로 돌려줍니다."""
     asked = {t.topic_id for t in turns if t.topic_id} | {state.current_topic_id}
     return [topic_id for topic_id in state.topic_order if topic_id in asked]
+
+
+def after_hint_turn_ids(turns: list[TurnRecord]) -> set[UUID]:
+    """힌트를 받은 뒤에 한 답변의 turn_id입니다. 바로 앞 턴에서 면접관이 같은 주제로 힌트를 준 경우입니다."""
+    hinted: set[UUID] = set()
+    for before, after in pairwise(turns):
+        if before.reply.action is Action.HINT and before.topic_id == after.topic_id:
+            hinted.add(after.turn_id)
+    return hinted
+
+
+def shown_symbol_ids(turns: list[TurnRecord], topic: Topic) -> set[str]:
+    """면접 중 이 주제에서 화면에 띄운 코드입니다. 주제 코드와, 면접관 발화에 붙은 하이라이트입니다."""
+    # 하이라이트는 면접관 발화(reply)에 붙습니다. 다음 주제로 넘어가는 발화의 하이라이트는 새 주제의 것이라
+    # 답변한 주제(turn.topic_id)가 아니라 발화의 주제(reply.topic_id)로 가릅니다.
+    return {topic.symbol.symbol_id} | {
+        t.reply.highlight.symbol_id
+        for t in turns
+        if t.reply.topic_id == topic.topic_id and t.reply.highlight is not None
+    }
 
 
 def covered_points(turns: list[TurnRecord], topic_id: str) -> set[str]:
@@ -94,12 +121,16 @@ def build_report_messages(
         }
         for topic in (analysis.topic(t) for t in topic_ids)
     ]
+    hinted = after_hint_turn_ids(turns)
     answers = [
         {
             "turn_id": str(t.turn_id),
             "topic_id": t.topic_id,
             "question": t.question,
             "answer": t.transcript,
+            # 아래 둘은 서버가 기록한 사실입니다. 기여 라벨은 넣지 않습니다.
+            "dont_know": t.judgment is not None and t.judgment.intent is Intent.DONT_KNOW,
+            "after_hint": t.turn_id in hinted,
         }
         for t in turns
         if t.transcript.strip()
@@ -129,7 +160,11 @@ def validate_competencies(
     analysis: AnalysisResult,
     matcher: QuoteMatcher = EXACT,
 ) -> list[CompetencyScore]:
-    """근거가 실제 자막과 맞는 역량만 남깁니다. 근거가 하나도 남지 않으면 그 역량을 버립니다."""
+    """근거가 실제 자막과 맞는 역량만 남깁니다. 근거가 하나도 남지 않으면 그 역량을 버립니다.
+
+    근거의 코드 위치는 면접 중 그 주제에서 화면에 띄운 코드일 때만 붙입니다.
+    띄운 적 없는 코드면 인용문은 남기고 코드 위치만 뺍니다.
+    """
     by_id = {str(t.turn_id): t for t in turns}
     scores: list[CompetencyScore] = []
     seen = set()
@@ -143,7 +178,9 @@ def validate_competencies(
                 continue
             symbol = None
             if item.symbol_id and turn.topic_id:
-                symbol = analysis.topic(turn.topic_id).find_symbol(item.symbol_id)
+                topic = analysis.topic(turn.topic_id)
+                if item.symbol_id in shown_symbol_ids(turns, topic):
+                    symbol = topic.find_symbol(item.symbol_id)
             evidence.append(Evidence(turn_id=turn.turn_id, quote=item.quote.strip(), symbol=symbol))
         if not evidence:
             logger.info(
@@ -165,11 +202,7 @@ def topic_reports(
     for topic_id in topic_ids:
         topic = analysis.topic(topic_id)
         covered = covered_points(turns, topic_id)
-        used = {topic.symbol.symbol_id} | {
-            t.reply.highlight.symbol_id
-            for t in turns
-            if t.topic_id == topic_id and t.reply.highlight is not None
-        }
+        used = shown_symbol_ids(turns, topic)
         symbols = [s for s in (topic.symbol, *topic.related_symbols) if s.symbol_id in used]
         answer = model_answers.get(topic_id, "").strip()
         reports.append(

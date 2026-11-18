@@ -3,8 +3,16 @@
 import type { Action, BrainReply } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import CodeViewer from "@/components/CodeViewer";
-import { ApiError, TRANSCRIPT_MAX, createSession, endSession, isAbort, postTurn } from "@/lib/voice/api";
 import { reportHref } from "@/lib/reports";
+import {
+  ApiError,
+  TRANSCRIPT_MAX,
+  createSession,
+  endSession,
+  isAbort,
+  isReportUnavailable,
+  postTurn,
+} from "@/lib/voice/api";
 import { DEFAULT_VAD } from "@/lib/voice/config";
 import { explainError, isLoginError } from "@/lib/voice/errors";
 import { connectGemini } from "@/lib/voice/gemini";
@@ -167,7 +175,8 @@ export default function InterviewScreen({
       setReport({ kind: "ready", reportId: ended.report_id });
     } catch (e) {
       if (ac.signal.aborted) return;
-      if (e instanceof ApiError && e.status === 503) {
+      // 리포트를 만들지 않는 서버일 때만 안내하고 끝냅니다. DB 장애 같은 다른 503은 아래에서 "다시 시도"를 보여 줍니다.
+      if (isReportUnavailable(e)) {
         setReport({ kind: "unavailable" });
         return;
       }
@@ -655,7 +664,7 @@ function ReportStatus({
     <div role="status" aria-live="polite" className={styles.reportBox}>
       <p className={styles.done}>수고하셨습니다.</p>
       {(report.kind === "idle" || report.kind === "making") && (
-        <p className={styles.reportNote}>리포트를 만들고 있어요. 30초쯤 걸릴 수 있어요.</p>
+        <p className={styles.reportNote}>리포트를 만들고 있어요. 길면 1분쯤 걸릴 수 있어요.</p>
       )}
       {report.kind === "ready" && (
         <a className={styles.primary} href={href(report.reportId)}>

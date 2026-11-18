@@ -37,7 +37,7 @@ from gitinsight_contracts.llm import (
     ReportDraft,
     TopicDraft,
 )
-from gitinsight_contracts.report import Report, ReportKind
+from gitinsight_contracts.report import ProgressEntry, Report, ReportKind
 
 from api_test_support import ClientFactory
 
@@ -521,3 +521,51 @@ async def test_pool_timeout_is_503(client_for: ClientFactory, metrics_path: Path
 
     assert response.status_code == 503
     assert response.json() == {"detail": "데이터베이스에 연결하지 못했습니다"}
+
+
+async def test_progress_lists_my_scored_interviews_oldest_first(
+    client_for: ClientFactory, metrics_path: Path
+) -> None:
+    # 이전 면접 비교 (#77). 리포트에 적힌 역량 수준을 면접별로 그대로 돌려줍니다.
+    llm = FakeLLM()
+    first_turn, second_turn, failed_turn = uuid4(), uuid4(), uuid4()
+    llm.push(JUDGE_PURPOSE, FakeStep(value=judged()), FakeStep(value=judged()))
+    llm.push(JUDGE_PURPOSE, FakeStep(value=judged()))
+    llm.push(
+        REPORT_PURPOSE,
+        FakeStep(value=report_draft(first_turn)),
+        FakeStep(value=report_draft(second_turn)),
+        # 리포트 LLM이 실패하면 턴별 판단 표가 됩니다. 역량 평가가 없어 비교에서 빠집니다.
+        FakeStep(error=LLMTimeoutError("t")),
+    )
+    app, _, users = real_app(metrics_path, llm)
+    session_ids = []
+    async with client_for(app) as client:
+        empty = await client.get("/api/me/progress")
+        for turn_id in (first_turn, second_turn, failed_turn):
+            created = await create(client)
+            await client.post(f"/api/sessions/{created.session_id}/turns", json=turn(GOOD, turn_id))
+            await end(client, created.session_id)
+            session_ids.append(created.session_id)
+        mine = await client.get("/api/me/progress")
+        users.current = BOB
+        others = await client.get("/api/me/progress")
+
+    assert empty.status_code == 200 and empty.json() == []
+    assert mine.status_code == 200, mine.text
+    entries = [ProgressEntry.model_validate(e) for e in mine.json()]
+    assert [e.session_id for e in entries] == session_ids[:2]
+    assert entries[0].date <= entries[1].date
+    assert [(c.name, c.level) for c in entries[0].competencies] == [
+        (Competency.CODE_UNDERSTANDING, 3)
+    ]
+    assert others.json() == []
+
+
+async def test_progress_requires_login(client_for: ClientFactory, metrics_path: Path) -> None:
+    app, _, _ = real_app(metrics_path)
+    app.dependency_overrides.clear()
+    async with client_for(app) as client:
+        response = await client.get("/api/me/progress")
+
+    assert response.status_code == 401

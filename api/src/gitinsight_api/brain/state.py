@@ -26,6 +26,9 @@ class TopicProgress(BaseModel):
     off_topic_count: int = 0
     # 사용한 미리 만든 꼬리질문 수입니다.
     prepared_used: int = 0
+    # 이 주제에서 판단 없이 지나간 답변 수입니다 (판단 LLM 시간 초과·검증 실패).
+    # 그 답변이 어떤 포인트를 다뤘는지 모르므로, 0보다 크면 빠진 포인트를 다시 묻지(PROBE) 않습니다.
+    unjudged_answers: int = 0
     # 세션 시작 기준으로 이 주제를 시작한 시각(초)입니다.
     started_at_sec: float = 0.0
 

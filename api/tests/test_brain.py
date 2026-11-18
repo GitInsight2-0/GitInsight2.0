@@ -15,7 +15,7 @@ from gitinsight_api.brain.judge import (
 )
 from gitinsight_api.brain.protocol import SessionClosedError
 from gitinsight_api.brain.repository import InMemorySessionRepository, SessionHandle
-from gitinsight_api.brain.service import InterviewBrain
+from gitinsight_api.brain.service import InterviewBrain, usable_followups
 from gitinsight_api.llm.fake import FakeLLM, FakeStep
 from gitinsight_contracts.analysis import AnalysisResult
 from gitinsight_contracts.fixtures import (
@@ -395,3 +395,121 @@ async def test_turn_reads_analysis_before_taking_session_lock() -> None:
 
     assert reply.action is Action.FOLLOW_UP
     assert reads_while_locked == []
+
+
+# 실제 워커로 만든 데모 스냅샷입니다. 첫 주제(build_github_repo)의 미리 만든 꼬리질문 하나가
+# 다른 주제의 코드(extract_active_db_resources)를 가리킵니다 (2026-11-17 통합 점검에서 드러난 경우).
+LIVE = load_analysis("gitinsight_agent_live")
+LIVE_TOPIC = LIVE.topic("build-github-repo")
+OTHER_TOPIC_SYMBOL = LIVE.topic("extract-active-db-resources").symbol.symbol_id
+
+
+def make_live_brain(fake: FakeLLM) -> InterviewBrain:
+    return InterviewBrain(
+        analyses=FixtureAnalysisSource(LIVE),
+        repository=InMemorySessionRepository(),
+        llm=fake,
+        judge_timeout_s=JUDGE_TIMEOUT_S,
+        clock=Clock(),
+    )
+
+
+def test_prepared_followup_pointing_at_another_topic_is_not_used() -> None:
+    # 그 코드는 자기 주제에서 물으므로, 여기서 먼저 물으면 같은 함수를 두 번 묻게 됩니다.
+    assert OTHER_TOPIC_SYMBOL in {f.symbol_id for f in LIVE_TOPIC.prepared_followups}
+    order = [t.topic_id for t in LIVE.topics]
+
+    usable = usable_followups(LIVE, order, LIVE_TOPIC)
+
+    assert usable
+    assert OTHER_TOPIC_SYMBOL not in {f.symbol_id for f in usable}
+    # 이번 면접에 그 주제가 없으면 그대로 씁니다.
+    assert (
+        usable_followups(LIVE, [LIVE_TOPIC.topic_id], LIVE_TOPIC) == LIVE_TOPIC.prepared_followups
+    )
+
+
+async def test_judge_timeout_does_not_ask_about_another_topics_code() -> None:
+    fake = FakeLLM()
+    fake.push(JUDGE_PURPOSE, FakeStep(delay_s=10))
+    brain = make_live_brain(fake)
+    session_id, _ = await brain.start(
+        SessionCreate(analysis_id=LIVE.analysis_id, mode=InterviewMode.TEXT)
+    )
+
+    reply = await brain.handle_turn(session_id, turn_request("전체 순서를 길게 설명한 답변입니다"))
+
+    assert reply.action is Action.FOLLOW_UP
+    assert reply.highlight is not None
+    assert reply.highlight.symbol_id != OTHER_TOPIC_SYMBOL
+    assert reply.utterance in {
+        f.question for f in LIVE_TOPIC.prepared_followups if f.symbol_id != OTHER_TOPIC_SYMBOL
+    }
+
+
+async def test_missing_point_is_not_probed_after_an_unjudged_answer() -> None:
+    # 첫 답변의 판단이 시간 초과로 없으면, 그 답변이 어떤 포인트를 다뤘는지 모릅니다.
+    # 다음 답변의 충족률이 낮아도 빠진 포인트를 묻지 않습니다. 이미 설명한 내용을 다시 묻게 되기 때문입니다.
+    points = [p.point_id for p in LIVE_TOPIC.expected_points]
+    second_answer = "알려진 속성 이름을 먼저 확인하고 없으면 새로 만듭니다"
+    low_coverage = Judgment(
+        intent=Intent.ANSWER,
+        coverage=[
+            PointCoverage(
+                point_id=points[1],
+                status=CoverageStatus.COVERED,
+                evidence_quote="알려진 속성 이름을 먼저 확인하고",
+            )
+        ],
+        followup=Followup(question="그렇게 만든 이유는 무엇인가요?", symbol_id=None),
+    )
+    assert 1 / len(points) < brain_probe_threshold()
+    fake = FakeLLM()
+    fake.push(JUDGE_PURPOSE, FakeStep(delay_s=10), FakeStep(value=low_coverage))
+    brain = make_live_brain(fake)
+    session_id, _ = await brain.start(
+        SessionCreate(analysis_id=LIVE.analysis_id, mode=InterviewMode.TEXT)
+    )
+
+    await brain.handle_turn(session_id, turn_request("전체 순서를 길게 설명한 답변입니다"))
+    reply = await brain.handle_turn(session_id, turn_request(second_answer))
+
+    assert reply.action is Action.FOLLOW_UP
+    assert reply.utterance == "그렇게 만든 이유는 무엇인가요?"
+    turns = await brain.repository.list_turns(session_id)
+    assert [t.fallback_reason for t in turns] == [FallbackReason.TIMEOUT, None]
+
+
+async def test_missing_point_is_still_probed_when_every_answer_was_judged() -> None:
+    points = [p.point_id for p in LIVE_TOPIC.expected_points]
+    answer = "알려진 속성 이름을 먼저 확인하고 없으면 새로 만듭니다"
+    low_coverage = Judgment(
+        intent=Intent.ANSWER,
+        coverage=[
+            PointCoverage(
+                point_id=points[1],
+                status=CoverageStatus.COVERED,
+                evidence_quote="알려진 속성 이름을 먼저 확인하고",
+            )
+        ],
+        followup=None,
+    )
+    fake = FakeLLM()
+    fake.push(JUDGE_PURPOSE, FakeStep(value=low_coverage))
+    brain = make_live_brain(fake)
+    session_id, _ = await brain.start(
+        SessionCreate(analysis_id=LIVE.analysis_id, mode=InterviewMode.TEXT)
+    )
+
+    reply = await brain.handle_turn(session_id, turn_request(answer))
+
+    assert reply.action is Action.PROBE
+    assert reply.utterance == LIVE_TOPIC.expected_points[0].probe_question
+    # 기대 포인트는 주제 코드에 대한 것이라 주제 코드를 보여 줍니다.
+    assert reply.highlight == LIVE_TOPIC.symbol
+
+
+def brain_probe_threshold() -> float:
+    from gitinsight_api.brain.config import InterviewConfig
+
+    return InterviewConfig().probe_threshold

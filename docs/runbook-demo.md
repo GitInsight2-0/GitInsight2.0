@@ -68,6 +68,7 @@ uv run python scripts/demo_check.py --real-llm    # 실제 LLM으로 완주 (비
 ```
 
 세 명령 모두 마지막 줄까지 `[통과]`여야 합니다. `--real-llm`에서 대체 사유가 `timeout`으로 많이 나오면 `JUDGE_TIMEOUT_S`나 `LLM_JUDGE_REASONING_EFFORT`를 조정합니다.
+리포트가 판단 표(`turn_table`)로 자주 나오면 리포트 생성이 제한 30초(`REPORT_TIMEOUT_S`)를 넘는 것입니다. 리포트 모델의 추론량은 `LLM_REPORT_REASONING_EFFORT`(기본 `low`, 12초 안팎)로 바꿉니다. 비우면 모델 기본값(23~28초)을 씁니다.
 
 - [ ] Railway 환경 변수: `LAB_ENABLED=false`, `BRAIN_FORCE_PREPARED=false`, `LLM_PROVIDER`와 모델 이름 변수 비움 (기본값 Gemini)
 - [ ] Railway 시작 명령이 `uvicorn --factory gitinsight_worker.server:app_factory`인지 확인 (`gitinsight_api.main:app_factory`이면 분석 요청이 503)
