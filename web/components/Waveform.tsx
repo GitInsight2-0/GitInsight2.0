@@ -1,25 +1,39 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { AudioLevels } from "@/lib/voice/session";
 import styles from "./interview.module.css";
 
-/** 막대 수와 높이 (px) */
+/** 막대 수 */
 const BARS = 13;
-const MIN_H = 8;
-const MAX_H = 72;
 /** 이 RMS에서 막대가 가득 찹니다. 말소리는 보통 0.02~0.2입니다 */
 const FULL_RMS = 0.15;
-/** 소리가 없을 때 보여 줄 모양 (가운데가 높은 낮은 물결) */
-const IDLE = Array.from({ length: BARS }, (_, i) => MIN_H + Math.round(10 * Math.sin((Math.PI * (i + 1)) / (BARS + 1))));
+
+/** 소리가 없을 때 보여 줄 모양 (가운데가 높은 낮은 물결). 막대 최대 높이에 맞춰 줄입니다 */
+function idleShape(minH: number, maxH: number): number[] {
+  const swell = Math.max(2, Math.round(maxH * 0.14));
+  return Array.from({ length: BARS }, (_, i) => minH + Math.round(swell * Math.sin((Math.PI * (i + 1)) / (BARS + 1))));
+}
 
 /**
  * 마이크와 AI 목소리 크기를 막대로 그립니다.
  * 최근 소리 크기를 오른쪽에서 왼쪽으로 흘려 보여 줍니다.
  * 매 프레임 React 상태를 바꾸지 않고 막대 높이만 직접 고칩니다.
  */
-export default function Waveform({ levels, active }: { levels: AudioLevels | null; active: boolean }) {
+export default function Waveform({
+  levels,
+  active,
+  maxHeight = 72,
+}: {
+  levels: AudioLevels | null;
+  active: boolean;
+  /** 막대가 가장 클 때의 높이 (px). 말풍선과 아래 막대에서는 작게 씁니다 */
+  maxHeight?: number;
+}) {
   const bars = useRef<(HTMLSpanElement | null)[]>([]);
+  const MAX_H = maxHeight;
+  const MIN_H = Math.max(3, Math.round(maxHeight / 9));
+  const IDLE = useMemo(() => idleShape(MIN_H, MAX_H), [MIN_H, MAX_H]);
 
   useEffect(() => {
     const paint = (heights: number[]) =>
@@ -65,10 +79,10 @@ export default function Waveform({ levels, active }: { levels: AudioLevels | nul
       for (let i = 0; i < prev.length; i++) s += prev[i] * prev[i];
       return Math.sqrt(s / prev.length);
     }
-  }, [levels, active]);
+  }, [levels, active, IDLE, MIN_H, MAX_H]);
 
   return (
-    <span className={styles.wave} aria-hidden="true">
+    <span className={styles.wave} style={{ height: maxHeight }} aria-hidden="true">
       {IDLE.map((h, i) => (
         <span
           key={i}

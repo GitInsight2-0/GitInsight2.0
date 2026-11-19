@@ -7,6 +7,7 @@ from gitinsight_worker.candidates import (
     is_inactive_path,
     is_test_path,
     logic_line_count,
+    script_logic_line_count,
     select_candidates,
 )
 
@@ -158,3 +159,209 @@ def test_string_value_lines_are_counted_not_skipped() -> None:
     return text
 '''
     assert logic_line_count(code) == 4
+
+
+# ---- TypeScript·JavaScript (#72) ----
+
+
+def test_script_test_and_inactive_paths() -> None:
+    assert is_test_path("web/lib/api.test.ts")
+    assert is_test_path("web/components/Button.spec.tsx")
+    assert is_test_path("src/__tests__/util.js")
+    assert is_test_path("src/__mocks__/client.mjs")
+    assert not is_test_path("web/lib/latest.ts")
+    assert not is_test_path("web/lib/spec.ts")
+    assert is_inactive_path("src/old.ts")
+    assert is_inactive_path("examples/demo.jsx")
+    assert not is_inactive_path("src/models.ts")
+
+
+HOLLOW_SCRIPT_CLASS = """export class AuditLogger {
+  /**
+   * 시작을 기록합니다.
+   * @param name 작업 이름
+   */
+  start(name: string) {
+    console.log("start", name);
+  }
+
+  // 끝을 기록합니다.
+  finish(name: string) {
+    this.logger.info("finish", name);
+  }
+
+  reset() {
+    return;
+  }
+}
+"""
+
+WORKING_SCRIPT_FUNCTION = """export async function loadItems(client: Client, limit = 10): Promise<Item[]> {
+  const response = await client.get("/items", { limit });
+  if (!response.ok) {
+    throw new Error("failed");
+  }
+  const items = response.data.filter((item) => item.active);
+  return items.slice(0, limit);
+}
+"""
+
+
+def test_hollow_script_class_has_little_logic() -> None:
+    # 메서드 머리줄 3개만 남습니다. 주석, 로그 호출, 빈 return, 닫는 괄호는 세지 않습니다.
+    assert script_logic_line_count(HOLLOW_SCRIPT_CLASS) == 3
+    assert not has_enough_logic(HOLLOW_SCRIPT_CLASS, "src/audit.ts")
+
+
+MARKUP_ONLY_COMPONENT = """\
+export function Card({ title, children }: Props) {
+  return (
+    <section className="card">
+      {/* 제목 */}
+      <h2>{title}</h2>
+      <div
+        className="body"
+      >
+        {children}
+      </div>
+      <Footer />
+    </section>
+  );
+}
+"""
+
+COMPONENT_WITH_LOGIC = """\
+export function Counter({ start }: Props) {
+  const [count, setCount] = useState(start);
+  const doubled = useMemo(() => count * 2, [count]);
+  const increase = () => setCount((value) => value + 1);
+  useEffect(() => {
+    document.title = String(count);
+  }, [count]);
+  return (
+    <button onClick={increase}>
+      {doubled}
+    </button>
+  );
+}
+"""
+
+
+def test_markup_only_component_has_little_logic() -> None:
+    # `return (`, 태그 속성 줄, `{children}`만 남습니다. 태그로 시작하는 줄과 JSX 주석은 세지 않습니다.
+    assert script_logic_line_count(MARKUP_ONLY_COMPONENT) == 3
+    assert not has_enough_logic(MARKUP_ONLY_COMPONENT, "web/Card.tsx")
+
+
+def test_component_with_hooks_and_handlers_has_enough_logic() -> None:
+    assert script_logic_line_count(COMPONENT_WITH_LOGIC) == 8
+    assert has_enough_logic(COMPONENT_WITH_LOGIC, "web/Counter.tsx")
+
+
+def test_working_script_function_has_enough_logic() -> None:
+    # 함수 머리줄과 닫는 괄호를 뺀 다섯 줄입니다.
+    assert script_logic_line_count(WORKING_SCRIPT_FUNCTION) == 5
+    assert has_enough_logic(WORKING_SCRIPT_FUNCTION, "src/items.ts")
+
+
+def test_components_and_other_code_alternate_so_routes_become_topics() -> None:
+    # 줄 수만 보면 컴포넌트 넷이 앞자리를 다 차지합니다.
+    symbols = [
+        sym("app/components/Profile.tsx", "Profile", 1, 300),
+        sym("app/components/Feed.tsx", "Feed", 1, 250),
+        sym("app/components/Canvas.jsx", "Canvas", 1, 200),
+        sym("app/components/Modal.tsx", "Modal", 1, 150),
+        sym("app/api/items/route.ts", "POST", 1, 40),
+        sym("lib/db.js", "connect", 1, 30),
+    ]
+
+    assert ids(symbols) == [
+        "app/components/Profile.tsx::Profile",
+        "app/api/items/route.ts::POST",
+        "app/components/Feed.tsx::Feed",
+        "lib/db.js::connect",
+        "app/components/Canvas.jsx::Canvas",
+        "app/components/Modal.tsx::Modal",
+    ]
+
+
+def test_alternation_starts_with_the_biggest_and_keeps_label_order() -> None:
+    route = sym("app/api/route.ts", "handler", 1, 400)
+    big = sym("app/Big.tsx", "Big", 1, 300)
+    mine = sym("app/Mine.tsx", "Mine", 1, 20)
+    other = sym("app/Other.tsx", "Other", 1, 100)
+    labels = {mine.symbol_id: ContributionLabel.VERIFIED}
+
+    candidates = select_candidates(
+        [route, big, mine, other],
+        lambda s: labels.get(s.symbol_id, ContributionLabel.UNVERIFIED),
+    )
+
+    # 기여 근거가 있는 코드가 먼저이고, 그 뒤는 가장 큰 후보(라우트)부터 번갈아 놓습니다.
+    assert [c.symbol.name for c in candidates] == ["Mine", "handler", "Big", "Other"]
+
+
+def test_repo_without_component_files_keeps_size_order() -> None:
+    symbols = [
+        sym("app/a.py", "small", 1, 10),
+        sym("src/b.ts", "big", 1, 120),
+        sym("app/c.py", "mid", 1, 60),
+    ]
+
+    assert ids(symbols) == ["src/b.ts::big", "app/c.py::mid", "app/a.py::small"]
+
+
+def test_languages_alternate_so_python_is_not_pushed_out_by_long_script_symbols() -> None:
+    # 줄 수만 보면 TypeScript 넷이 앞자리를 다 차지합니다 (#129).
+    symbols = [
+        sym("web/components/Screen.tsx", "Screen", 1, 600),
+        sym("web/lib/session.ts", "startSession", 1, 400),
+        sym("web/components/Lab.tsx", "Lab", 1, 280),
+        sym("web/lib/gemini.ts", "connect", 1, 250),
+        sym("api/brain/service.py", "Brain", 1, 200),
+        sym("worker/stage2.py", "generate", 1, 90),
+        sym("worker/pipeline.py", "run", 1, 60),
+    ]
+
+    # 언어끼리 번갈아 놓고, TypeScript 안에서는 컴포넌트와 나머지를 번갈아 놓습니다.
+    assert ids(symbols) == [
+        "web/components/Screen.tsx::Screen",
+        "api/brain/service.py::Brain",
+        "web/lib/session.ts::startSession",
+        "worker/stage2.py::generate",
+        "web/components/Lab.tsx::Lab",
+        "worker/pipeline.py::run",
+        "web/lib/gemini.ts::connect",
+    ]
+
+
+def test_language_alternation_starts_with_the_biggest_and_keeps_label_order() -> None:
+    service = sym("api/service.py", "Service", 1, 300)
+    screen = sym("web/Screen.tsx", "Screen", 1, 200)
+    helper = sym("api/helper.py", "helper", 1, 100)
+    mine = sym("web/mine.ts", "mine", 1, 20)
+    labels = {mine.symbol_id: ContributionLabel.VERIFIED}
+
+    candidates = select_candidates(
+        [service, screen, helper, mine],
+        lambda s: labels.get(s.symbol_id, ContributionLabel.UNVERIFIED),
+    )
+
+    # 기여 근거가 있는 코드가 먼저이고, 그 뒤는 가장 큰 후보(Python)부터 번갈아 놓습니다.
+    assert [c.symbol.name for c in candidates] == ["mine", "Service", "Screen", "helper"]
+
+
+def test_python_only_repo_keeps_size_order() -> None:
+    symbols = [
+        sym("app/a.py", "small", 1, 10),
+        sym("app/b.py", "big", 1, 120),
+        sym("app/c.py", "mid", 1, 60),
+    ]
+
+    assert ids(symbols) == ["app/b.py::big", "app/c.py::mid", "app/a.py::small"]
+
+
+def test_logic_rules_follow_the_file_language() -> None:
+    # 경로가 없거나 Python이면 지금까지의 Python 기준을 그대로 씁니다.
+    assert has_enough_logic(WORKING_FUNCTION) == has_enough_logic(WORKING_FUNCTION, "app/a.py")
+    assert has_enough_logic(HOLLOW_CLASS) == has_enough_logic(HOLLOW_CLASS, "app/a.py")

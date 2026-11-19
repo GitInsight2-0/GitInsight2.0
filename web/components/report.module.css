@@ -16,6 +16,9 @@
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   font-weight: 700;
   font-size: 18px;
   letter-spacing: -0.02em;
@@ -565,6 +568,152 @@
   padding: 2px 10px;
   border-radius: var(--gi-radius-pill);
   background: var(--gi-surface);
+}
+
+/* 역량 변화 그래프 (#120). 선과 점만 강조색을 쓰고, 글자는 글자 색을 씁니다. */
+.growthGrid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 16px;
+}
+
+.growthTile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+  border: 1px solid var(--gi-line);
+  border-radius: var(--gi-radius);
+  background: var(--gi-bg);
+}
+
+.growthHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.growthHead h3 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  word-break: keep-all;
+}
+
+.growthValue {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.growthPlot {
+  width: 100%;
+  min-width: 0;
+}
+
+/* 실제 픽셀 크기로 그립니다. 늘려 그리지 않아서 안의 글자가 화면 글자와 같은 크기입니다. */
+.growthSvg {
+  display: block;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.growthRule {
+  stroke: var(--gi-line);
+  stroke-width: 1;
+}
+
+/* 그래프 안의 글자는 아래 읽기 줄(.growthReadout)과 같은 글꼴, 같은 크기, 같은 굵기입니다. */
+.growthTick {
+  fill: var(--gi-muted);
+  font-family: var(--gi-font-sans);
+  font-size: 13px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.growthLine {
+  fill: none;
+  stroke: var(--gi-accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* 평가가 없던 구간. 값이 아니라서 강조색을 쓰지 않고 가늘게 그립니다. */
+.growthGap {
+  stroke: var(--gi-muted);
+  stroke-opacity: 0.45;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+/* 점 둘레의 바탕색 테두리는 점이 선이나 다른 점과 겹칠 때 구분되게 합니다. */
+.growthDot {
+  fill: var(--gi-accent);
+  stroke: var(--gi-bg);
+  stroke-width: 2;
+}
+
+.growthHit {
+  fill: transparent;
+  outline: none;
+}
+
+.growthHit:hover,
+.growthHit:focus-visible {
+  fill: var(--gi-accent);
+  fill-opacity: 0.16;
+}
+
+.growthReadout {
+  margin: 0;
+  min-height: 1.6em;
+  font-size: 13px;
+  color: var(--gi-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.growthTable summary {
+  width: fit-content;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gi-accent-text);
+}
+
+.growthTable .tableWrap {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+.growthTable table {
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.growthTable th,
+.growthTable td {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--gi-line);
+  text-align: left;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.growthTable thead th {
+  color: var(--gi-muted);
+  font-weight: 600;
+}
+
+.growthTable tbody th {
+  font-weight: 400;
 }
 
 @media (max-width: 720px) {

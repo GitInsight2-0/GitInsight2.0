@@ -8,6 +8,7 @@
   Optional[...], 문자열 전방 참조 안의 클래스 이름도 찾습니다.
 - 요약에는 시그니처, 클래스의 self 속성 이름, 메서드 시그니처만 넣고 본문은 넣지 않습니다. 입력 토큰을 제한하기 위해서입니다.
 - 요약은 레포 코드에서 온 값이라 프롬프트에서 untrusted_block 안에만 넣습니다. 저장하지 않습니다.
+- Python 문법으로 읽으므로 Python 파일끼리만 연결합니다. TypeScript·JavaScript 주제에는 붙이지 않습니다 (#72).
 """
 
 import logging
@@ -19,6 +20,7 @@ from tree_sitter import Node
 
 from gitinsight_contracts.common import SymbolKind, SymbolRef
 from gitinsight_worker.candidates import is_inactive_path, is_test_path
+from gitinsight_worker.languages import PYTHON, language_of
 from gitinsight_worker.symbols import identifier_lines, parse_python
 
 logger = logging.getLogger(__name__)
@@ -36,12 +38,13 @@ _CLOSE_PAREN = re.compile(r",?\s+\)|,\)")
 
 
 def top_level_index(symbols: list[SymbolRef]) -> dict[str, list[SymbolRef]]:
-    """이름별 최상위 함수·클래스입니다. 테스트와 지금 쓰지 않는 경로(legacy 등)는 뺍니다."""
+    """이름별 Python 최상위 함수·클래스입니다. 테스트와 지금 쓰지 않는 경로(legacy 등)는 뺍니다."""
     index: dict[str, list[SymbolRef]] = {}
     for symbol in symbols:
         top_level = "." not in symbol.symbol_id.split("::", 1)[1]
         if (
             top_level
+            and language_of(symbol.path) == PYTHON
             and symbol.kind in (SymbolKind.FUNCTION, SymbolKind.CLASS)
             and not is_test_path(symbol.path)
             and not is_inactive_path(symbol.path)
@@ -187,6 +190,8 @@ def external_definitions_text(
     root: Path, target: SymbolRef, index: dict[str, list[SymbolRef]]
 ) -> str:
     """프롬프트에 넣을 요약 묶음입니다. 붙일 정의가 없으면 빈 문자열입니다."""
+    if language_of(target.path) != PYTHON:
+        return ""
     summaries: list[str] = []
     try:
         for symbol in external_definitions(root, target, index):

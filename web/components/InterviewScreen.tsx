@@ -1,8 +1,9 @@
 "use client";
 
-import type { Action, BrainReply } from "@gitinsight/contracts";
+import type { Action, BrainReply, SymbolRef, TurnRequest } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import CodeViewer from "@/components/CodeViewer";
+import { interviewHref } from "@/lib/analyses";
 import { reportHref } from "@/lib/reports";
 import {
   ApiError,
@@ -19,6 +20,7 @@ import { connectGemini } from "@/lib/voice/gemini";
 import { type AudioLevels, type SessionUi, type VoiceSession, startVoiceSession } from "@/lib/voice/session";
 import { USER_SILENCE_MS } from "@/lib/voice/meter";
 import styles from "./interview.module.css";
+import Logo from "./Logo";
 import Waveform from "./Waveform";
 
 /**
@@ -32,11 +34,19 @@ import Waveform from "./Waveform";
 interface HistoryItem {
   who: "interviewer" | "me" | "system";
   text: string;
+  /** 면접관 말풍선 아래에 적을 질문 종류와 코드 위치 (서버가 준 값) */
+  action?: Action;
+  where?: SymbolRef | null;
+}
+
+/** 면접관 발화를 대화 기록 한 줄로 */
+function said(r: BrainReply): HistoryItem {
+  return { who: "interviewer", text: r.utterance, action: r.action, where: r.highlight };
 }
 
 type Mode = "text" | "voice";
 type VoiceState = "idle" | "connecting" | "live";
-/** 가운데 음성 표시가 보여 줄 상태 */
+/** 아래 막대와 말풍선이 보여 줄 상태 */
 type Stage = "connecting" | "listening" | "thinking" | "speaking" | "text" | "done";
 
 const STAGE_LABEL: Record<Stage, string> = {
@@ -47,9 +57,6 @@ const STAGE_LABEL: Record<Stage, string> = {
   text: "텍스트로 답하는 중",
   done: "면접이 끝났어요",
 };
-
-/** 서버의 마무리 발화 없이 끝났을 때(끝내기, 409) 질문 칸에 보여 주는 문구 (#84). 인사는 아래 리포트 안내에 있습니다 */
-const CLOSED_TEXT = "면접을 마쳤어요.";
 
 /** 말 끝 판정 침묵 (초). 안내 문구에 씁니다 */
 const SILENCE_SEC = DEFAULT_VAD.silenceMs / 1000;
@@ -147,6 +154,14 @@ export default function InterviewScreen({
   /** 사용자가 직접 음성을 끈 것인지 (끊김과 구분해 자동 전환 안내를 하지 않음) */
   const voiceStoppedByUser = useRef(false);
 
+  /** 다시 보기 면접을 열었는데 다시 물을 질문이 없음 (서버 409, #118) */
+  const [nothingToReview, setNothingToReview] = useState(false);
+  /** 대화 말풍선 목록. 새 말풍선이 생기면 맨 아래로 내립니다 */
+  const threadRef = useRef<HTMLDivElement | null>(null);
+
+  /** 다시 보기 면접에서 서버가 "다시 볼 질문이 없다"(409)고 답했는지 */
+  const isNothingToReview = (e: unknown) => reviewOnly && e instanceof ApiError && e.status === 409;
+
   const push = (item: HistoryItem) => setHistory((h) => [...h, item]);
   const showReply = (r: BrainReply) => {
     replyRef.current = r;
@@ -177,6 +192,12 @@ export default function InterviewScreen({
     if (finished) void requestReport();
     // requestReport는 ref로 한 번만 보내므로 finished만 봅니다.
   }, [finished]);
+
+  // 새 말풍선(질문, 받아쓰기, 기다림, 리포트 안내)이 생기면 대화 칸을 맨 아래로 내립니다. 페이지 전체는 움직이지 않습니다.
+  useEffect(() => {
+    const box = threadRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [history.length, lastAnswer, thinking, busy, aiSpeaking, report.kind]);
 
   async function requestReport() {
     const id = sessionRef.current;
@@ -234,10 +255,13 @@ export default function InterviewScreen({
       sessionRef.current = created.session_id;
       setSessionId(created.session_id);
       showReply(created.first);
-      setHistory([{ who: "interviewer", text: created.first.utterance }]);
+      setHistory([said(created.first)]);
     } catch (e) {
-      if (isLoginError(e)) setNeedLogin(true);
-      setError(explainError(e));
+      if (isNothingToReview(e)) setNothingToReview(true);
+      else {
+        if (isLoginError(e)) setNeedLogin(true);
+        setError(explainError(e));
+      }
     } finally {
       setBusy(false);
     }
@@ -264,7 +288,7 @@ export default function InterviewScreen({
       });
       pendingTurn.current = null;
       push({ who: "me", text: transcript });
-      push({ who: "interviewer", text: next.utterance });
+      push(said(next));
       showReply(next);
       setDraft("");
     } catch (e) {
@@ -278,6 +302,47 @@ export default function InterviewScreen({
         setError(explainError(e));
       } else {
         setError(`답변을 보내지 못했습니다. 다시 보내 주세요. (${explainError(e)})`);
+      }
+    } finally {
+      sending.current = false;
+      setBusy(false);
+    }
+  }
+
+  /**
+   * 음성 턴의 응답을 받기 전에 음성이 끝났을 때, 같은 turn_id로 다시 보내 화면 질문을 서버와 맞춥니다 (#47).
+   * 서버는 이미 처리한 turn_id면 저장된 응답을, 처리 중이면 끝날 때까지 기다렸다 같은 응답을 돌려줍니다.
+   * 그래도 못 받으면 그 답변을 입력칸에 넣어 둡니다. 그대로 보내면 같은 turn_id로 가서 서버가 한 번만 반영합니다.
+   */
+  async function resyncTurn(turn: TurnRequest) {
+    const id = sessionRef.current;
+    if (!id || sending.current) return;
+    sending.current = true;
+    setBusy(true);
+    setError(null);
+    pendingTurn.current = { id: turn.turn_id, transcript: turn.transcript };
+    try {
+      const next = await postTurn(id, turn);
+      pendingTurn.current = null;
+      // 기다리는 사이 "끝내기"로 면접을 끝냈으면 종료 화면을 덮지 않습니다.
+      if (replyRef.current?.done) return;
+      push(said(next));
+      showReply(next);
+    } catch (e) {
+      if (replyRef.current?.done) {
+        pendingTurn.current = null;
+        return;
+      }
+      if (e instanceof ApiError && e.status === 409) {
+        pendingTurn.current = null;
+        push({ who: "system", text: "이미 끝난 면접입니다." });
+        closeLocally();
+      } else if (isLoginError(e)) {
+        setNeedLogin(true);
+        setError(explainError(e));
+      } else {
+        setDraft(turn.transcript);
+        setError(`음성으로 보낸 마지막 답변의 결과를 받지 못했어요. 입력칸의 답변을 그대로 보내 주세요. (${explainError(e)})`);
       }
     } finally {
       sending.current = false;
@@ -322,14 +387,14 @@ export default function InterviewScreen({
         if (!sessionRef.current) {
           sessionRef.current = id;
           setSessionId(id);
-          setHistory([{ who: "interviewer", text: current.utterance }]);
+          setHistory([said(current)]);
           showReply(current);
         }
       },
       reply: (r) => {
         // 이어받은 세션의 현재 발화는 이미 기록에 있으므로 다시 넣지 않습니다.
         if (r === replyRef.current) return;
-        push({ who: "interviewer", text: r.utterance });
+        push(said(r));
         showReply(r);
         // "답변을 살펴보고 있어요"는 AI가 실제로 말하기 시작할 때 끕니다 (speaking).
         // 방금 보낸 답변은 다음 답변을 말하기 시작할 때까지 남겨 둡니다.
@@ -365,7 +430,7 @@ export default function InterviewScreen({
       audio: (levels) => {
         if (current()) setLevels(levels);
       },
-      ended: (reason, kind) => {
+      ended: (reason, kind, unfinished) => {
         if (!current()) return;
         voice.current = null;
         resetVoiceView();
@@ -380,6 +445,8 @@ export default function InterviewScreen({
         if (!voiceStoppedByUser.current && sessionRef.current) {
           setNotice(`음성 연결이 끊겨 텍스트로 이어 갑니다. 다시 시도하려면 위의 "음성"을 누르세요. (${reason})`);
         }
+        // 서버로 간 답변의 응답을 못 받았습니다. 화면 질문이 서버보다 한 단계 늦지 않게 맞춥니다 (#47).
+        if (unfinished) void resyncTurn(unfinished);
       },
       latency: noop,
       filler: noop,
@@ -419,6 +486,10 @@ export default function InterviewScreen({
       setVoiceState("idle");
       setMode("text");
       if (voiceStoppedByUser.current || isAbort(e)) return;
+      if (!sessionRef.current && isNothingToReview(e)) {
+        setNothingToReview(true);
+        return;
+      }
       if (isLoginError(e)) setNeedLogin(true);
       const message = explainError(e);
       if (sessionRef.current) setNotice(`음성으로 연결하지 못해 텍스트로 이어 갑니다. (${message})`);
@@ -454,34 +525,52 @@ export default function InterviewScreen({
     return (
       <div className={styles.page}>
         <header className={styles.topbar}>
-          <span className={styles.brand}>GitInsight</span>
+          <a className={styles.brand} href="/">
+            <Logo size={22} />
+            GitInsight
+          </a>
         </header>
-        <main className={styles.layout}>
-          <section className={styles.stage}>
-            <div className={styles.intro}>
-              <h1>{reviewOnly ? "부족했던 질문 다시 보기" : "모의 기술면접"}</h1>
-              <p>
-                {reviewOnly
-                  ? "지난 면접에서 막혔거나 힌트를 받고 답한 질문만 다시 묻습니다. 음성으로 답하거나 텍스트로 답할 수 있고, 도중에 바꿀 수 있습니다."
-                  : "레포 분석 결과를 바탕으로 질문합니다. 음성으로 답하거나 텍스트로 답할 수 있고, 도중에 바꿀 수 있습니다."}
-              </p>
-              <div className={styles.introActions}>
-                <button type="button" className={styles.primary} onClick={() => void startVoice()} disabled={busy}>
-                  음성으로 시작
-                </button>
-                <button type="button" className={styles.secondary} onClick={() => void startText()} disabled={busy}>
-                  텍스트로 시작
-                </button>
-              </div>
-              <p className={styles.note}>
-                <MicIcon />
-                음성은 Chrome에서 이어폰을 끼고 쓰세요. 스피커로 들으면 AI가 자기 목소리를 듣고 끊길 수 있습니다.
-              </p>
-              <p role="status" aria-live="polite" className={styles.error}>
-                {error}
-              </p>
-              {needLogin && <LoginLink />}
-            </div>
+        <main className={styles.introWrap}>
+          <section className={styles.intro}>
+            <Logo size={52} className={styles.introMark} />
+            <h1>{reviewOnly ? "부족했던 질문 다시 보기" : "모의 기술면접"}</h1>
+            {nothingToReview ? (
+              <>
+                <p>다시 볼 질문이 없어요. 이 레포로 본 면접에서 막혔거나 힌트를 받고 답한 질문이 남아 있지 않아요.</p>
+                <div className={styles.introActions}>
+                  <a className={styles.primary} href={interviewHref(analysisId, repo ?? undefined)}>
+                    일반 면접으로 시작
+                  </a>
+                  <a className={styles.secondary} href="/">
+                    첫 화면으로
+                  </a>
+                </div>
+              </>
+            ) : (
+              <>
+                <p>
+                  {reviewOnly
+                    ? "지난 면접에서 막혔거나 힌트를 받고 답한 질문만 다시 묻습니다. 음성으로 답하거나 텍스트로 답할 수 있고, 도중에 바꿀 수 있습니다."
+                    : "레포 분석 결과를 바탕으로 질문합니다. 음성으로 답하거나 텍스트로 답할 수 있고, 도중에 바꿀 수 있습니다."}
+                </p>
+                <div className={styles.introActions}>
+                  <button type="button" className={styles.primary} onClick={() => void startVoice()} disabled={busy}>
+                    음성으로 시작
+                  </button>
+                  <button type="button" className={styles.secondary} onClick={() => void startText()} disabled={busy}>
+                    텍스트로 시작
+                  </button>
+                </div>
+                <p className={styles.note}>
+                  <MicIcon />
+                  음성은 Chrome에서 이어폰을 끼고 쓰세요. 스피커로 들으면 AI가 자기 목소리를 듣고 끊길 수 있습니다.
+                </p>
+              </>
+            )}
+            <p role="status" aria-live="polite" className={styles.error}>
+              {error}
+            </p>
+            {needLogin && <LoginLink />}
           </section>
         </main>
       </div>
@@ -502,55 +591,36 @@ export default function InterviewScreen({
           : aiSpeaking
             ? "speaking"
             : "listening";
-  const quiet = stage === "text" || stage === "done";
-  const orbClass = [styles.orb, quiet ? styles.orbIdle : "", stage === "thinking" || stage === "connecting" ? styles.orbThinking : ""]
-    .filter(Boolean)
-    .join(" ");
   const canSwitchToVoice = mode === "text" && voiceState === "idle" && !busy && !done;
+  // 음성으로 말하는 중인 답변. 아직 서버로 보내지 않아서 점선 말풍선에 받아쓰기를 보여 줍니다.
+  const live = mode === "voice" && !done && !answerSent && (lastAnswer !== null || stage === "listening");
+  // 텍스트로 보내는 중인 답변. 서버가 받으면 기록에 들어갑니다.
+  const sendingText = mode === "text" && busy && draft.trim() ? draft.trim() : null;
+  const lastInterviewer = history.reduce((at, h, i) => (h.who === "interviewer" ? i : at), -1);
 
   return (
     <div className={styles.page}>
       <header className={styles.topbar}>
-        <span className={styles.brand}>GitInsight</span>
-        {reply && !closedLocally && (
-          <span className={styles.progress}>
-            <span className={styles.chip}>{ACTION_LABEL[reply.action]}</span>
+        <a className={styles.brand} href="/">
+          <Logo size={22} />
+          GitInsight
+        </a>
+        {reply && !closedLocally && !done && <span className={styles.chip}>{ACTION_LABEL[reply.action]}</span>}
+        <span className={styles.spacer} />
+        {reply && !done && (
+          <span className={styles.time}>
+            남은 시간 <b>{remainingLabel(reply.remaining_sec)}</b>
           </span>
         )}
-        <div className={styles.controls}>
-          {reply && !done && (
-            <span className={styles.time}>
-              남은 시간 <b>{remainingLabel(reply.remaining_sec)}</b>
-            </span>
-          )}
-          <div role="group" aria-label="답변 방식" className={styles.toggle}>
-            <button
-              type="button"
-              aria-pressed={mode === "voice"}
-              onClick={() => void startVoice()}
-              disabled={mode === "voice" || !canSwitchToVoice}
-            >
-              음성
-            </button>
-            <button type="button" aria-pressed={mode === "text"} onClick={switchToText} disabled={mode === "text"}>
-              텍스트
-            </button>
-          </div>
-          {reply && !done && (
-            <button
-              type="button"
-              className={styles.secondary}
-              onClick={() => setConfirmEnd(true)}
-              disabled={busy || confirmEnd}
-            >
-              끝내기
-            </button>
-          )}
-        </div>
+        {reply && !done && (
+          <button type="button" className={styles.end} onClick={() => setConfirmEnd(true)} disabled={busy || confirmEnd}>
+            끝내기
+          </button>
+        )}
       </header>
 
       <main className={styles.layout}>
-        <section aria-label="면접" className={styles.stage}>
+        <section aria-label="면접 대화" className={styles.chat}>
           {notice && (
             <p role="status" aria-live="polite" className={styles.notice}>
               {notice}
@@ -577,81 +647,129 @@ export default function InterviewScreen({
             </div>
           )}
 
-          <div className={styles.voice}>
-            <div className={orbClass}>
-              <Waveform levels={levels} active={stage === "listening" || stage === "speaking"} />
-            </div>
-            <span role="status" aria-live="polite" className={quiet ? `${styles.state} ${styles.stateIdle}` : styles.state}>
-              {STAGE_LABEL[stage]}
-            </span>
+          <div ref={threadRef} className={styles.thread} role="log" aria-live="polite" aria-label="대화 기록">
+            {history.length === 0 && <p className={styles.system}>{STAGE_LABEL[stage]}</p>}
+            {history.map((h, i) =>
+              h.who === "system" ? (
+                <p key={i} className={styles.system}>
+                  {h.text}
+                </p>
+              ) : h.who === "interviewer" ? (
+                <div key={i} className={`${styles.msg} ${styles.ai}`}>
+                  <span className={styles.who}>
+                    면접관
+                    {h.action && <span className={styles.tag}>{ACTION_LABEL[h.action]}</span>}
+                    {i === lastInterviewer && stage === "speaking" && <span className={styles.speaking}>말하는 중</span>}
+                  </span>
+                  <p className={styles.bubble}>{h.text}</p>
+                  {h.where && (
+                    <span className={styles.ref}>
+                      {h.where.path} <b>{h.where.start_line}–{h.where.end_line}줄</b>
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div key={i} className={`${styles.msg} ${styles.me}`}>
+                  <span className={styles.who}>나</span>
+                  <p className={styles.bubble}>{h.text}</p>
+                  <span className={styles.sent}>보냄</span>
+                </div>
+              ),
+            )}
+
+            {sendingText && (
+              <div className={`${styles.msg} ${styles.me} ${styles.pending}`}>
+                <span className={styles.who}>나</span>
+                <p className={styles.bubble}>{sendingText}</p>
+                <span className={styles.sent}>보내는 중</span>
+              </div>
+            )}
+
+            {live && (
+              <div className={`${styles.msg} ${styles.me} ${styles.live}`}>
+                <span className={styles.who}>나 · 듣는 중</span>
+                <div className={styles.bubble}>
+                  <Waveform levels={levels} active={stage === "listening"} maxHeight={26} />
+                  <p className={styles.partial}>{lastAnswer ?? "말씀하시면 여기에 받아 적어요."}</p>
+                </div>
+              </div>
+            )}
+
+            {stage === "thinking" && (
+              <div className={`${styles.msg} ${styles.ai} ${styles.waiting}`}>
+                <span className={styles.who}>면접관</span>
+                <p className={styles.bubble}>
+                  <span className={styles.dots} aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                  답변을 살펴보고 있어요
+                </p>
+              </div>
+            )}
+
+            {done && <ReportStatus report={report} href={reportHref} onRetry={() => void requestReport()} />}
           </div>
 
-          <p aria-live="polite" className={styles.question}>
-            {closedLocally ? CLOSED_TEXT : reply?.utterance ?? "면접을 준비하고 있습니다…"}
-          </p>
-
-          {done ? (
-            <ReportStatus
-              report={report}
-              href={reportHref}
-              onRetry={() => void requestReport()}
-            />
-          ) : mode === "voice" ? (
-            <>
-              <div className={styles.answer}>
-                <div className={styles.label}>{answerSent ? "방금 보낸 답변" : "내 답변"}</div>
-                <p className={styles.answerText}>{lastAnswer ?? (stage === "listening" ? "말을 마치면 여기에 적어 드려요." : "")}</p>
-              </div>
-              <p className={styles.hint}>
-                <MicIcon />
-                말을 마치고 {SILENCE_SEC}초 쉬면 답변이 전송돼요
-              </p>
-            </>
-          ) : (
-            <div className={styles.composer}>
-              <textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  // 한글 입력 중(조합 중)에는 Enter로 보내지 않습니다.
-                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    void submit();
-                  }
-                }}
-                aria-label="답변"
-                maxLength={TRANSCRIPT_MAX}
-                placeholder="답변을 입력하세요 (Enter 보내기, Shift+Enter 줄바꿈)"
-                rows={4}
-                disabled={busy}
-              />
-              <div className={styles.composerRow}>
-                <span role="status" aria-live="polite" className={styles.error}>
-                  {error}
-                </span>
-                <button type="button" className={styles.primary} onClick={() => void submit()} disabled={busy || !draft.trim()}>
-                  {busy ? "보내는 중…" : "답변 보내기"}
+          {!done && (
+            <footer className={styles.dock}>
+              {mode === "voice" ? (
+                <div className={styles.mic}>
+                  <Waveform levels={levels} active={stage === "listening" || stage === "speaking"} maxHeight={22} />
+                  <div>
+                    <div role="status" aria-live="polite" className={styles.micState}>
+                      {STAGE_LABEL[stage]}
+                    </div>
+                    <div className={styles.hint}>말을 마치고 {SILENCE_SEC}초 쉬면 답변이 전송돼요</div>
+                  </div>
+                </div>
+              ) : (
+                <div className={styles.composer}>
+                  <textarea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      // 한글 입력 중(조합 중)에는 Enter로 보내지 않습니다.
+                      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        void submit();
+                      }
+                    }}
+                    aria-label="답변"
+                    maxLength={TRANSCRIPT_MAX}
+                    placeholder="답변을 입력하세요 (Enter 보내기, Shift+Enter 줄바꿈)"
+                    rows={2}
+                    disabled={busy}
+                  />
+                  <button type="button" className={styles.send} onClick={() => void submit()} disabled={busy || !draft.trim()}>
+                    {busy ? "보내는 중…" : "보내기"}
+                  </button>
+                </div>
+              )}
+              <div role="group" aria-label="답변 방식" className={styles.toggle}>
+                <button
+                  type="button"
+                  aria-pressed={mode === "voice"}
+                  onClick={() => void startVoice()}
+                  disabled={mode === "voice" || !canSwitchToVoice}
+                >
+                  음성
+                </button>
+                <button type="button" aria-pressed={mode === "text"} onClick={switchToText} disabled={mode === "text"}>
+                  텍스트
                 </button>
               </div>
-            </div>
-          )}
-
-          {history.length > 1 && (
-            <details className={styles.history}>
-              <summary>대화 기록 ({history.length})</summary>
-              <ol>
-                {history.map((h, i) => (
-                  <li key={i} className={h.who === "system" ? styles.historySystem : undefined}>
-                    <span className={styles.who}>{h.who === "interviewer" ? "면접관" : h.who === "me" ? "나" : "·"}</span>
-                    {h.text}
-                  </li>
-                ))}
-              </ol>
-            </details>
+              {error && (
+                <p role="status" aria-live="polite" className={styles.barError}>
+                  {error}
+                </p>
+              )}
+            </footer>
           )}
         </section>
 
-        <CodeViewer repo={repo} target={reply?.highlight ?? null} />
+        <CodeViewer analysisId={analysisId} repo={repo} target={reply?.highlight ?? null} />
       </main>
     </div>
   );
