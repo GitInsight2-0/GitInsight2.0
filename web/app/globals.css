@@ -1,42 +1,50 @@
 /*
- * 화면 공용 디자인 값 (#42).
- * 면접 화면은 무대형 시안(C)을 따릅니다.
- * 리포트 화면(#20) 등 다른 화면도 이 값을 쓰면 모양이 맞습니다.
+ * 화면 공용 디자인 값 (#42, 개편 #125).
+ * 개편 시안 후보 1: 어두운 바탕에 주황·청록 빛 곡선. 첫 화면, 면접 화면, 리포트 화면이 모두 이 값을 씁니다.
  * 색을 바꿀 때는 글자 대비 4.5:1(큰 글자 3:1)을 지킵니다.
  */
 
 :root {
-  /* 바탕과 선 */
-  --gi-bg: #ffffff;
-  --gi-surface: #f4f4f1;
-  --gi-line: #e4e4de;
+  color-scheme: dark;
+
+  /* 바탕과 선. --gi-panel은 빛 곡선 위에 뜨는 반투명 판입니다 */
+  --gi-bg: #07080a;
+  --gi-surface: #111317;
+  --gi-panel: rgba(17, 19, 23, 0.82);
+  --gi-line: #23262c;
+  --gi-line-strong: #33373e;
 
   /* 글자 */
-  --gi-ink: #111214;
-  --gi-muted: #5e636b;
+  --gi-ink: #eceae6;
+  --gi-muted: #9a9ea5;
 
   /* 강조. --gi-accent는 도형과 큰 글자에, --gi-accent-text는 작은 글자에 씁니다 */
   --gi-accent: #f06418;
-  --gi-accent-text: #c2410c;
-  --gi-accent-soft: #fff4ec;
-  --gi-accent-softer: #fff8f3;
-  --gi-accent-softest: #fffbf8;
+  --gi-accent-text: #ff9a5c;
+  --gi-accent-soft: rgba(240, 100, 24, 0.16);
+  --gi-accent-softer: rgba(240, 100, 24, 0.1);
+  --gi-accent-softest: rgba(240, 100, 24, 0.05);
+
+  /* 내 답변 말풍선 (청록) */
+  --gi-me: #17262b;
+  --gi-me-line: rgba(84, 160, 178, 0.4);
 
   /* 안내와 오류 */
-  --gi-notice-bg: #fff6d5;
-  --gi-notice-ink: #5c4500;
-  --gi-error: #b42318;
+  --gi-notice-bg: #2a2410;
+  --gi-notice-ink: #f3d98a;
+  --gi-error: #ff8a7a;
 
-  /* 코드 강조 줄 */
-  --gi-code-hit: #ffefe4;
-  --gi-code-gutter: #6e7781;
-  --gi-code-ink: #1f2328;
+  /* 코드 */
+  --gi-code-bg: #0b0c0f;
+  --gi-code-hit: rgba(240, 100, 24, 0.14);
+  --gi-code-gutter: #636970;
+  --gi-code-ink: #d6d8dc;
 
   /* --gi-font-plex, --gi-font-jetbrains는 app/layout.tsx의 next/font가 정합니다 */
   --gi-font-sans: var(--gi-font-plex, "IBM Plex Sans KR"), "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
   --gi-font-mono: var(--gi-font-jetbrains, "JetBrains Mono"), ui-monospace, Menlo, monospace;
 
-  --gi-radius: 12px;
+  --gi-radius: 14px;
   --gi-radius-pill: 999px;
 }
 
@@ -46,10 +54,25 @@
 
 body {
   margin: 0;
+  min-height: 100vh;
   background: var(--gi-bg);
   color: var(--gi-ink);
   font-family: var(--gi-font-sans);
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* 빛 곡선 배경. 화면 뒤에 고정하고 내용 아래에 깝니다 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 90% at -10% -20%, transparent 58%, rgba(240, 100, 24, 0.5) 60.5%, rgba(240, 100, 24, 0.07) 64%, transparent 70%),
+    radial-gradient(140% 80% at 70% 135%, rgba(44, 88, 102, 0.5) 0 48%, rgba(240, 120, 40, 0.4) 49.2%, transparent 51.5%),
+    radial-gradient(60% 50% at 0% 0%, rgba(120, 40, 10, 0.32), transparent 70%);
 }
 
 button,

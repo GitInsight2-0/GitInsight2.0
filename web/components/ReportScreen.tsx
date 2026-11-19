@@ -26,6 +26,7 @@ import {
   isGithubLink,
   previousEntry,
 } from "@/lib/reports";
+import Logo from "./Logo";
 import styles from "./report.module.css";
 
 type State = { kind: "loading" } | ReportLoad;
@@ -57,6 +58,7 @@ export default function ReportScreen({ reportId }: { reportId: string }) {
     <div className={styles.page}>
       <header className={styles.topbar}>
         <a className={styles.brand} href="/">
+          <Logo size={22} />
           GitInsight
         </a>
         <a className={styles.ghost} href="/">
