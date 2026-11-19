@@ -14,7 +14,7 @@
  * 여러 번 불러도 한 번만 정리합니다.
  */
 import type { BrainReply, MetricEvent, MetricName, TurnRequest } from "@gitinsight/contracts";
-import { ApiError, createSession, fetchVoiceToken, isAbort, postMetric, postTurn } from "./api";
+import { ApiError, TRANSCRIPT_MAX, createSession, fetchVoiceToken, isAbort, postMetric, postTurn } from "./api";
 import { DELEGATION_TOOL, SAY_MARKER, type VadSettings, sayMessage } from "./config";
 import { Meter, epochMs } from "./meter";
 import { similarity } from "./similarity";
@@ -66,6 +66,13 @@ export interface SessionUi {
   speaking?(who: "user" | "ai", on: boolean): void;
   /** 음성 연결이 열렸습니다. 화면이 소리 크기를 그릴 수 있게 측정용 노드를 넘깁니다. */
   audio?(levels: AudioLevels): void;
+  /**
+   * 받아쓴 답변을 서버로 보내기 전에 면접자에게 확인받습니다 (#148). 없으면 바로 보냅니다.
+   * 보낼 답변(고친 것일 수 있음)이나, 지웠으면 null을 돌려줍니다.
+   * 확인하는 동안 진행기가 마이크를 꺼 두고, 음성 AI는 도구 결과를 기다립니다.
+   * 음성이 끝나면 signal이 멈추고, 이때 돌려준 값은 쓰지 않습니다.
+   */
+  review?(transcript: string, signal: AbortSignal): Promise<string | null>;
 }
 
 /** 측정용 소리 노드. 연결 중에는 null일 수 있어 그때그때 꺼내 씁니다. */
@@ -105,6 +112,8 @@ export interface VoiceSession {
 /** 서버 응답을 못 받았을 때 음성 AI가 할 말. 면접을 진행시키지 않고 다시 말해 달라고만 합니다. */
 const RETRY_UTTERANCE = "잠시 연결이 불안정했어요. 방금 답변을 한 번만 더 말씀해 주시겠어요?";
 const EMPTY_UTTERANCE = "잘 못 들었어요. 한 번만 더 말씀해 주시겠어요?";
+/** 면접자가 보내기 전에 답변을 지웠을 때 (#148). 서버로 보내지 않았으므로 같은 질문에 다시 답하게 합니다 */
+const DISCARDED_UTTERANCE = "네, 다시 말씀해 주세요.";
 /** 턴이 이만큼 연달아 실패하면 같은 부탁을 반복하지 않고 음성을 끝냅니다 (화면은 텍스트로 이어 갑니다) */
 const MAX_TURN_FAILURES = 2;
 /** 턴이 연달아 실패해 음성을 끝내기 전에 할 말. 말없이 끊기면 사용자가 무슨 일인지 모릅니다 */
@@ -148,6 +157,10 @@ export async function startVoiceSession(
   let speakFallbackNow: (() => void) | null = null;
   /** 서버로 보냈고 아직 응답을 받지 못한 턴. 이 사이에 음성이 끝나면 화면에 넘깁니다 (#47) */
   let inFlight: TurnRequest | null = null;
+  /** 면접자가 마이크를 껐는지(#145)와, 보내기 전 확인 중이라 진행기가 꺼 둔 것인지(#148) */
+  let userMuted = false;
+  let reviewing = false;
+  const applyMute = () => handle?.setMuted(userMuted || reviewing);
   const clearSpeakFallback = () => {
     if (speakFallbackTimer) clearTimeout(speakFallbackTimer);
     speakFallbackTimer = null;
@@ -376,8 +389,9 @@ export async function startVoiceSession(
       // 앞 발화의 다시 보내기가 남아 있으면 지웁니다. 질문 두 개가 이어서 들리지 않게 합니다 (#86).
       clearSpeakFallback();
       userSpokeSinceTool = false;
-      // 이 턴의 질문 측정 기준: 도구 호출을 받은 시점의 마지막 사용자 말 끝
-      const baseEnd = m.lastUserEnd;
+      // 이 턴의 질문 측정 기준: 도구 호출을 받은 시점의 마지막 사용자 말 끝.
+      // 보내기 전에 확인받았으면 확인이 끝난 시각으로 바꿉니다 (확인하는 시간을 응답 시간에 넣지 않게).
+      let baseEnd = m.lastUserEnd;
       /** fallback이 false면 이 발화에는 다시 보내기를 걸지 않습니다 (같은 일이 되풀이되지 않게) */
       const respond = (utterance: string, isDone: boolean, end?: { reason: string; kind: EndKind }, fallback = true) => {
         if (closed) return;
@@ -423,12 +437,35 @@ export async function startVoiceSession(
         return;
       }
       resentUtterance = null;
-      const transcript = asr || fromModel;
+      let transcript = asr || fromModel;
       if (asr && fromModel) ui.transcriptSimilarity(similarity(asr, fromModel));
       if (!asr && fromModel) ui.log("system", "받아쓰기가 없어 음성 AI의 도구 인자를 보냅니다");
       if (!transcript) {
         respond(EMPTY_UTTERANCE, false);
         return;
+      }
+
+      // 보내기 전에 면접자가 답변을 확인합니다 (#148). 그동안 들어온 소리가 다음 답변에 섞이지 않게 마이크를 꺼 둡니다.
+      if (ui.review) {
+        reviewing = true;
+        applyMute();
+        let decided: string | null;
+        try {
+          decided = await ui.review(transcript, life.signal);
+        } finally {
+          reviewing = false;
+          if (!closed) applyMute();
+        }
+        if (closed) return;
+        baseEnd = Date.now();
+        const edited = decided?.trim().slice(0, TRANSCRIPT_MAX) ?? "";
+        if (!edited) {
+          // 서버로 보내지 않았으므로 면접은 그대로이고, 같은 질문에 다시 답합니다.
+          ui.log("system", "면접자가 보내기 전에 답변을 지웠습니다");
+          respond(DISCARDED_UTTERANCE, false, undefined, false);
+          return;
+        }
+        transcript = edited;
       }
 
       const turnId = crypto.randomUUID();
@@ -536,7 +573,8 @@ export async function startVoiceSession(
       shutdown("사용자가 멈췄습니다", "user");
     },
     setMuted(on) {
-      if (!closed) handle?.setMuted(on);
+      userMuted = on;
+      if (!closed) applyMute();
     },
   };
 }

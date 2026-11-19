@@ -47,17 +47,27 @@ function said(r: BrainReply): HistoryItem {
 type Mode = "text" | "voice";
 type VoiceState = "idle" | "connecting" | "live";
 /** 아래 막대와 말풍선이 보여 줄 상태 */
-type Stage = "connecting" | "listening" | "muted" | "thinking" | "speaking" | "text" | "done";
+type Stage = "connecting" | "listening" | "muted" | "review" | "thinking" | "speaking" | "text" | "done";
 
 const STAGE_LABEL: Record<Stage, string> = {
   connecting: "연결하고 있어요",
   listening: "듣고 있어요",
   muted: "마이크가 꺼져 있어요",
+  review: "보내기 전에 답변을 확인해 주세요",
   thinking: "답변을 살펴보고 있어요",
   speaking: "말하는 중",
   text: "텍스트로 답하는 중",
   done: "면접이 끝났어요",
 };
+
+/** 음성 답변을 보내기 전에 보여 주는 시간 (초, #148). 그대로 두면 이 시간 뒤에 보냅니다 */
+const REVIEW_SEC = 5;
+
+/** 서버로 보내기 전에 확인 중인 음성 답변 (#148). editing이면 카운트다운을 멈추고 글로 고치는 중입니다 */
+interface Review {
+  text: string;
+  editing: boolean;
+}
 
 /** 말 끝 판정 침묵 (초). 안내 문구에 씁니다 */
 const SILENCE_SEC = DEFAULT_VAD.silenceMs / 1000;
@@ -137,6 +147,13 @@ export default function InterviewScreen({
   const [levels, setLevels] = useState<AudioLevels | null>(null);
   /** 면접자가 음성 막대의 버튼으로 마이크를 껐는지 (#145). 음성을 새로 열면 켜진 상태로 돌아갑니다 */
   const [micOff, setMicOff] = useState(false);
+  const [review, setReview] = useState<Review | null>(null);
+  const [reviewDraft, setReviewDraft] = useState("");
+  /** 확인이 끝나면 진행기에 보낼 답변(지웠으면 null)을 넘깁니다 */
+  const reviewResolve = useRef<((text: string | null) => void) | null>(null);
+  const reviewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 확인 중에 음성이 끝나면 입력칸으로 옮길 답변. 고치는 중이면 고친 글입니다 */
+  const reviewText = useRef("");
   const [report, setReport] = useState<ReportState>({ kind: "idle" });
   /** 서버가 401을 돌려줬습니다. 첫 화면으로 가서 다시 로그인하라고 안내합니다 */
   const [needLogin, setNeedLogin] = useState(false);
@@ -453,6 +470,31 @@ export default function InterviewScreen({
         // 서버로 간 답변의 응답을 못 받았습니다. 화면 질문이 서버보다 한 단계 늦지 않게 맞춥니다 (#47).
         if (unfinished) void resyncTurn(unfinished);
       },
+      review: (transcript, signal) =>
+        new Promise<string | null>((resolve) => {
+          if (!current() || signal.aborted) {
+            resolve(null);
+            return;
+          }
+          clearThinkingTimer();
+          setThinking(false);
+          reviewResolve.current = resolve;
+          reviewText.current = transcript;
+          setReviewDraft(transcript);
+          setReview({ text: transcript, editing: false });
+          reviewTimer.current = setTimeout(() => finishReview(transcript), REVIEW_SEC * 1000);
+          signal.addEventListener(
+            "abort",
+            () => {
+              if (reviewResolve.current !== resolve) return;
+              // 보내지 못한 답변을 텍스트 입력칸으로 옮겨 다시 말하지 않아도 되게 합니다.
+              const left = reviewText.current.trim();
+              if (left) setDraft((d) => (d.trim() ? d : left));
+              finishReview(null);
+            },
+            { once: true },
+          );
+        }),
       latency: noop,
       filler: noop,
       delegation: noop,
@@ -523,6 +565,37 @@ export default function InterviewScreen({
     setLastAnswer(null);
     setAnswerSent(false);
     setMicOff(false);
+  }
+
+  /** 음성 답변 확인을 끝냅니다. text가 null이면 지운 것입니다 (#148) */
+  function finishReview(text: string | null) {
+    if (reviewTimer.current) clearTimeout(reviewTimer.current);
+    reviewTimer.current = null;
+    const resolve = reviewResolve.current;
+    reviewResolve.current = null;
+    reviewText.current = "";
+    setReview(null);
+    resolve?.(text);
+  }
+
+  function editReview() {
+    if (reviewTimer.current) clearTimeout(reviewTimer.current);
+    reviewTimer.current = null;
+    setReview((r) => (r ? { ...r, editing: true } : r));
+  }
+
+  function discardReview() {
+    finishReview(null);
+    setLastAnswer(null);
+    setAnswerSent(false);
+    push({ who: "system", text: "답변을 지웠어요. 같은 질문에 다시 답해 주세요." });
+  }
+
+  function sendReview() {
+    if (!review) return;
+    const text = review.editing ? reviewDraft.trim() : review.text;
+    if (!text) return;
+    finishReview(text);
   }
 
   /** 마이크를 끄거나 켭니다. 말하던 중에 끄면 그때까지 한 말이 답변으로 넘어갑니다 */
@@ -603,16 +676,18 @@ export default function InterviewScreen({
         : "text"
       : voiceState !== "live"
         ? "connecting"
-        : thinking
-          ? "thinking"
-          : aiSpeaking
+        : review
+          ? "review"
+          : thinking
+            ? "thinking"
+            : aiSpeaking
             ? "speaking"
             : micOff
               ? "muted"
               : "listening";
   const canSwitchToVoice = mode === "text" && voiceState === "idle" && !busy && !done;
   // 음성으로 말하는 중인 답변. 아직 서버로 보내지 않아서 점선 말풍선에 받아쓰기를 보여 줍니다.
-  const live = mode === "voice" && !done && !answerSent && (lastAnswer !== null || stage === "listening");
+  const live = mode === "voice" && !done && !answerSent && !review && (lastAnswer !== null || stage === "listening");
   // 텍스트로 보내는 중인 답변. 서버가 받으면 기록에 들어갑니다.
   const sendingText = mode === "text" && busy && draft.trim() ? draft.trim() : null;
   const lastInterviewer = history.reduce((at, h, i) => (h.who === "interviewer" ? i : at), -1);
@@ -714,6 +789,57 @@ export default function InterviewScreen({
               </div>
             )}
 
+            {review && mode === "voice" && !done && (
+              <div className={`${styles.msg} ${styles.me} ${styles.review}`} role="group" aria-label="보내기 전 답변 확인">
+                <span className={styles.who}>나 · {review.editing ? "고치는 중" : `${REVIEW_SEC}초 뒤 보내요`}</span>
+                <div className={styles.bubble}>
+                  {review.editing ? (
+                    <textarea
+                      className={styles.reviewEdit}
+                      value={reviewDraft}
+                      onChange={(e) => {
+                        setReviewDraft(e.target.value);
+                        reviewText.current = e.target.value;
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          sendReview();
+                        }
+                      }}
+                      aria-label="답변 고치기"
+                      maxLength={TRANSCRIPT_MAX}
+                      rows={3}
+                      autoFocus
+                    />
+                  ) : (
+                    <>
+                      <p className={styles.reviewText}>{review.text}</p>
+                      <span className={styles.countdown} style={{ animationDuration: `${REVIEW_SEC}s` }} aria-hidden="true" />
+                    </>
+                  )}
+                  <div className={styles.reviewActions}>
+                    <button
+                      type="button"
+                      className={styles.send}
+                      onClick={sendReview}
+                      disabled={review.editing && !reviewDraft.trim()}
+                    >
+                      {review.editing ? "보내기" : "지금 보내기"}
+                    </button>
+                    {!review.editing && (
+                      <button type="button" className={styles.reviewButton} onClick={editReview}>
+                        고치기
+                      </button>
+                    )}
+                    <button type="button" className={styles.reviewButton} onClick={discardReview}>
+                      지우기
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {stage === "thinking" && (
               <div className={`${styles.msg} ${styles.ai} ${styles.waiting}`}>
                 <span className={styles.who}>면접관</span>
@@ -739,7 +865,7 @@ export default function InterviewScreen({
                     type="button"
                     className={micOff ? `${styles.micButton} ${styles.micButtonOff}` : styles.micButton}
                     onClick={toggleMic}
-                    disabled={voiceState !== "live"}
+                    disabled={voiceState !== "live" || review !== null}
                     aria-label={micOff ? "마이크 켜기" : "마이크 끄기"}
                     title={micOff ? "마이크 켜기" : "마이크 끄기"}
                   >
@@ -751,7 +877,9 @@ export default function InterviewScreen({
                       {STAGE_LABEL[stage]}
                     </div>
                     <div className={styles.hint}>
-                      {micOff
+                      {review
+                        ? "그대로 두면 보내요. 잘못 들렸으면 고치거나 지우세요"
+                        : micOff
                         ? "답할 때 마이크 버튼을 눌러 켜세요. 꺼진 동안의 소리는 보내지 않아요"
                         : `말을 마치고 ${SILENCE_SEC}초 쉬면 답변이 전송돼요. 말하지 않을 때는 마이크를 꺼 두세요`}
                     </div>
