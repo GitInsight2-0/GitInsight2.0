@@ -255,7 +255,7 @@ function JobView({
           </div>
           {status !== "done" && (
             <span className={styles.muted}>
-              {checking && job.kind === "running" && job.state
+              {checking
                 ? "연결이 잠시 불안정해서 진행 상태를 다시 확인하고 있어요."
                 : "레포 크기에 따라 몇 분 걸릴 수 있어요."}
             </span>
