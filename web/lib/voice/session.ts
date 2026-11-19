@@ -13,7 +13,7 @@
  * 끝나는 길은 하나(shutdown)입니다: 사용자 종료, 제공사 연결 끊김, 면접 종료(done), 409, 페이지 이탈.
  * 여러 번 불러도 한 번만 정리합니다.
  */
-import type { BrainReply, MetricEvent, MetricName } from "@gitinsight/contracts";
+import type { BrainReply, MetricEvent, MetricName, TurnRequest } from "@gitinsight/contracts";
 import { ApiError, createSession, fetchVoiceToken, isAbort, postMetric, postTurn } from "./api";
 import { DELEGATION_TOOL, SAY_MARKER, type VadSettings, sayMessage } from "./config";
 import { Meter, epochMs } from "./meter";
@@ -51,8 +51,12 @@ export interface SessionUi {
    * 이미 보낸 턴의 늦은 조각은 들어가지 않습니다. 화면 표시용이고, 서버로 보낸 답변은 turnSent로 받습니다.
    */
   answer?(textSoFar: string): void;
-  /** 음성이 끝났습니다. reason은 화면에 보여 줄 문구, kind는 끝난 까닭입니다. */
-  ended(reason: string, kind: EndKind): void;
+  /**
+   * 음성이 끝났습니다. reason은 화면에 보여 줄 문구, kind는 끝난 까닭입니다.
+   * unfinished는 서버로 보냈지만 응답을 받기 전에 음성이 끝난 턴입니다 (#47).
+   * 서버는 이 턴을 이미 처리했을 수 있으므로, 화면은 같은 turn_id로 다시 보내 현재 질문을 맞춥니다.
+   */
+  ended(reason: string, kind: EndKind, unfinished?: TurnRequest): void;
   /**
    * 세션이 정해졌습니다 (새로 만들었거나 이어받음). 음성 연결 전에 불리므로,
    * 연결에 실패해도 화면은 이 세션으로 텍스트 면접을 이어 갈 수 있습니다.
@@ -140,6 +144,8 @@ export async function startVoiceSession(
   let resentUtterance: string | null = null;
   /** 걸어 둔 다시 보내기를 기다리지 않고 바로 실행합니다. 걸어 둔 것이 없으면 null */
   let speakFallbackNow: (() => void) | null = null;
+  /** 서버로 보냈고 아직 응답을 받지 못한 턴. 이 사이에 음성이 끝나면 화면에 넘깁니다 (#47) */
+  let inFlight: TurnRequest | null = null;
   const clearSpeakFallback = () => {
     if (speakFallbackTimer) clearTimeout(speakFallbackTimer);
     speakFallbackTimer = null;
@@ -157,7 +163,8 @@ export async function startVoiceSession(
     meter?.stop();
     handle?.stop();
     ui.status("종료됨");
-    ui.ended(reason, kind);
+    ui.ended(reason, kind, inFlight ?? undefined);
+    inFlight = null;
   }
   const onOuterAbort = () => shutdown("사용자가 멈췄습니다", "user");
   if (opts.signal.aborted) onOuterAbort();
@@ -426,24 +433,25 @@ export async function startVoiceSession(
       const t0 = performance.now();
       metric("delegation_start", { turn_id: turnId });
       ui.turnSent(transcript);
+      const turn: TurnRequest = {
+        turn_id: turnId,
+        transcript,
+        source: "voice",
+        speech_started_at: m.lastUserStart,
+        speech_ended_at: m.lastUserEnd,
+      };
+      inFlight = turn;
       try {
-        const reply = await postTurn(
-          sessionId,
-          {
-            turn_id: turnId,
-            transcript,
-            source: "voice",
-            speech_started_at: m.lastUserStart,
-            speech_ended_at: m.lastUserEnd,
-          },
-          { labDelayMs: opts.labDelayMs, signal: life.signal },
-        );
+        const reply = await postTurn(sessionId, turn, { labDelayMs: opts.labDelayMs, signal: life.signal });
+        inFlight = null;
         done = reply.done;
         turnFailures = 0;
         ui.reply(reply);
         respond(reply.utterance, reply.done);
       } catch (e) {
+        // 음성을 끝내서 끊긴 요청이면 inFlight를 남겨 둡니다. shutdown이 화면에 넘깁니다.
         if (closed || isAbort(e)) return;
+        inFlight = null;
         if (e instanceof ApiError && e.status === 409) {
           // 서버가 이미 끝난 세션이라고 답했습니다. 다시 말해 달라고 하지 않고 종료합니다.
           done = true;
