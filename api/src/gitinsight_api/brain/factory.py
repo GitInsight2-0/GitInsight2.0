@@ -1,7 +1,7 @@
 """설정으로 면접 두뇌와 LLM 클라이언트를 만듭니다. CLI와 평가 스크립트가 같이 씁니다."""
 
 from gitinsight_api.brain.analysis_source import AnalysisSource, FixtureAnalysisSource
-from gitinsight_api.brain.planner import RevisitSource
+from gitinsight_api.brain.planner import ReviewSource
 from gitinsight_api.brain.repository import InMemorySessionRepository, SessionRepository
 from gitinsight_api.brain.service import InterviewBrain
 from gitinsight_api.llm import CostRecorder, LiteLLMClient, LLMClient
@@ -97,8 +97,8 @@ def build_server_services(
         llm=build_judge_llm(settings),
         analyses=analyses,
         repository=sessions,
-        # 면접 두뇌가 같은 리포트 저장소에서 지난 코드 지도를 읽어 다시 물을 주제를 고릅니다 (#107).
-        revisit=ReportHistory(report_store, analyses),
+        # 다시 보기 면접에서 면접 두뇌가 같은 리포트 저장소의 지난 코드 지도로 다시 물을 주제를 고릅니다 (#107).
+        review=ReportHistory(report_store),
     )
     reports = build_report_service(
         settings,
@@ -119,13 +119,13 @@ def build_fixture_brain(
     force_prepared: bool = False,
     analyses: AnalysisSource | None = None,
     repository: SessionRepository | None = None,
-    revisit: RevisitSource | None = None,
+    review: ReviewSource | None = None,
 ) -> InterviewBrain:
     """샘플 분석 결과와 메모리 저장소로 면접 두뇌를 만듭니다. llm이 없으면 미리 만든 질문만 씁니다.
 
     analyses를 주면 샘플 파일 대신 그 저장소(예: Postgres 분석 기록)에서 면접 재료를 읽습니다.
     repository를 주면 메모리 대신 그 저장소(예: Postgres)에 세션을 둡니다.
-    revisit을 주면 같은 레포로 다시 보는 면접에서 지난 면접에 막혔던 함수부터 묻습니다.
+    review를 주면 다시 보기 면접(SessionCreate.review_only)에서 지난 면접에 답변이 부족했던 주제만 묻습니다.
     """
     from gitinsight_api.llm.fake import FakeLLM
 
@@ -141,5 +141,5 @@ def build_fixture_brain(
         plan_model=settings.llm_analysis_model,
         force_prepared=force_prepared or settings.brain_force_prepared or llm is None,
         quote_matcher=settings.quote_matcher(),
-        revisit=revisit,
+        review=review,
     )

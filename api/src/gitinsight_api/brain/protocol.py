@@ -18,6 +18,10 @@ class AnalysisNotFoundError(Exception):
     pass
 
 
+class NothingToReviewError(Exception):
+    """다시 보기 면접을 요청했는데 지난 면접에서 답변이 부족했던 주제가 없습니다 (#107)."""
+
+
 class Brain(Protocol):
     async def start(
         self, request: SessionCreate, owner_id: str | None = None

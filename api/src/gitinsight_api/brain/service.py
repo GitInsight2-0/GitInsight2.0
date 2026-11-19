@@ -24,9 +24,10 @@ from gitinsight_api.brain import utterance
 from gitinsight_api.brain.analysis_source import AnalysisSource
 from gitinsight_api.brain.config import InterviewConfig
 from gitinsight_api.brain.judge import judge_answer
-from gitinsight_api.brain.planner import NO_REVISIT, RevisitSource, plan_interview
+from gitinsight_api.brain.planner import ReviewSource, plan_interview
 from gitinsight_api.brain.protocol import (
     AnalysisNotFoundError,
+    NothingToReviewError,
     SessionClosedError,
     SessionNotFoundError,
 )
@@ -85,11 +86,11 @@ class InterviewBrain:
         quote_matcher: QuoteMatcher = EXACT,
         clock: Clock = utc_now,
         perf_counter: Callable[[], float] = time.perf_counter,
-        revisit: RevisitSource | None = None,
+        review: ReviewSource | None = None,
     ) -> None:
         self._analyses = analyses
-        # 지난 면접 기록입니다. 없으면 항상 기본 순서로 묻습니다.
-        self._revisit = revisit
+        # 지난 면접 기록입니다. 다시 보기 면접에서 답변이 부족했던 주제를 찾는 데만 씁니다.
+        self._review = review
         self._repository = repository
         self._llm = llm
         self._config = config or InterviewConfig()
@@ -123,12 +124,17 @@ class InterviewBrain:
         self, request: SessionCreate, owner_id: str | None = None
     ) -> tuple[UUID, BrainReply]:
         analysis = await self._analysis(request.analysis_id)
-        # 같은 레포로 본 지난 면접이 있으면 막혔던 함수와 그 뒤 커밋이 들어온 함수부터 묻습니다 (#107).
-        revisit = (
-            await self._revisit.targets(owner_id, analysis)
-            if self._revisit is not None
-            else NO_REVISIT
-        )
+        # 다시 보기 면접은 지난 면접에서 답변이 부족했던 주제만 묻습니다 (#107).
+        # 요청하지 않은 면접은 지난 기록을 읽지 않고 늘 같은 순서로 묻습니다.
+        only: frozenset[str] | None = None
+        if request.review_only:
+            only = (
+                await self._review.review_topic_ids(owner_id, analysis)
+                if self._review is not None
+                else frozenset()
+            )
+            if not only:
+                raise NothingToReviewError(request.analysis_id)
         plan = await plan_interview(
             analysis,
             None if self._force_prepared else request.jd_text,
@@ -136,14 +142,11 @@ class InterviewBrain:
             config=self._config,
             timeout_s=self._plan_timeout_s,
             model=self._plan_model,
-            revisit=revisit,
+            only=only,
         )
         topic = analysis.topic(plan.topic_order[0])
         intro = utterance.topic_intro(
-            topic.contribution_label,
-            first=True,
-            stuck=topic.topic_id in revisit.stuck,
-            changed=topic.topic_id in revisit.changed,
+            topic.contribution_label, first=True, review=request.review_only
         )
         now = self._clock()
         state = SessionState(
@@ -161,8 +164,7 @@ class InterviewBrain:
             last_highlight=topic.symbol,
             persona_keywords=plan.persona_keywords,
             plan_source=plan.source,
-            revisit_stuck=[t for t in plan.topic_order if t in revisit.stuck],
-            revisit_changed=[t for t in plan.topic_order if t in revisit.changed],
+            review_only=request.review_only,
         )
         await self._repository.create(state)
         reply = BrainReply(
@@ -346,10 +348,7 @@ class InterviewBrain:
             )
             highlight = topic.symbol
             intro = utterance.topic_intro(
-                topic.contribution_label,
-                first=False,
-                stuck=topic.topic_id in state.revisit_stuck,
-                changed=topic.topic_id in state.revisit_changed,
+                topic.contribution_label, first=False, review=state.review_only
             )
             text = utterance.join(intro, topic.base_question)
             state.last_question = topic.base_question

@@ -154,7 +154,7 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
         </section>
       )}
 
-      {report.code_map && <CodeMapSection codeMap={report.code_map} />}
+      {report.code_map && <CodeMapSection codeMap={report.code_map} topics={report.topics} />}
 
       {(report.strengths.length > 0 || report.improvements.length > 0 || report.next_topics.length > 0) && (
         <section aria-label="총평" className={styles.columns}>
@@ -273,7 +273,12 @@ const STATUS_CLASS: Record<ExplainStatus, string> = {
  * 설명 못 한 코드 지도 (#107).
  * 상태와 숫자는 서버가 턴 기록으로 정한 값입니다. 화면에서는 더하기만 합니다.
  */
-function CodeMapSection({ codeMap }: { codeMap: CodeMap }) {
+function CodeMapSection({ codeMap, topics }: { codeMap: CodeMap; topics: TopicReport[] }) {
+  // 다시 볼 질문: 이번 면접에서 막혔거나 힌트를 받고 설명한 함수입니다. 질문 문장은 그 주제의 질문에서 가져옵니다.
+  const questionOf = new Map(topics.map((t) => [t.topic_id, t.question]));
+  const weak = codeMap.entries.filter((entry) => entry.status !== "explained");
+  // 지난 면접에서 부족했던 함수가 남아 있어도 다시 볼 수 있습니다 (숫자는 이 레포로 본 면접을 모두 합친 값).
+  const canReview = weak.length > 0 || codeMap.stuck_count + codeMap.after_hint_count > 0;
   const total = codeMap.key_function_count;
   const explained = codeMap.explained_count + codeMap.after_hint_count;
   const notAsked = Math.max(0, total - explained - codeMap.stuck_count);
@@ -344,15 +349,36 @@ function CodeMapSection({ codeMap }: { codeMap: CodeMap }) {
         )}
       </div>
 
-      <div className={styles.mapAgain}>
-        <a className={styles.secondary} href={interviewHref(codeMap.analysis_id, codeMap.repo_full_name)}>
-          이 레포로 다시 면접 보기
-        </a>
-        <p className={styles.muted}>
-          다시 면접을 보면 막혔던 함수부터 물어봐요. 이번 면접 뒤에 커밋을 올렸다면 첫 화면에서 레포를 다시 분석해 주세요. 그러면
-          커밋이 들어온 함수도 먼저 물어봐요.
-        </p>
+      <div>
+        <p className={styles.label}>답변이 부족했던 질문</p>
+        {weak.length === 0 ? (
+          <p className={styles.muted}>이번 면접에서는 막히거나 힌트를 받은 질문이 없었어요.</p>
+        ) : (
+          <ul className={styles.mapEntries}>
+            {weak.map((entry) => (
+              <li key={entry.symbol.symbol_id}>
+                <span className={STATUS_CLASS[entry.status]}>{EXPLAIN_STATUS_LABEL[entry.status]}</span>
+                <span className={styles.mapQuestion}>{questionOf.get(entry.topic_id) ?? entry.symbol.name}</span>
+                <SymbolTag symbol={entry.symbol} />
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
+
+      {canReview && (
+        <div className={styles.mapAgain}>
+          <a
+            className={styles.secondary}
+            href={interviewHref(codeMap.analysis_id, codeMap.repo_full_name, { review: true })}
+          >
+            부족했던 질문만 다시 면접 보기
+          </a>
+          <p className={styles.muted}>
+            이 레포로 본 면접에서 막혔거나 힌트를 받고 답한 질문만 다시 물어봐요. 힌트 없이 설명하면 다음 다시 보기에서 빠져요.
+          </p>
+        </div>
+      )}
     </section>
   );
 }

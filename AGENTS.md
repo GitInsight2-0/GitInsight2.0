@@ -112,7 +112,7 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 같은 조건에서 리포트도 `reports` 테이블에 둡니다(`report/postgres.py`의 `PostgresReportStore`, #75). 세션 하나에 리포트는 하나이고, 서버를 다시 시작해도 같은 `report_id`로 다시 엽니다.
 이전 면접 비교는 `GET /api/me/progress`입니다(#77). 로그인한 사용자의 리포트에 적힌 역량 수준을 면접별로, 오래된 것부터 최근 20건까지 돌려줍니다. 역량 평가가 없는 리포트(턴별 판단 표)는 빠집니다.
 리포트에는 질문받은 함수별 상태(설명함, 힌트 받고 설명함, 막힘)를 담은 코드 지도(`Report.code_map`)가 들어갑니다(#107, `report/code_map.py`). LLM 없이 턴 기록으로 집계하고, 누적 숫자는 같은 사용자가 같은 레포로 본 리포트를 합쳐 냅니다.
-같은 레포로 다시 면접을 시작하면(`POST /api/sessions`) 지난 코드 지도에서 막혔던 함수의 주제, 지난 면접 이후 커밋이 들어온 함수의 주제, 나머지 순서로 묻습니다. 새 API나 테이블은 없고 `reports` 테이블의 리포트를 읽습니다.
+다시 보기 면접은 `POST /api/sessions`에 `review_only: true`를 보내 시작합니다(리포트 화면의 "부족했던 질문만 다시 면접 보기", 주소 `?review=1`). 지난 코드 지도에서 가장 최근 상태가 막힘이거나 힌트 받고 설명함인 함수의 주제만 규칙 순서로 묻고, 그런 주제가 없으면 409입니다. `review_only`를 보내지 않은 면접은 지난 기록을 읽지 않고 늘 같은 순서로 묻습니다. 새 API나 테이블은 없고 `reports` 테이블의 리포트를 읽습니다.
 세션 API가 DB에 연결하지 못하면 503을 돌려줍니다. 턴은 `turn_id`로 한 번만 처리하므로 같은 요청을 다시 보내면 됩니다.
 DB 연결과 테이블 정의는 `api/src/gitinsight_api/db.py`, `tables.py`, 마이그레이션은 `api/migrations/versions/`에 있습니다. 새 테이블은 두 곳을 같이 바꾸고 `alembic check`로 맞는지 확인합니다.
 기본 `pytest`는 DB 없이 돕니다(`api/tests/conftest.py`가 `DATABASE_URL`을 비웁니다). 실제 Postgres 테스트는 `postgres` 표시로 따로 돌립니다. 공용 픽스처 `test_database_url`, `pg_engine`(마이그레이션 적용 후 모든 테이블을 비움)도 `conftest.py`에 있습니다.
