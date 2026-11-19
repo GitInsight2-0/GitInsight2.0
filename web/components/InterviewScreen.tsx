@@ -60,8 +60,16 @@ const STAGE_LABEL: Record<Stage, string> = {
   done: "면접이 끝났어요",
 };
 
-/** 음성 답변을 보내기 전에 보여 주는 시간 (초, #148). 그대로 두면 이 시간 뒤에 보냅니다 */
-const REVIEW_SEC = 5;
+/**
+ * 음성 답변을 보내기 전에 보여 주는 시간 (초, #148). 그대로 두면 이 시간 뒤에 보냅니다.
+ * 답변마다 이만큼 늘고 서버의 남은 시간은 그대로 흘러서 짧게 둡니다 (#149 리뷰).
+ */
+const REVIEW_SEC = 3;
+/**
+ * 고치는 중에 이 시간 동안 아무것도 안 하면 고친 글로 보냅니다 (초, #149 리뷰).
+ * 그동안 음성 AI가 도구 결과를 기다리므로 끝없이 붙잡아 두지 않습니다.
+ */
+const EDIT_IDLE_SEC = 60;
 
 /** 서버로 보내기 전에 확인 중인 음성 답변 (#148). editing이면 카운트다운을 멈추고 글로 고치는 중입니다 */
 interface Review {
@@ -579,9 +587,18 @@ export default function InterviewScreen({
   }
 
   function editReview() {
-    if (reviewTimer.current) clearTimeout(reviewTimer.current);
-    reviewTimer.current = null;
     setReview((r) => (r ? { ...r, editing: true } : r));
+    armEditIdle();
+  }
+
+  /** 고치는 중 쉬는 시간을 다시 잽니다. 글을 고칠 때마다 다시 시작합니다 */
+  function armEditIdle() {
+    if (reviewTimer.current) clearTimeout(reviewTimer.current);
+    reviewTimer.current = setTimeout(() => {
+      const text = reviewText.current.trim();
+      if (text) finishReview(text);
+      else discardReview();
+    }, EDIT_IDLE_SEC * 1000);
   }
 
   function discardReview() {
@@ -791,7 +808,9 @@ export default function InterviewScreen({
 
             {review && mode === "voice" && !done && (
               <div className={`${styles.msg} ${styles.me} ${styles.review}`} role="group" aria-label="보내기 전 답변 확인">
-                <span className={styles.who}>나 · {review.editing ? "고치는 중" : `${REVIEW_SEC}초 뒤 보내요`}</span>
+                <span className={styles.who}>
+                  나 · {review.editing ? `고치는 중 (${EDIT_IDLE_SEC}초 동안 그대로 두면 보내요)` : `${REVIEW_SEC}초 뒤 보내요`}
+                </span>
                 <div className={styles.bubble}>
                   {review.editing ? (
                     <textarea
@@ -800,6 +819,7 @@ export default function InterviewScreen({
                       onChange={(e) => {
                         setReviewDraft(e.target.value);
                         reviewText.current = e.target.value;
+                        armEditIdle();
                       }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
