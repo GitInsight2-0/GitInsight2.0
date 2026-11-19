@@ -614,7 +614,7 @@ def _prepare(
     # 다른 파일의 정의를 이름으로 찾는 색인입니다 (#66). 1단계 심볼 목록이 없으면 붙이지 않습니다.
     index = top_level_index(symbols) if symbols else {}
     # 틀린 말 방식과 부른다고 말할 함수를 정합니다 (#142).
-    planner = MisstatementPlanner(root, symbols or [])
+    planner = MisstatementPlanner(root, symbols or [], references)
     prepared: list[_Prepared] = []
     hollow = 0
     for candidate in candidates:
