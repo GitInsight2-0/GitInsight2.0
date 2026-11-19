@@ -191,6 +191,17 @@
         "done": {
           "type": "boolean"
         },
+        "focus": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LineSpan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "highlight": {
           "anyOf": [
             {
@@ -237,6 +248,7 @@
         "action",
         "utterance",
         "highlight",
+        "focus",
         "topic_id",
         "depth",
         "remaining_sec",
@@ -511,6 +523,17 @@
       "additionalProperties": false,
       "description": "좋은 답변이라면 다뤄야 할 요점입니다.",
       "properties": {
+        "focus": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LineSpan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "point_id": {
           "maxLength": 100,
           "minLength": 1,
@@ -530,7 +553,8 @@
       "required": [
         "point_id",
         "text",
-        "probe_question"
+        "probe_question",
+        "focus"
       ],
       "title": "ExpectedPoint",
       "type": "object"
@@ -672,6 +696,26 @@
         "file_count"
       ],
       "title": "LanguageStat",
+      "type": "object"
+    },
+    "LineSpan": {
+      "additionalProperties": false,
+      "description": "심볼 안의 좁은 줄 범위입니다 (#156). 분석 결과에서 얻고, LLM이 만들지 않습니다.\n\nif·for·try 블록처럼 이름이 없는 범위라 symbol_id, name, kind가 없습니다.\n파일과 커밋은 이 범위를 담은 심볼(SymbolRef)의 것을 씁니다.",
+      "properties": {
+        "end_line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_line",
+        "end_line"
+      ],
+      "title": "LineSpan",
       "type": "object"
     },
     "Me": {
