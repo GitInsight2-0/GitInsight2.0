@@ -456,29 +456,154 @@
 }
 
 /* 리포트 안내 (대화 맨 끝) */
-.reportBox {
-  align-self: stretch;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 16px 18px;
-  border: 1px solid rgba(240, 100, 24, 0.35);
-  border-radius: 14px;
-  background: var(--gi-accent-softest);
-}
-
-.done {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 700;
-}
-
 .reportNote {
   margin: 0;
   font-size: 14px;
   line-height: 1.6;
   color: var(--gi-muted);
+}
+
+/* ── 끝난 뒤 리포트 기다리기 (#132) ── */
+
+.endCard {
+  gap: 14px;
+}
+
+.endStatus {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 20px;
+  border: 1px solid rgba(240, 100, 24, 0.35);
+  border-radius: 14px;
+  background: var(--gi-accent-softest);
+  text-align: center;
+}
+
+.endRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+}
+
+.elapsed {
+  font-family: var(--gi-font-mono);
+  font-size: 13px;
+  color: var(--gi-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--gi-accent-soft);
+  border-top-color: var(--gi-accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.check {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--gi-accent);
+  color: #140804;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* 진행률을 모르는 막대. 빛이 왼쪽에서 오른쪽으로 계속 지나갑니다 */
+.endTrack {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--gi-radius-pill);
+  background: var(--gi-surface);
+}
+
+.endTrack span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  border-radius: inherit;
+  background: var(--gi-accent);
+  box-shadow: 0 0 12px rgba(240, 100, 24, 0.6);
+  animation: sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .endTrack span {
+    animation: none;
+  }
+}
+
+.endLog {
+  align-self: stretch;
+  text-align: left;
+}
+
+.endLog summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gi-muted);
+  text-align: center;
+}
+
+.endLog ol {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 12px 0 0;
+  padding: 14px 16px;
+  border: 1px solid var(--gi-line);
+  border-radius: 12px;
+  background: var(--gi-surface);
+  list-style: none;
+}
+
+.endLog li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.endLog li b {
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  color: var(--gi-muted);
+}
+
+.endMe b {
+  color: #8cc3d0 !important;
 }
 
 /* ── 시작 전 ── */
