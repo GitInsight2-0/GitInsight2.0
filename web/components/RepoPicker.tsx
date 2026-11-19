@@ -14,6 +14,7 @@ import {
   startAnalysis,
 } from "@/lib/analyses";
 import { DEMO_ANALYSIS_ID, DEMO_REPO } from "@/lib/demo";
+import { APP_INSTALL_URL } from "@/lib/github-app";
 import { explainError } from "@/lib/voice/errors";
 import styles from "./home.module.css";
 
@@ -71,9 +72,32 @@ export default function RepoPicker() {
   const jobAbort = useRef<AbortController | null>(null);
   const reposAbort = useRef<AbortController | null>(null);
 
+  /** 레포 연결(App 설치) 화면을 새 탭으로 열었는지. 이 탭으로 돌아오면 목록을 다시 불러옵니다 (#150) */
+  const installOpened = useRef(false);
+  const jobIdle = useRef(true);
+  jobIdle.current = job.kind === "idle";
+
   useEffect(() => {
     loadRepos();
+    // 설치를 마치면 GitHub가 Setup URL(첫 화면)로 installation_id, setup_action을 붙여 돌려보냅니다.
+    // 쓰지 않는 값이라 주소에서 지웁니다. 목록은 위에서 새로 불러옵니다.
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("setup_action") || url.searchParams.has("installation_id")) {
+      url.searchParams.delete("setup_action");
+      url.searchParams.delete("installation_id");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+    const onBack = () => {
+      if (document.visibilityState !== "visible" || !installOpened.current) return;
+      installOpened.current = false;
+      // 분석을 시작했으면 목록을 다시 불러오지 않습니다 (화면이 진행 상태를 보여 주는 중).
+      if (jobIdle.current) loadRepos();
+    };
+    document.addEventListener("visibilitychange", onBack);
+    window.addEventListener("focus", onBack);
     return () => {
+      document.removeEventListener("visibilitychange", onBack);
+      window.removeEventListener("focus", onBack);
       reposAbort.current?.abort();
       jobAbort.current?.abort();
     };
@@ -188,13 +212,30 @@ export default function RepoPicker() {
     return (
       <>
         <Steps at={1} />
-        <h2 className={styles.cardTitle}>면접 볼 레포가 아직 없어요</h2>
+        <h2 className={styles.cardTitle}>면접 볼 레포를 연결해 주세요</h2>
         <p className={styles.muted}>
-          GitHub에서 GitInsight 앱을 면접 볼 레포에 설치하면 여기에 나타나요. 설치한 뒤 다시 불러와 주세요.
+          GitInsight는 GitHub에서 연결을 허락한 레포만 읽어요. 비공개 레포도 연결할 수 있어요.
+          {APP_INSTALL_URL
+            ? " 연결 화면에서 레포를 고르고 이 화면으로 돌아오면 목록에 나타나요."
+            : " GitHub에서 GitInsight 앱을 면접 볼 레포에 설치한 뒤 다시 불러와 주세요."}
         </p>
-        <button type="button" className={styles.secondary} onClick={loadRepos}>
-          다시 불러오기
-        </button>
+        <div className={styles.actions}>
+          {APP_INSTALL_URL && (
+            <a
+              className={styles.primary}
+              href={APP_INSTALL_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => (installOpened.current = true)}
+            >
+              GitHub에서 레포 연결하기
+            </a>
+          )}
+          <button type="button" className={styles.secondary} onClick={loadRepos}>
+            다시 불러오기
+          </button>
+        </div>
+        <OrgNote />
       </>
     );
   }
@@ -251,12 +292,36 @@ export default function RepoPicker() {
             ))}
             {shown.length === 0 && <p className={styles.muted}>"{query}"에 맞는 레포가 없어요.</p>}
           </div>
+          {APP_INSTALL_URL && (
+            <p className={styles.muted}>
+              찾는 레포가 없나요?{" "}
+              <a
+                className={styles.textLink}
+                href={APP_INSTALL_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => (installOpened.current = true)}
+              >
+                GitHub에서 레포 추가하기
+              </a>
+            </p>
+          )}
         </fieldset>
         <button type="button" className={styles.primary} disabled={!pick} onClick={() => pick && void analyze(pick)}>
           분석하고 면접 시작
         </button>
       </div>
     </>
+  );
+}
+
+/** 조직 레포는 조직 관리자만 연결할 수 있습니다. 관리자가 아니면 GitHub 설치 화면에서 요청을 보냅니다 */
+function OrgNote() {
+  return (
+    <p className={styles.small}>
+      조직 레포는 조직 관리자만 연결할 수 있어요. 관리자가 아니면 연결 화면에서 요청을 보내고, 관리자가 승인하면 여기에
+      나타나요.
+    </p>
   );
 }
 
