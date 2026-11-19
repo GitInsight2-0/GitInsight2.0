@@ -1,6 +1,6 @@
 "use client";
 
-import type { Action, BrainReply } from "@gitinsight/contracts";
+import type { Action, BrainReply, TurnRequest } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import CodeViewer from "@/components/CodeViewer";
 import { reportHref } from "@/lib/reports";
@@ -285,6 +285,47 @@ export default function InterviewScreen({
     }
   }
 
+  /**
+   * 음성 턴의 응답을 받기 전에 음성이 끝났을 때, 같은 turn_id로 다시 보내 화면 질문을 서버와 맞춥니다 (#47).
+   * 서버는 이미 처리한 turn_id면 저장된 응답을, 처리 중이면 끝날 때까지 기다렸다 같은 응답을 돌려줍니다.
+   * 그래도 못 받으면 그 답변을 입력칸에 넣어 둡니다. 그대로 보내면 같은 turn_id로 가서 서버가 한 번만 반영합니다.
+   */
+  async function resyncTurn(turn: TurnRequest) {
+    const id = sessionRef.current;
+    if (!id || sending.current) return;
+    sending.current = true;
+    setBusy(true);
+    setError(null);
+    pendingTurn.current = { id: turn.turn_id, transcript: turn.transcript };
+    try {
+      const next = await postTurn(id, turn);
+      pendingTurn.current = null;
+      // 기다리는 사이 "끝내기"로 면접을 끝냈으면 종료 화면을 덮지 않습니다.
+      if (replyRef.current?.done) return;
+      push({ who: "interviewer", text: next.utterance });
+      showReply(next);
+    } catch (e) {
+      if (replyRef.current?.done) {
+        pendingTurn.current = null;
+        return;
+      }
+      if (e instanceof ApiError && e.status === 409) {
+        pendingTurn.current = null;
+        push({ who: "system", text: "이미 끝난 면접입니다." });
+        closeLocally();
+      } else if (isLoginError(e)) {
+        setNeedLogin(true);
+        setError(explainError(e));
+      } else {
+        setDraft(turn.transcript);
+        setError(`음성으로 보낸 마지막 답변의 결과를 받지 못했어요. 입력칸의 답변을 그대로 보내 주세요. (${explainError(e)})`);
+      }
+    } finally {
+      sending.current = false;
+      setBusy(false);
+    }
+  }
+
   // ── 음성 ──
 
   /** 음성 면접을 시작합니다. 진행 중인 세션이 있으면 현재 질문부터 음성으로 이어 갑니다. */
@@ -365,7 +406,7 @@ export default function InterviewScreen({
       audio: (levels) => {
         if (current()) setLevels(levels);
       },
-      ended: (reason, kind) => {
+      ended: (reason, kind, unfinished) => {
         if (!current()) return;
         voice.current = null;
         resetVoiceView();
@@ -380,6 +421,8 @@ export default function InterviewScreen({
         if (!voiceStoppedByUser.current && sessionRef.current) {
           setNotice(`음성 연결이 끊겨 텍스트로 이어 갑니다. 다시 시도하려면 위의 "음성"을 누르세요. (${reason})`);
         }
+        // 서버로 간 답변의 응답을 못 받았습니다. 화면 질문이 서버보다 한 단계 늦지 않게 맞춥니다 (#47).
+        if (unfinished) void resyncTurn(unfinished);
       },
       latency: noop,
       filler: noop,
