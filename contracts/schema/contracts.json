@@ -803,6 +803,17 @@
       "additionalProperties": false,
       "description": "면접관이 일부러 하는 틀린 말입니다 (#133).\n\n2단계 분석에서 만들고 서버가 검증합니다. 면접 중에 지어내지 않습니다.",
       "properties": {
+        "absent_symbol": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SymbolRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "correction": {
           "maxLength": 150,
           "minLength": 1,
@@ -834,7 +845,8 @@
         "kind",
         "statement",
         "correction",
-        "point_id"
+        "point_id",
+        "absent_symbol"
       ],
       "title": "Misstatement",
       "type": "object"

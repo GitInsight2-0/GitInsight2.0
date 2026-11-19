@@ -84,6 +84,10 @@ class Misstatement(Contract):
     correction: ShortSentence
     # 반대로 말한 요점입니다. inverted_point일 때만 있습니다.
     point_id: Id | None = None
+    # 부른다고 말한 함수입니다. absent_call일 때만 있습니다.
+    # 함수 이름과 위치는 LLM 문장이 아니라 분석 결과에서 가져옵니다.
+    # 주제 코드가 이 함수를 직접 부르지 않는다는 것은 2단계 분석이 확인합니다.
+    absent_symbol: SymbolRef | None = None
 
     @model_validator(mode="after")
     def _check(self) -> Self:
@@ -92,6 +96,11 @@ class Misstatement(Contract):
         inverted = self.kind is MisstatementKind.INVERTED_POINT
         if inverted != (self.point_id is not None):
             raise ValueError("point_id는 inverted_point일 때만, 그리고 반드시 있어야 합니다")
+        absent = self.kind is MisstatementKind.ABSENT_CALL
+        if absent != (self.absent_symbol is not None):
+            raise ValueError("absent_symbol은 absent_call일 때만, 그리고 반드시 있어야 합니다")
+        if self.absent_symbol is not None and self.absent_symbol.name not in self.statement:
+            raise ValueError("statement에 absent_symbol의 이름이 들어 있어야 합니다")
         return self
 
 
@@ -129,6 +138,9 @@ class Topic(Contract):
         inverted = self.misstatement.point_id if self.misstatement is not None else None
         if inverted is not None and inverted not in point_ids:
             raise ValueError(f"{self.topic_id}: 틀린 말의 point_id {inverted}가 요점에 없습니다")
+        absent = self.misstatement.absent_symbol if self.misstatement is not None else None
+        if absent is not None and absent.symbol_id == self.symbol.symbol_id:
+            raise ValueError(f"{self.topic_id}: 틀린 말의 absent_symbol이 주제 코드 자신입니다")
         allowed = self.allowed_symbol_ids()
         for followup in self.prepared_followups:
             if followup.symbol_id is not None and followup.symbol_id not in allowed:
