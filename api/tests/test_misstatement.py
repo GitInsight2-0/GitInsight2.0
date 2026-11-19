@@ -58,11 +58,17 @@ from gitinsight_contracts.report import ReportKind
 
 STATEMENT = "여기서 직접 save_report를 호출해서 저장하죠?"
 CORRECTION = "방금 말씀드린 것과 달리 이 함수는 save_report를 직접 호출하지 않습니다."
-MISSTATEMENT = Misstatement(
-    kind=MisstatementKind.ABSENT_CALL, statement=STATEMENT, correction=CORRECTION
-)
 BASE = load_analysis()
 ORDER = rule_order(BASE)
+ABSENT = BASE.topics[0].symbol.model_copy(
+    update={"symbol_id": "app/report.py::save_report", "name": "save_report"}
+)
+MISSTATEMENT = Misstatement(
+    kind=MisstatementKind.ABSENT_CALL,
+    statement=STATEMENT,
+    correction=CORRECTION,
+    absent_symbol=ABSENT,
+)
 START = datetime(2026, 11, 19, 10, 0, tzinfo=UTC)
 # 첫 답변에서 주제의 질문이 끝나게 해서 테스트를 짧게 합니다. 꼬리질문과 빠진 요점 다시 묻기를 끕니다.
 ONE_QUESTION = InterviewConfig(max_depth=0, probe_threshold=0.0)
