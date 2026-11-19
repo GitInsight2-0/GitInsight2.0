@@ -311,6 +311,56 @@ def test_repo_without_component_files_keeps_size_order() -> None:
     assert ids(symbols) == ["src/b.ts::big", "app/c.py::mid", "app/a.py::small"]
 
 
+def test_languages_alternate_so_python_is_not_pushed_out_by_long_script_symbols() -> None:
+    # 줄 수만 보면 TypeScript 넷이 앞자리를 다 차지합니다 (#129).
+    symbols = [
+        sym("web/components/Screen.tsx", "Screen", 1, 600),
+        sym("web/lib/session.ts", "startSession", 1, 400),
+        sym("web/components/Lab.tsx", "Lab", 1, 280),
+        sym("web/lib/gemini.ts", "connect", 1, 250),
+        sym("api/brain/service.py", "Brain", 1, 200),
+        sym("worker/stage2.py", "generate", 1, 90),
+        sym("worker/pipeline.py", "run", 1, 60),
+    ]
+
+    # 언어끼리 번갈아 놓고, TypeScript 안에서는 컴포넌트와 나머지를 번갈아 놓습니다.
+    assert ids(symbols) == [
+        "web/components/Screen.tsx::Screen",
+        "api/brain/service.py::Brain",
+        "web/lib/session.ts::startSession",
+        "worker/stage2.py::generate",
+        "web/components/Lab.tsx::Lab",
+        "worker/pipeline.py::run",
+        "web/lib/gemini.ts::connect",
+    ]
+
+
+def test_language_alternation_starts_with_the_biggest_and_keeps_label_order() -> None:
+    service = sym("api/service.py", "Service", 1, 300)
+    screen = sym("web/Screen.tsx", "Screen", 1, 200)
+    helper = sym("api/helper.py", "helper", 1, 100)
+    mine = sym("web/mine.ts", "mine", 1, 20)
+    labels = {mine.symbol_id: ContributionLabel.VERIFIED}
+
+    candidates = select_candidates(
+        [service, screen, helper, mine],
+        lambda s: labels.get(s.symbol_id, ContributionLabel.UNVERIFIED),
+    )
+
+    # 기여 근거가 있는 코드가 먼저이고, 그 뒤는 가장 큰 후보(Python)부터 번갈아 놓습니다.
+    assert [c.symbol.name for c in candidates] == ["mine", "Service", "Screen", "helper"]
+
+
+def test_python_only_repo_keeps_size_order() -> None:
+    symbols = [
+        sym("app/a.py", "small", 1, 10),
+        sym("app/b.py", "big", 1, 120),
+        sym("app/c.py", "mid", 1, 60),
+    ]
+
+    assert ids(symbols) == ["app/b.py::big", "app/c.py::mid", "app/a.py::small"]
+
+
 def test_logic_rules_follow_the_file_language() -> None:
     # 경로가 없거나 Python이면 지금까지의 Python 기준을 그대로 씁니다.
     assert has_enough_logic(WORKING_FUNCTION) == has_enough_logic(WORKING_FUNCTION, "app/a.py")

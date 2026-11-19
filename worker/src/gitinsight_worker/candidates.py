@@ -161,8 +161,7 @@ def script_logic_line_count(code: str) -> int:
 
 def has_enough_logic(code: str, path: str = "") -> bool:
     """`path`의 확장자가 TypeScript·JavaScript면 그 문법 기준으로, 아니면 Python 기준으로 셉니다."""
-    script = _SOURCE_SUFFIX.search(path.lower()) is not None and not path.lower().endswith(".py")
-    count = script_logic_line_count(code) if script else logic_line_count(code)
+    count = script_logic_line_count(code) if is_script_path(path) else logic_line_count(code)
     return count >= MIN_LOGIC_LINES
 
 
@@ -190,7 +189,7 @@ def select_candidates(symbols: list[SymbolRef], label_of: LabelOf = _unverified)
             continue
         chosen.append(symbol)
         per_file[symbol.path] += 1
-    ordered = _alternate_markup(chosen, label_of)
+    ordered = _alternate_groups(chosen, label_of)
     return [Candidate(symbol=s, related_choices=_related(s, symbols)) for s in ordered]
 
 
@@ -202,26 +201,52 @@ def is_markup_path(path: str) -> bool:
     return path.lower().endswith(_MARKUP_SUFFIXES)
 
 
-def _alternate_markup(chosen: list[SymbolRef], label_of: LabelOf) -> list[SymbolRef]:
-    """화면 컴포넌트 파일(.tsx, .jsx)의 후보와 나머지 파일의 후보를 번갈아 놓습니다 (#72).
+def is_script_path(path: str) -> bool:
+    """TypeScript·JavaScript 파일인지 봅니다."""
+    lowered = path.lower()
+    return _SOURCE_SUFFIX.search(lowered) is not None and not lowered.endswith(".py")
 
-    줄 수가 많은 순으로만 고르면 마크업이 긴 컴포넌트가 앞자리를 다 차지해서,
-    API 라우트나 서버 로직처럼 짧지만 동작이 있는 코드가 주제가 되지 못합니다.
+
+def _alternate(items: list[SymbolRef], in_first: Callable[[SymbolRef], bool]) -> list[SymbolRef]:
+    """두 묶음을 번갈아 놓습니다. 맨 앞 후보가 속한 묶음부터 시작하고, 각 묶음 안의 순서는 그대로입니다."""
+    if not items:
+        return []
+    head = in_first(items[0])
+    first = deque(s for s in items if in_first(s) == head)
+    second = deque(s for s in items if in_first(s) != head)
+    ordered: list[SymbolRef] = []
+    while first or second:
+        if first:
+            ordered.append(first.popleft())
+        if second:
+            ordered.append(second.popleft())
+    return ordered
+
+
+def _alternate_groups(chosen: list[SymbolRef], label_of: LabelOf) -> list[SymbolRef]:
+    """줄 수가 많은 순으로만 고르면 한쪽 코드가 앞자리를 다 차지하므로, 두 번 번갈아 놓습니다.
+
+    1. TypeScript·JavaScript 안에서 화면 컴포넌트 파일(.tsx, .jsx)과 나머지 파일(.ts, .js)을 번갈아 놓습니다 (#72).
+       마크업이 긴 컴포넌트에 밀려 API 라우트처럼 짧지만 동작이 있는 코드가 주제가 되지 못하는 것을 막습니다.
+    2. TypeScript·JavaScript와 그 밖의 언어(Python)를 번갈아 놓습니다 (#129).
+       TypeScript는 컴포넌트와 클로저에 함수를 모아 한 심볼이 길고 Python은 클래스와 메서드로 나뉘어 짧아서,
+       두 언어가 섞인 레포에서는 Python이 대부분이어도 주제가 TypeScript로 쏠립니다.
+
     기여 라벨 순서는 그대로 두고, 같은 라벨 안에서만 번갈아 놓습니다. 각 묶음 안의 순서(줄 수 순)도 그대로입니다.
-    .tsx, .jsx가 없는 레포(Python 레포 등)는 순서가 바뀌지 않습니다.
+    맨 앞 후보는 바뀌지 않습니다. 한 언어만 있는 레포는 2번에서 순서가 바뀌지 않습니다.
+    한계: 파일 수 비율대로 나누지 않습니다. 한 언어가 조금뿐인 레포도 그 후보가 남아 있는 동안은 한 자리 건너 하나씩 옵니다.
     """
     ordered: list[SymbolRef] = []
     for _, group in groupby(chosen, key=lambda s: _LABEL_RANK[label_of(s)]):
         items = list(group)
-        # 가장 앞선 후보가 속한 쪽부터 시작해 맨 앞 후보는 바뀌지 않습니다.
-        first_is_markup = is_markup_path(items[0].path)
-        first = deque(s for s in items if is_markup_path(s.path) == first_is_markup)
-        second = deque(s for s in items if is_markup_path(s.path) != first_is_markup)
-        while first or second:
-            if first:
-                ordered.append(first.popleft())
-            if second:
-                ordered.append(second.popleft())
+        scripts = iter(
+            _alternate(
+                [s for s in items if is_script_path(s.path)], lambda s: is_markup_path(s.path)
+            )
+        )
+        # 스크립트 자리에 1번에서 정한 순서대로 다시 넣습니다. 다른 언어의 자리는 그대로입니다.
+        mixed = [next(scripts) if is_script_path(s.path) else s for s in items]
+        ordered.extend(_alternate(mixed, lambda s: is_script_path(s.path)))
     return ordered
 
 
