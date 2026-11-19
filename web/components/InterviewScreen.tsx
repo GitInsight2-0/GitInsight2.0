@@ -47,11 +47,12 @@ function said(r: BrainReply): HistoryItem {
 type Mode = "text" | "voice";
 type VoiceState = "idle" | "connecting" | "live";
 /** 아래 막대와 말풍선이 보여 줄 상태 */
-type Stage = "connecting" | "listening" | "thinking" | "speaking" | "text" | "done";
+type Stage = "connecting" | "listening" | "muted" | "thinking" | "speaking" | "text" | "done";
 
 const STAGE_LABEL: Record<Stage, string> = {
   connecting: "연결하고 있어요",
   listening: "듣고 있어요",
+  muted: "마이크가 꺼져 있어요",
   thinking: "답변을 살펴보고 있어요",
   speaking: "말하는 중",
   text: "텍스트로 답하는 중",
@@ -134,6 +135,8 @@ export default function InterviewScreen({
   /** 타이머 안에서 AI가 말하는 중인지 보려고 상태와 같이 둡니다 */
   const aiSpeakingRef = useRef(false);
   const [levels, setLevels] = useState<AudioLevels | null>(null);
+  /** 면접자가 음성 막대의 버튼으로 마이크를 껐는지 (#145). 음성을 새로 열면 켜진 상태로 돌아갑니다 */
+  const [micOff, setMicOff] = useState(false);
   const [report, setReport] = useState<ReportState>({ kind: "idle" });
   /** 서버가 401을 돌려줬습니다. 첫 화면으로 가서 다시 로그인하라고 안내합니다 */
   const [needLogin, setNeedLogin] = useState(false);
@@ -519,6 +522,14 @@ export default function InterviewScreen({
     setAiSpeaking(false);
     setLastAnswer(null);
     setAnswerSent(false);
+    setMicOff(false);
+  }
+
+  /** 마이크를 끄거나 켭니다. 말하던 중에 끄면 그때까지 한 말이 답변으로 넘어갑니다 */
+  function toggleMic() {
+    const next = !micOff;
+    voice.current?.setMuted(next);
+    setMicOff(next);
   }
 
   // ── 화면 ──
@@ -596,7 +607,9 @@ export default function InterviewScreen({
           ? "thinking"
           : aiSpeaking
             ? "speaking"
-            : "listening";
+            : micOff
+              ? "muted"
+              : "listening";
   const canSwitchToVoice = mode === "text" && voiceState === "idle" && !busy && !done;
   // 음성으로 말하는 중인 답변. 아직 서버로 보내지 않아서 점선 말풍선에 받아쓰기를 보여 줍니다.
   const live = mode === "voice" && !done && !answerSent && (lastAnswer !== null || stage === "listening");
@@ -722,12 +735,26 @@ export default function InterviewScreen({
             <footer className={styles.dock}>
               {mode === "voice" ? (
                 <div className={styles.mic}>
+                  <button
+                    type="button"
+                    className={micOff ? `${styles.micButton} ${styles.micButtonOff}` : styles.micButton}
+                    onClick={toggleMic}
+                    disabled={voiceState !== "live"}
+                    aria-label={micOff ? "마이크 켜기" : "마이크 끄기"}
+                    title={micOff ? "마이크 켜기" : "마이크 끄기"}
+                  >
+                    {micOff ? <MicOffIcon /> : <MicIcon />}
+                  </button>
                   <Waveform levels={levels} active={stage === "listening" || stage === "speaking"} maxHeight={22} />
                   <div>
                     <div role="status" aria-live="polite" className={styles.micState}>
                       {STAGE_LABEL[stage]}
                     </div>
-                    <div className={styles.hint}>말을 마치고 {SILENCE_SEC}초 쉬면 답변이 전송돼요</div>
+                    <div className={styles.hint}>
+                      {micOff
+                        ? "답할 때 마이크 버튼을 눌러 켜세요. 꺼진 동안의 소리는 보내지 않아요"
+                        : `말을 마치고 ${SILENCE_SEC}초 쉬면 답변이 전송돼요. 말하지 않을 때는 마이크를 꺼 두세요`}
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -832,6 +859,17 @@ function remainingLabel(sec: number): string {
   if (sec <= 0) return "없음";
   if (sec < 60) return "1분 미만";
   return `약 ${Math.ceil(sec / 60)}분`;
+}
+
+function MicOffIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0" />
+      <path d="M12 18v3" />
+      <path d="M4 4l16 16" />
+    </svg>
+  );
 }
 
 function MicIcon() {

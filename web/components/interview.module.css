@@ -320,6 +320,34 @@
   min-width: 0;
 }
 
+/* 마이크 끄기·켜기 (#145). 켜져 있을 때는 강조색, 꺼지면 회색 */
+.micButton {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(240, 100, 24, 0.55);
+  border-radius: 50%;
+  background: var(--gi-accent-soft);
+  color: var(--gi-accent-text);
+}
+
+.micButton svg {
+  width: 18px;
+  height: 18px;
+}
+
+.micButtonOff {
+  border-color: var(--gi-line-strong);
+  background: var(--gi-surface);
+  color: var(--gi-muted);
+}
+
+.micButton:disabled {
+  opacity: 0.45;
+}
+
 .micState {
   font-size: 14.5px;
 }

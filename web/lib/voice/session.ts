@@ -98,6 +98,8 @@ export interface SessionOptions {
 
 export interface VoiceSession {
   stop(): void;
+  /** 마이크를 끄거나 켭니다 (#145). 다음 질문과 상태는 그대로 서버가 정합니다 */
+  setMuted(on: boolean): void;
 }
 
 /** 서버 응답을 못 받았을 때 음성 AI가 할 말. 면접을 진행시키지 않고 다시 말해 달라고만 합니다. */
@@ -532,6 +534,9 @@ export async function startVoiceSession(
     stop() {
       opts.signal.removeEventListener("abort", onOuterAbort);
       shutdown("사용자가 멈췄습니다", "user");
+    },
+    setMuted(on) {
+      if (!closed) handle?.setMuted(on);
     },
   };
 }

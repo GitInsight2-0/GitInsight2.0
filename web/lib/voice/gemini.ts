@@ -51,6 +51,8 @@ export const connectGemini: Connect = async (token, hooks, { signal }) => {
   // 연결 도중 실패해도, 정상 종료할 때도 같은 정리를 합니다 (마이크가 켜진 채 남지 않게).
   let ready = false;
   let closed = false;
+  /** 면접자가 마이크를 껐는지 (#145). 꺼져 있으면 소리를 보내지 않습니다 */
+  let muted = false;
   const cleanup = () => {
     if (closed) return;
     closed = true;
@@ -210,7 +212,7 @@ export const connectGemini: Connect = async (token, hooks, { signal }) => {
     await orAbort(setupDone);
 
     node.port.onmessage = (e: MessageEvent<Float32Array>) => {
-      if (ready) send({ realtimeInput: { audio: { data: floatToPcm16Base64(e.data), mimeType: "audio/pcm;rate=16000" } } });
+      if (ready && !muted) send({ realtimeInput: { audio: { data: floatToPcm16Base64(e.data), mimeType: "audio/pcm;rate=16000" } } });
     };
 
     return {
@@ -221,6 +223,15 @@ export const connectGemini: Connect = async (token, hooks, { signal }) => {
       respondTool(callId, name, output) {
         afterTool = { audio: false, text: false, at: performance.now() };
         send({ toolResponse: { functionResponses: [{ id: callId, name, response: output }] } });
+      },
+      setMuted(on) {
+        if (on === muted || closed) return;
+        muted = on;
+        // 트랙을 끄면 소리 대신 무음이 흘러 측정기와 소리 막대도 조용해집니다.
+        mic?.getAudioTracks().forEach((t) => (t.enabled = !on));
+        // 마이크를 끈 경우 문서대로 audioStreamEnd를 보냅니다. 말하던 중이면 그때까지 한 말이 답변으로 넘어갑니다.
+        // 다시 켜면 소리를 보내는 것만으로 입력이 다시 열립니다.
+        if (on) send({ realtimeInput: { audioStreamEnd: true } });
       },
       userAnalyser: () => user,
       aiAnalyser: () => ai,
