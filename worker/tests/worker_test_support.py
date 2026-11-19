@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 from gitinsight_contracts.api import AnalysisState
-from gitinsight_worker.stage2 import FollowupDraft, PointDraft, TopicMaterial
+from gitinsight_worker.stage2 import FollowupDraft, MisstatementDraft, PointDraft, TopicMaterial
 
 
 class Recorder:
@@ -56,6 +56,7 @@ def material(
     followups: int = 1,
     related: list[str] | None = None,
     followup_symbol: str | None = None,
+    misstatement: MisstatementDraft | None = None,
 ) -> TopicMaterial:
     """검증을 통과하는 LLM 출력입니다. 인자로 한 군데씩 바꿔 실패 경우를 만듭니다."""
     return TopicMaterial(
@@ -77,6 +78,25 @@ def material(
         ],
         hint=hint,
         related_symbol_ids=related or [],
+        misstatement=misstatement or inverted_draft(),
+    )
+
+
+def inverted_draft(point_index: int | None = 1) -> MisstatementDraft:
+    """요점 하나를 반대로 말하는 틀린 말입니다. absent_call 주제에서는 함수 이름이 없어 검증에 실패합니다."""
+    return MisstatementDraft(
+        statement="이 코드는 계산 없이 요청을 그대로 돌려주죠?",
+        correction="방금 말씀드린 것과 달리 이 코드는 값을 차례로 계산한 뒤 첫 값을 돌려줍니다.",
+        point_index=point_index,
+    )
+
+
+def absent_draft(name: str) -> MisstatementDraft:
+    """주제 코드가 name 함수를 직접 부른다고 말하는 틀린 말입니다."""
+    return MisstatementDraft(
+        statement=f"여기서 직접 {name}를 호출해서 값을 준비하죠?",
+        correction=f"방금 말씀드린 것과 달리 이 코드는 {name}를 직접 호출하지 않습니다.",
+        point_index=None,
     )
 
 
