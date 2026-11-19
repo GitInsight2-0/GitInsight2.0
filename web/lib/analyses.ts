@@ -33,6 +33,17 @@ export async function fetchAnalysis(analysisId: string, signal?: AbortSignal): P
   return (await res.json()) as AnalysisState;
 }
 
+/**
+ * 진행 상태 조회를 다시 해 볼 오류인지 (#102).
+ * 중계·서버의 일시 오류(502, 503, 504)와 네트워크 오류만 다시 묻습니다.
+ * 401(로그인 만료), 404(없는 분석) 같은 나머지는 다시 물어도 같아서 바로 멈춥니다.
+ */
+export function isRetryablePollError(e: unknown): boolean {
+  if (e instanceof ApiError) return e.status === 502 || e.status === 503 || e.status === 504;
+  // fetch는 연결이 끊기면 TypeError를 던집니다.
+  return e instanceof TypeError;
+}
+
 export const STATUS_TEXT: Record<AnalysisStatus, string> = {
   queued: "분석을 기다리고 있어요",
   stage1: "코드 구조와 커밋 이력을 읽고 있어요",

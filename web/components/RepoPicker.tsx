@@ -9,6 +9,7 @@ import {
   fetchAnalysis,
   fetchRepos,
   interviewHref,
+  isRetryablePollError,
   isUnsupportedCode,
   startAnalysis,
 } from "@/lib/analyses";
@@ -18,14 +19,23 @@ import styles from "./home.module.css";
 
 /** 분석 진행을 다시 묻는 간격 */
 const POLL_MS = 2000;
+/** 진행 상태 조회가 잇달아 실패해도 다시 묻는 횟수. 2초 간격이라 10초쯤 더 기다립니다 (#102) */
+const POLL_RETRIES = 5;
 /** 레포가 이보다 많으면 검색 칸을 보여 줍니다 */
 const SEARCH_FROM = 6;
 
 type Job =
   | { kind: "idle" }
   | { kind: "starting"; repo: Repo }
-  | { kind: "running"; repo: Repo; analysisId: string; state: AnalysisState | null }
-  | { kind: "error"; repo: Repo; message: string };
+  /** checking: 진행 상태 조회가 실패해서 다시 묻는 중 */
+  | { kind: "running"; repo: Repo; analysisId: string; state: AnalysisState | null; checking: boolean }
+  /** 분석 요청 자체가 실패함 */
+  | { kind: "error"; repo: Repo; message: string }
+  /**
+   * 분석은 요청했지만 진행 상태를 끝내 확인하지 못함. 서버에서는 분석이 계속되고 있을 수 있습니다.
+   * canResume: 일시 오류라서 다시 물어볼 만함 (401, 404는 다시 물어도 같아서 false)
+   */
+  | { kind: "lost"; repo: Repo; analysisId: string; message: string; canResume: boolean };
 
 /**
  * 로그인 뒤 레포를 고르고 분석을 기다리는 곳 (#61).
@@ -51,25 +61,58 @@ export default function RepoPicker() {
     };
   }, []);
 
-  async function analyze(repo: Repo) {
+  function begin(): AbortController {
     jobAbort.current?.abort();
     const ac = new AbortController();
     jobAbort.current = ac;
+    return ac;
+  }
+
+  async function analyze(repo: Repo) {
+    const ac = begin();
     setJob({ kind: "starting", repo });
+    let created;
     try {
-      const created = await startAnalysis(repo.repo_id, ac.signal);
-      let state: AnalysisState | null =
-        created.status === "done" ? { status: "done", progress: 1, commit_sha: null, error: null } : null;
-      setJob({ kind: "running", repo, analysisId: created.analysis_id, state });
-      // 끝나거나 실패할 때까지 진행을 다시 묻습니다.
-      while (state?.status !== "done" && state?.status !== "failed") {
-        await sleep(POLL_MS, ac.signal);
-        state = await fetchAnalysis(created.analysis_id, ac.signal);
-        setJob({ kind: "running", repo, analysisId: created.analysis_id, state });
-      }
+      created = await startAnalysis(repo.repo_id, ac.signal);
     } catch (e) {
       if (ac.signal.aborted) return;
       setJob({ kind: "error", repo, message: explainError(e) });
+      return;
+    }
+    const state: AnalysisState | null =
+      created.status === "done" ? { status: "done", progress: 1, commit_sha: null, error: null } : null;
+    await poll(repo, created.analysis_id, state, false, ac);
+  }
+
+  /** 진행 상태를 끝내 확인하지 못한 분석을 다시 묻습니다. 분석 요청은 다시 보내지 않습니다 */
+  function resume(repo: Repo, analysisId: string) {
+    void poll(repo, analysisId, null, true, begin());
+  }
+
+  /**
+   * 끝나거나 실패할 때까지 진행을 다시 묻습니다.
+   * 조회가 일시 오류로 실패하면 진행 화면을 그대로 두고 몇 번 더 묻습니다 (#102).
+   */
+  async function poll(repo: Repo, analysisId: string, first: AnalysisState | null, checking: boolean, ac: AbortController) {
+    let state = first;
+    let failures = 0;
+    setJob({ kind: "running", repo, analysisId, state, checking });
+    while (state?.status !== "done" && state?.status !== "failed") {
+      try {
+        await sleep(POLL_MS, ac.signal);
+        state = await fetchAnalysis(analysisId, ac.signal);
+        failures = 0;
+        setJob({ kind: "running", repo, analysisId, state, checking: false });
+      } catch (e) {
+        if (ac.signal.aborted) return;
+        failures += 1;
+        const retryable = isRetryablePollError(e);
+        if (!retryable || failures > POLL_RETRIES) {
+          setJob({ kind: "lost", repo, analysisId, message: explainError(e), canResume: retryable });
+          return;
+        }
+        setJob({ kind: "running", repo, analysisId, state, checking: true });
+      }
     }
   }
 
@@ -103,7 +146,16 @@ export default function RepoPicker() {
     );
   }
 
-  if (job.kind !== "idle") return <JobView job={job} onRetry={() => void analyze(job.repo)} onBack={cancel} />;
+  if (job.kind !== "idle") {
+    return (
+      <JobView
+        job={job}
+        onRetry={() => void analyze(job.repo)}
+        onResume={() => job.kind === "lost" && resume(job.repo, job.analysisId)}
+        onBack={cancel}
+      />
+    );
+  }
 
   const q = query.trim().toLowerCase();
   const shown = q ? repos.repos.filter((r) => r.full_name.toLowerCase().includes(q)) : repos.repos;
@@ -151,12 +203,28 @@ export default function RepoPicker() {
   );
 }
 
-function JobView({ job, onRetry, onBack }: { job: Exclude<Job, { kind: "idle" }>; onRetry: () => void; onBack: () => void }) {
+function JobView({
+  job,
+  onRetry,
+  onResume,
+  onBack,
+}: {
+  job: Exclude<Job, { kind: "idle" }>;
+  onRetry: () => void;
+  onResume: () => void;
+  onBack: () => void;
+}) {
   const status = job.kind === "running" ? job.state?.status ?? "queued" : null;
   const progress = job.kind === "running" ? job.state?.progress ?? 0 : 0;
-  const failed = job.kind === "error" || status === "failed";
+  const checking = job.kind === "running" && job.checking;
+  const lost = job.kind === "lost";
+  const failed = job.kind === "error" || lost || status === "failed";
   const message =
-    job.kind === "error" ? job.message : job.kind === "running" && status === "failed" ? job.state?.error ?? "" : "";
+    job.kind === "error" || job.kind === "lost"
+      ? job.message
+      : job.kind === "running" && status === "failed"
+        ? job.state?.error ?? ""
+        : "";
   // Python 코드가 없는 레포는 다시 분석해도 같은 결과라, 다른 레포를 고르게 먼저 안내합니다 (#71).
   const unsupported = job.kind === "running" && status === "failed" && isUnsupportedCode(job.state?.error);
   return (
@@ -169,7 +237,11 @@ function JobView({ job, onRetry, onBack }: { job: Exclude<Job, { kind: "idle" }>
       {!failed && (
         <div className={styles.progressBox} role="status" aria-live="polite">
           <span className={styles.progressText}>
-            {job.kind === "starting" ? "분석을 요청하고 있어요" : STATUS_TEXT[status ?? "queued"]}
+            {job.kind === "starting"
+              ? "분석을 요청하고 있어요"
+              : checking && !job.state
+                ? "진행 상태를 확인하고 있어요"
+                : STATUS_TEXT[status ?? "queued"]}
           </span>
           <div
             className={styles.progressTrack}
@@ -181,7 +253,13 @@ function JobView({ job, onRetry, onBack }: { job: Exclude<Job, { kind: "idle" }>
           >
             <div className={styles.progressFill} style={{ width: `${Math.max(4, Math.round(progress * 100))}%` }} />
           </div>
-          {status !== "done" && <span className={styles.muted}>레포 크기에 따라 몇 분 걸릴 수 있어요.</span>}
+          {status !== "done" && (
+            <span className={styles.muted}>
+              {checking
+                ? "연결이 잠시 불안정해서 진행 상태를 다시 확인하고 있어요."
+                : "레포 크기에 따라 몇 분 걸릴 수 있어요."}
+            </span>
+          )}
         </div>
       )}
 
@@ -189,6 +267,16 @@ function JobView({ job, onRetry, onBack }: { job: Exclude<Job, { kind: "idle" }>
         (unsupported ? (
           <p role="alert" className={styles.error}>
             이 레포에서 Python 코드를 찾지 못했어요. 다른 레포를 골라 주세요.
+          </p>
+        ) : lost ? (
+          <p role="alert" className={styles.error}>
+            분석 진행 상태를 확인하지 못했어요.
+            {job.canResume ? " 분석은 서버에서 계속되고 있을 수 있어요." : ""}
+            {message ? ` (${message})` : ""}
+          </p>
+        ) : job.kind === "error" ? (
+          <p role="alert" className={styles.error}>
+            분석을 요청하지 못했어요.{message ? ` (${message})` : ""}
           </p>
         ) : (
           <p role="alert" className={styles.error}>
@@ -211,7 +299,12 @@ function JobView({ job, onRetry, onBack }: { job: Exclude<Job, { kind: "idle" }>
           </button>
         </>
       )}
-      {failed && !unsupported && (
+      {lost && job.canResume && (
+        <button type="button" className={styles.primary} onClick={onResume}>
+          진행 상태 다시 확인
+        </button>
+      )}
+      {failed && !unsupported && !lost && (
         <button type="button" className={styles.primary} onClick={onRetry}>
           다시 분석
         </button>
