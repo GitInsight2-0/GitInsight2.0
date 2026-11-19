@@ -51,6 +51,7 @@ from gitinsight_api.brain.rules import (
 from gitinsight_api.brain.state import SessionState, TopicProgress, TurnRecord
 from gitinsight_api.llm import LLMClient
 from gitinsight_contracts.analysis import AnalysisResult, Misstatement, PreparedFollowup, Topic
+from gitinsight_contracts.common import LineSpan, SymbolRef
 from gitinsight_contracts.interview import Action, BrainReply, SessionCreate, TurnRequest
 from gitinsight_contracts.llm import CatchStatus, Intent, Judgment, MisstatementJudgment
 from gitinsight_contracts.report import FallbackReason
@@ -62,6 +63,19 @@ Clock = Callable[[], datetime]
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def focus_within(focus: LineSpan | None, highlight: SymbolRef | None) -> LineSpan | None:
+    """화면에 띄울 코드(highlight) 안의 줄일 때만 focus를 돌려줍니다 (#156).
+
+    BrainReply 계약은 highlight 밖의 focus를 거부합니다. 응답을 만드는 자리마다 맞추지 못한 것이 있어도
+    면접 도중 턴이 검증 오류로 실패하지 않게, 여기 한 곳에서 focus만 비웁니다.
+    """
+    if focus is None or highlight is None or not focus.within(highlight):
+        if focus is not None:
+            logger.warning("focus_dropped reason=outside_highlight")
+        return None
+    return focus
 
 
 def usable_followups(
@@ -370,6 +384,8 @@ class InterviewBrain:
         progress.covered_points = list(decision.covered_after)
         action = decision.action
         highlight = state.last_highlight
+        # 질문을 다시 말하는 행동(REPEAT, CLARIFY, HINT)은 직전 질문이 가리키던 줄을 그대로 둡니다 (#156).
+        focus = state.last_focus
         remaining = state.remaining_sec(now)
 
         if action is Action.WRAP_UP:
@@ -413,6 +429,8 @@ class InterviewBrain:
             progress.probed_points.append(point.point_id)
             # 기대 포인트는 주제 코드에 대한 것입니다. 직전 꼬리질문이 다른 심볼을 보여 주고 있었어도 주제 코드로 돌아옵니다.
             highlight = topic.symbol
+            # 분석이 이 요점에 고른 줄입니다. 없으면 주제 코드 전체를 봅니다.
+            focus = point.focus
             text = point.probe_question
             state.last_question = text
         elif action is Action.FOLLOW_UP:
@@ -425,6 +443,7 @@ class InterviewBrain:
                 text = followup.question
                 symbol_id = followup.symbol_id
             highlight = (topic.find_symbol(symbol_id) if symbol_id else None) or topic.symbol
+            focus = None
             progress.depth += 1
             state.last_question = text
         elif action is Action.NEXT_TOPIC:
@@ -434,6 +453,7 @@ class InterviewBrain:
                 topic_id=topic.topic_id, started_at_sec=state.elapsed_sec(now)
             )
             highlight = topic.symbol
+            focus = None
             # 틀린 말에 답한 뒤에는 주제를 시작하는 문장 자리에 인정 또는 정정을 말합니다.
             intro = reveal or utterance.topic_intro(
                 topic.contribution_label, first=False, review=state.review_only
@@ -447,18 +467,22 @@ class InterviewBrain:
             state.misstatement_pending = True
             # 틀린 말은 주제 코드에 대한 것입니다.
             highlight = topic.symbol
+            focus = None
             text = utterance.join(utterance.MISSTATE_INTRO, topic.misstatement.statement)
             state.last_question = topic.misstatement.statement
         else:
             raise ValueError(f"턴 처리에서 나올 수 없는 행동입니다: {action}")
 
+        focus = focus_within(focus, highlight)
         state.last_action = action
         state.last_highlight = highlight
+        state.last_focus = focus
         return BrainReply(
             turn_id=turn_id,
             action=action,
             utterance=text,
             highlight=highlight,
+            focus=focus,
             topic_id=topic.topic_id,
             depth=progress.depth,
             remaining_sec=remaining,

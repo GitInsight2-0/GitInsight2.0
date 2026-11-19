@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from gitinsight_contracts.common import SymbolRef
+from gitinsight_contracts.common import LineSpan, SymbolRef
 from gitinsight_contracts.interview import Action, BrainReply, InterviewMode
 from gitinsight_contracts.llm import Judgment, MisstatementJudgment
 from gitinsight_contracts.report import FallbackReason
@@ -49,6 +49,8 @@ class SessionState(BaseModel):
     last_question: str
     last_action: Action
     last_highlight: SymbolRef | None
+    # last_question이 가리키는 줄입니다 (#156). 확인 질문(PROBE)에서만 채우고, 질문이 바뀌면 비웁니다.
+    last_focus: LineSpan | None = None
     persona_keywords: list[str] = Field(default_factory=list)
     plan_source: str = "rules"
     # 지난 면접에서 답변이 부족했던 주제만 묻는 다시 보기 면접입니다 (#107). 주제를 시작하는 문장을 고르는 데 씁니다.

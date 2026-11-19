@@ -39,6 +39,8 @@ def render(reply: BrainReply) -> str:
     if reply.highlight is not None:
         h = reply.highlight
         lines.append(f"  코드: {h.path}:{h.start_line}-{h.end_line} ({h.name})")
+        if reply.focus is not None:
+            lines.append(f"  볼 줄: {reply.focus.start_line}-{reply.focus.end_line}")
     lines.append(f"  주제: {reply.topic_id}, 깊이 {reply.depth}, 남은 시간 {reply.remaining_sec}초")
     return "\n".join(lines)
 
