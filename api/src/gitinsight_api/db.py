@@ -7,7 +7,8 @@
 """
 
 from sqlalchemy import URL, MetaData, make_url
-from sqlalchemy.exc import ArgumentError
+from sqlalchemy.exc import ArgumentError, InterfaceError, OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 DRIVER = "postgresql+psycopg"
@@ -15,6 +16,10 @@ DRIVER = "postgresql+psycopg"
 # 없으면 OS 기본값(Windows에서 약 130초)만큼 요청과 `alembic upgrade`가 멈춥니다.
 CONNECT_TIMEOUT_S = 5
 CONNECT_ARGS = {"connect_timeout": CONNECT_TIMEOUT_S}
+
+# DB에 연결하지 못했거나 연결 풀에서 기다리다 시간이 넘은 오류입니다. 같은 요청을 다시 보내면 될 수 있습니다 (503).
+# 그 밖의 SQLAlchemyError(테이블 없음, 쿼리와 스키마 불일치)는 다시 보내도 같습니다 (500, #101).
+RETRYABLE_DB_ERRORS = (OperationalError, InterfaceError, PoolTimeoutError)
 
 # 제약 조건 이름을 고정해 두면 마이그레이션에서 이름으로 지우거나 바꿀 수 있습니다.
 metadata = MetaData(
