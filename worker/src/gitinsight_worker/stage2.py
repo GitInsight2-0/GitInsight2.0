@@ -248,11 +248,16 @@ def read_readme(root: Path) -> str:
 
 
 def visible_focus(root: Path, candidate: Candidate, code: str) -> list[FocusCandidate]:
-    """LLM에 보낸 코드 안에서 시작하는 강조 범위 후보입니다. 코드가 길어 잘렸으면 잘린 뒤의 후보는 뺍니다."""
+    """LLM에 보낸 코드 안에서 시작하는 강조 범위 후보입니다. 코드가 길어 잘렸으면 잘린 뒤의 후보는 뺍니다.
+
+    후보를 뽑다가 어떤 오류가 나도 빈 목록을 돌려줍니다. 강조 범위 때문에 주제나 분석을 잃지 않습니다 (#167).
+    """
     symbol = candidate.symbol
     try:
         found = focus_candidates((root / symbol.path).read_bytes(), symbol)
-    except OSError:
+    except Exception as error:
+        # 예외 종류만 남깁니다. 메시지에 코드가 섞일 수 있습니다.
+        logger.warning("focus_failed error=%s", type(error).__name__)
         return []
     # 잘린 표시 줄을 빼고, 보낸 코드의 마지막 줄 번호를 셉니다.
     sent = code.count("\n") + 1 - (1 if len(code) > MAX_CODE_CHARS else 0)
