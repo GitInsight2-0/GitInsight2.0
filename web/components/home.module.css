@@ -1,4 +1,4 @@
-/* 첫 화면 (#59). 색과 글꼴은 app/globals.css의 값을 씁니다. */
+/* 첫 화면 (#59, 개편 #125). 색과 글꼴은 app/globals.css의 값을 씁니다. 배경의 빛 곡선도 globals.css에 있습니다. */
 
 .page {
   min-height: 100vh;
@@ -12,13 +12,16 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px 24px;
-  padding: 16px 36px;
+  padding: 16px max(20px, env(safe-area-inset-right, 0px)) 16px max(20px, env(safe-area-inset-left, 0px));
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   font-weight: 700;
-  font-size: 18px;
-  letter-spacing: -0.02em;
+  font-size: 17px;
+  letter-spacing: -0.01em;
 }
 
 .user {
@@ -42,88 +45,184 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: 32px;
-  padding: 32px 24px 64px;
+  padding: 40px 20px 72px;
+}
+
+/* ── 소개 ── */
+
+.hero {
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
 }
 
-.hero {
-  max-width: 760px;
+.heroMark {
+  margin-bottom: 18px;
+  filter: drop-shadow(0 0 24px rgba(240, 100, 24, 0.45));
 }
 
 .hero h1 {
-  margin: 0 0 16px;
-  font-size: clamp(30px, 3.4vw, 46px);
-  line-height: 1.25;
-  letter-spacing: -0.03em;
+  margin: 0;
+  font-size: clamp(44px, 7vw, 84px);
+  line-height: 1;
+  letter-spacing: -0.045em;
+  font-weight: 700;
+}
+
+.tagline {
+  margin: 14px 0 0;
+  font-size: clamp(18px, 2.2vw, 24px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--gi-accent-text);
   word-break: keep-all;
 }
 
-.hero p {
-  margin: 0;
-  font-size: 18px;
-  line-height: 1.7;
+.lead {
+  margin: 14px 0 0;
+  max-width: 34em;
+  font-size: 16px;
+  line-height: 1.75;
   color: var(--gi-muted);
   word-break: keep-all;
 }
 
-.panel {
-  width: 100%;
-  max-width: 520px;
+/* ── 시작 카드 ── */
+
+.card {
+  width: min(560px, 100%);
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--gi-line);
+  border-radius: 20px;
+  background: var(--gi-panel);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 30px 80px -40px rgba(0, 0, 0, 0.8);
+}
+
+.cardTitle {
+  margin: 0;
+  padding: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  word-break: keep-all;
+}
+
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px 5px 6px;
+  border: 1px solid var(--gi-line);
+  border-radius: var(--gi-radius-pill);
+  font-size: 13px;
+  color: var(--gi-muted);
+}
+
+.stepNo {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--gi-surface);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.steps .stepOn {
+  border-color: rgba(240, 100, 24, 0.45);
+  color: var(--gi-ink);
+  font-weight: 600;
+}
+
+.stepOn .stepNo {
+  background: var(--gi-accent);
+  color: #140804;
+}
+
+.steps .stepDone {
+  color: var(--gi-ink);
+}
+
+.stepDone .stepNo {
+  background: var(--gi-accent-soft);
+  color: var(--gi-accent-text);
+}
+
+.connected {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gi-accent-text);
 }
 
 .repo {
-  width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 18px 20px;
+  gap: 4px;
+  padding: 14px 16px;
   border: 1px solid var(--gi-line);
   border-radius: var(--gi-radius);
   background: var(--gi-surface);
 }
 
 .label {
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   color: var(--gi-muted);
 }
 
 .repoName {
   font-family: var(--gi-font-mono);
-  font-size: 16px;
-  font-weight: 500;
-  word-break: break-all;
+  font-size: 14px;
+  overflow-wrap: anywhere;
 }
 
 .muted {
   margin: 0;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.65;
   color: var(--gi-muted);
   word-break: keep-all;
 }
 
 .notice {
-  max-width: 520px;
   margin: 0;
-  padding: 10px 16px;
+  width: min(560px, 100%);
+  padding: 12px 16px;
   border-radius: var(--gi-radius);
   background: var(--gi-notice-bg);
   color: var(--gi-notice-ink);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .error {
   margin: 0;
-  color: var(--gi-error);
   font-size: 14px;
+  line-height: 1.6;
+  color: var(--gi-error);
+  word-break: keep-all;
 }
+
+/* ── 버튼 ── */
 
 .primary,
 .secondary,
@@ -131,168 +230,166 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 48px;
-  padding: 0 28px;
-  border-radius: var(--gi-radius-pill);
-  font-size: 16px;
+  gap: 8px;
+  border-radius: 12px;
   font-weight: 600;
   text-decoration: none;
+  transition: background 0.15s, border-color 0.15s;
 }
 
 .primary {
+  align-self: flex-start;
+  padding: 13px 20px;
   border: 0;
-  background: var(--gi-ink);
-  color: #ffffff;
+  background: var(--gi-accent);
+  color: #140804;
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .primary:hover {
-  opacity: 0.9;
+  background: #ff7a33;
+}
+
+.primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .secondary {
-  border: 1px solid var(--gi-line);
-  background: var(--gi-bg);
+  align-self: flex-start;
+  padding: 11px 18px;
+  border: 1px solid var(--gi-line-strong);
+  background: transparent;
   color: var(--gi-ink);
+  font-size: 14px;
+}
+
+.secondary:hover {
+  border-color: var(--gi-muted);
 }
 
 .ghost {
-  min-height: 40px;
-  padding: 0 16px;
-  border: 1px solid var(--gi-line);
+  padding: 7px 14px;
+  border: 1px solid var(--gi-line-strong);
   background: transparent;
-  color: var(--gi-muted);
-  font-size: 14px;
-  font-weight: 500;
+  color: var(--gi-ink);
+  font-size: 13px;
 }
 
 .ghost:disabled {
   opacity: 0.5;
 }
 
-/* ── 레포 선택과 분석 진행 (#61) ── */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ── 레포 고르기 ── */
 
 .picker {
-  width: 100%;
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 16px;
 }
 
 .repoList {
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  border: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  text-align: left;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
 .repoList legend {
   margin-bottom: 10px;
-  padding: 0;
 }
 
 .search {
   width: 100%;
-  min-height: 44px;
-  padding: 0 14px;
-  border: 1px solid var(--gi-line);
-  border-radius: var(--gi-radius);
-  font-size: 15px;
+  padding: 10px 14px;
+  border: 1px solid var(--gi-line-strong);
+  border-radius: 10px;
+  background: var(--gi-surface);
 }
 
 .repoScroll {
-  max-height: 320px;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
 }
 
 .repoRow {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 48px;
-  padding: 0 14px;
+  padding: 12px 14px;
   border: 1px solid var(--gi-line);
-  border-radius: var(--gi-radius);
+  border-radius: 12px;
+  background: var(--gi-surface);
   cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
 }
 
 .repoRow:hover {
-  background: var(--gi-surface);
+  border-color: var(--gi-line-strong);
 }
 
 .repoRowOn {
-  border-color: var(--gi-ink);
-  background: var(--gi-surface);
+  border-color: rgba(240, 100, 24, 0.55);
+  background: var(--gi-accent-softer);
 }
 
 .repoRow input {
-  accent-color: var(--gi-ink);
-  width: 18px;
-  height: 18px;
+  margin: 0;
+  accent-color: var(--gi-accent);
 }
 
 .repoRow .repoName {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 15px;
 }
 
 .badge {
   flex: none;
   padding: 2px 8px;
+  border: 1px solid var(--gi-line-strong);
   border-radius: var(--gi-radius-pill);
-  background: var(--gi-ink);
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 11.5px;
+  color: var(--gi-muted);
 }
 
-.primary:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.textLink {
-  color: var(--gi-accent-text);
-  font-size: 14px;
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
+/* ── 분석 진행 ── */
 
 .progressBox {
-  width: 100%;
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 10px;
 }
 
 .progressText {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
 }
 
 .progressTrack {
-  width: 100%;
-  height: 8px;
+  height: 6px;
+  overflow: hidden;
   border-radius: var(--gi-radius-pill);
   background: var(--gi-surface);
-  overflow: hidden;
 }
 
 .progressFill {
   height: 100%;
-  border-radius: var(--gi-radius-pill);
+  border-radius: inherit;
   background: var(--gi-accent);
+  box-shadow: 0 0 12px rgba(240, 100, 24, 0.6);
   transition: width 0.4s ease;
 }
 
@@ -302,8 +399,12 @@
   }
 }
 
-@media (max-width: 720px) {
-  .topbar {
-    padding: 12px 16px;
+@media (max-width: 560px) {
+  .main {
+    padding-top: 24px;
+  }
+
+  .card {
+    padding: 20px 18px;
   }
 }

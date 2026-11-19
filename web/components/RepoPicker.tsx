@@ -37,9 +37,31 @@ type Job =
    */
   | { kind: "lost"; repo: Repo; analysisId: string; message: string; canResume: boolean };
 
+/** 첫 화면의 단계 (개편 #125). 순서가 실제 진행 순서입니다 */
+const STEPS = ["GitHub 연결", "레포 고르기", "분석", "면접"] as const;
+
+/** 지금 단계(0부터)를 표시합니다. 앞 단계는 끝남, 지금 단계는 진행 중입니다 */
+export function Steps({ at }: { at: number }) {
+  return (
+    <ol className={styles.steps} aria-label="진행 단계">
+      {STEPS.map((name, i) => (
+        <li
+          key={name}
+          className={i < at ? styles.stepDone : i === at ? styles.stepOn : undefined}
+          aria-current={i === at ? "step" : undefined}
+        >
+          <span className={styles.stepNo}>{i < at ? "✓" : i + 1}</span>
+          {name}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 /**
  * 로그인 뒤 레포를 고르고 분석을 기다리는 곳 (#61).
- * 서버에 레포 목록 API가 아직 없거나 목록이 비면 데모 레포로 시작할 수 있게 둡니다.
+ * 레포 목록 API가 없는 서버(로컬·실험 모드)에서만 데모 레포로 시작할 수 있게 둡니다.
+ * 배포처럼 목록을 받는 서버에서는 데모 분석이 DB에 없어서 데모 시작을 감춥니다 (#104).
  */
 export default function RepoPicker() {
   const [repos, setRepos] = useState<ReposResult | null>(null);
@@ -47,19 +69,27 @@ export default function RepoPicker() {
   const [selected, setSelected] = useState<number | null>(null);
   const [job, setJob] = useState<Job>({ kind: "idle" });
   const jobAbort = useRef<AbortController | null>(null);
+  const reposAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    loadRepos();
+    return () => {
+      reposAbort.current?.abort();
+      jobAbort.current?.abort();
+    };
+  }, []);
+
+  function loadRepos() {
+    reposAbort.current?.abort();
     const ac = new AbortController();
+    reposAbort.current = ac;
+    setRepos(null);
     fetchRepos(ac.signal)
       .then(setRepos)
       .catch((e: unknown) => {
         if (!ac.signal.aborted) setRepos({ kind: "error", status: 0, message: explainError(e) });
       });
-    return () => {
-      ac.abort();
-      jobAbort.current?.abort();
-    };
-  }, []);
+  }
 
   function begin(): AbortController {
     jobAbort.current?.abort();
@@ -121,16 +151,35 @@ export default function RepoPicker() {
     setJob({ kind: "idle" });
   }
 
-  if (repos === null) return <p className={styles.muted}>레포 목록을 불러오고 있어요…</p>;
+  if (repos === null) {
+    return (
+      <>
+        <Steps at={1} />
+        <p className={styles.muted}>레포 목록을 불러오고 있어요…</p>
+      </>
+    );
+  }
 
-  // 레포 목록 API가 아직 없음: 데모 레포로 시작 (2단계 전 동작)
-  if (repos.kind === "missing") return <DemoStart note="레포 선택이 열리기 전까지는 준비된 데모 레포로 면접을 봅니다." />;
+  // 레포 목록 API가 없는 서버(로컬·실험 모드): 데모 레포로 시작
+  if (repos.kind === "missing") {
+    return (
+      <>
+        <Steps at={1} />
+        <DemoStart note="레포 선택이 열리지 않은 서버라 준비된 데모 레포로 면접을 봅니다." />
+      </>
+    );
+  }
 
   if (repos.kind === "error") {
     return (
       <>
-        <p className={styles.error}>레포 목록을 불러오지 못했어요. ({repos.message})</p>
-        <DemoStart note="데모 레포로는 바로 면접을 볼 수 있어요." secondary />
+        <Steps at={1} />
+        <p role="alert" className={styles.error}>
+          레포 목록을 불러오지 못했어요. 잠시 뒤 다시 불러와 주세요. ({repos.message})
+        </p>
+        <button type="button" className={styles.secondary} onClick={loadRepos}>
+          다시 불러오기
+        </button>
       </>
     );
   }
@@ -138,22 +187,30 @@ export default function RepoPicker() {
   if (repos.repos.length === 0) {
     return (
       <>
+        <Steps at={1} />
+        <h2 className={styles.cardTitle}>면접 볼 레포가 아직 없어요</h2>
         <p className={styles.muted}>
-          아직 읽을 수 있는 레포가 없어요. GitHub에서 우리 서비스 앱을 면접 볼 레포에 설치하면 여기에 나타나요.
+          GitHub에서 GitInsight 앱을 면접 볼 레포에 설치하면 여기에 나타나요. 설치한 뒤 다시 불러와 주세요.
         </p>
-        <DemoStart note="데모 레포로는 바로 면접을 볼 수 있어요." secondary />
+        <button type="button" className={styles.secondary} onClick={loadRepos}>
+          다시 불러오기
+        </button>
       </>
     );
   }
 
   if (job.kind !== "idle") {
+    const done = job.kind === "running" && job.state?.status === "done";
     return (
-      <JobView
-        job={job}
-        onRetry={() => void analyze(job.repo)}
-        onResume={() => job.kind === "lost" && resume(job.repo, job.analysisId)}
-        onBack={cancel}
-      />
+      <>
+        <Steps at={done ? 3 : 2} />
+        <JobView
+          job={job}
+          onRetry={() => void analyze(job.repo)}
+          onResume={() => job.kind === "lost" && resume(job.repo, job.analysisId)}
+          onBack={cancel}
+        />
+      </>
     );
   }
 
@@ -162,44 +219,44 @@ export default function RepoPicker() {
   const pick = repos.repos.find((r) => r.repo_id === selected) ?? null;
 
   return (
-    <div className={styles.picker}>
-      <fieldset className={styles.repoList}>
-        <legend className={styles.label}>면접 볼 레포를 고르세요</legend>
-        <p className={styles.muted}>{SUPPORTED_LANGUAGE_NOTE}</p>
-        {repos.repos.length >= SEARCH_FROM && (
-          <input
-            type="search"
-            className={styles.search}
-            placeholder="레포 이름으로 찾기"
-            aria-label="레포 이름으로 찾기"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        )}
-        <div className={styles.repoScroll}>
-          {shown.map((r) => (
-            <label key={r.repo_id} className={r.repo_id === selected ? `${styles.repoRow} ${styles.repoRowOn}` : styles.repoRow}>
-              <input
-                type="radio"
-                name="repo"
-                value={r.repo_id}
-                checked={r.repo_id === selected}
-                onChange={() => setSelected(r.repo_id)}
-              />
-              <span className={styles.repoName}>{r.full_name}</span>
-              {r.private && <span className={styles.badge}>비공개</span>}
-            </label>
-          ))}
-          {shown.length === 0 && <p className={styles.muted}>"{query}"에 맞는 레포가 없어요.</p>}
-        </div>
-      </fieldset>
-      <button type="button" className={styles.primary} disabled={!pick} onClick={() => pick && void analyze(pick)}>
-        분석하고 면접 시작
-      </button>
-      <a className={styles.textLink} href={interviewHref(DEMO_ANALYSIS_ID, DEMO_REPO)}>
-        데모 레포({DEMO_REPO})로 바로 시작
-      </a>
-    </div>
+    <>
+      <Steps at={1} />
+      <div className={styles.picker}>
+        <fieldset className={styles.repoList}>
+          <legend className={styles.cardTitle}>면접 볼 레포를 고르세요</legend>
+          <p className={styles.muted}>{SUPPORTED_LANGUAGE_NOTE}</p>
+          {repos.repos.length >= SEARCH_FROM && (
+            <input
+              type="search"
+              className={styles.search}
+              placeholder="레포 이름으로 찾기"
+              aria-label="레포 이름으로 찾기"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          )}
+          <div className={styles.repoScroll}>
+            {shown.map((r) => (
+              <label key={r.repo_id} className={r.repo_id === selected ? `${styles.repoRow} ${styles.repoRowOn}` : styles.repoRow}>
+                <input
+                  type="radio"
+                  name="repo"
+                  value={r.repo_id}
+                  checked={r.repo_id === selected}
+                  onChange={() => setSelected(r.repo_id)}
+                />
+                <span className={styles.repoName}>{r.full_name}</span>
+                {r.private && <span className={styles.badge}>비공개</span>}
+              </label>
+            ))}
+            {shown.length === 0 && <p className={styles.muted}>"{query}"에 맞는 레포가 없어요.</p>}
+          </div>
+        </fieldset>
+        <button type="button" className={styles.primary} disabled={!pick} onClick={() => pick && void analyze(pick)}>
+          분석하고 면접 시작
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -225,7 +282,7 @@ function JobView({
       : job.kind === "running" && status === "failed"
         ? job.state?.error ?? ""
         : "";
-  // Python 코드가 없는 레포는 다시 분석해도 같은 결과라, 다른 레포를 고르게 먼저 안내합니다 (#71).
+  // 지원하는 언어의 코드가 없는 레포는 다시 분석해도 같은 결과라, 다른 레포를 고르게 먼저 안내합니다 (#71).
   const unsupported = job.kind === "running" && status === "failed" && isUnsupportedCode(job.state?.error);
   return (
     <div className={styles.picker}>
@@ -284,52 +341,55 @@ function JobView({
           </p>
         ))}
 
-      {job.kind === "running" && status === "done" && (
-        <a className={styles.primary} href={interviewHref(job.analysisId, job.repo.full_name)}>
-          면접 시작
-        </a>
-      )}
-      {unsupported && (
-        <>
-          <button type="button" className={styles.primary} onClick={onBack}>
-            다른 레포 고르기
+      <div className={styles.actions}>
+        {job.kind === "running" && status === "done" && (
+          <a className={styles.primary} href={interviewHref(job.analysisId, job.repo.full_name)}>
+            면접 시작
+          </a>
+        )}
+        {unsupported && (
+          <>
+            <button type="button" className={styles.primary} onClick={onBack}>
+              다른 레포 고르기
+            </button>
+            <button type="button" className={styles.secondary} onClick={onRetry}>
+              다시 분석
+            </button>
+          </>
+        )}
+        {lost && job.canResume && (
+          <button type="button" className={styles.primary} onClick={onResume}>
+            진행 상태 다시 확인
           </button>
-          <button type="button" className={styles.ghost} onClick={onRetry}>
+        )}
+        {failed && !unsupported && !lost && (
+          <button type="button" className={styles.primary} onClick={onRetry}>
             다시 분석
           </button>
-        </>
-      )}
-      {lost && job.canResume && (
-        <button type="button" className={styles.primary} onClick={onResume}>
-          진행 상태 다시 확인
-        </button>
-      )}
-      {failed && !unsupported && !lost && (
-        <button type="button" className={styles.primary} onClick={onRetry}>
-          다시 분석
-        </button>
-      )}
-      {status !== "done" && !unsupported && (
-        <button type="button" className={styles.ghost} onClick={onBack}>
-          {failed ? "다른 레포 고르기" : "그만 기다리고 다른 레포 고르기"}
-        </button>
-      )}
+        )}
+        {status !== "done" && !unsupported && (
+          <button type="button" className={styles.secondary} onClick={onBack}>
+            {failed ? "다른 레포 고르기" : "그만 기다리고 다른 레포 고르기"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
 
-function DemoStart({ note, secondary = false }: { note: string; secondary?: boolean }) {
+/** 레포 목록 API가 없는 서버에서만 씁니다 (#104) */
+function DemoStart({ note }: { note: string }) {
   return (
-    <>
+    <div className={styles.picker}>
       <div className={styles.repo}>
         <span className={styles.label}>면접 볼 레포</span>
         <span className={styles.repoName}>{DEMO_REPO}</span>
         <span className={styles.muted}>{note}</span>
       </div>
-      <a className={secondary ? styles.secondary : styles.primary} href={interviewHref(DEMO_ANALYSIS_ID, DEMO_REPO)}>
-        {secondary ? "데모 레포로 면접 시작" : "면접 시작"}
+      <a className={styles.primary} href={interviewHref(DEMO_ANALYSIS_ID, DEMO_REPO)}>
+        면접 시작
       </a>
-    </>
+    </div>
   );
 }
 
