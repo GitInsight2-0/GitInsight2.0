@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     llm_report_model: str = PROVIDER_MODELS[DEFAULT_PROVIDER]["llm_report_model"]
     # true면 판단·계획·리포트에서 LLM을 부르지 않고 미리 만든 질문과 턴별 판단 표로 진행합니다.
     brain_force_prepared: bool = False
+    # false면 면접관이 일부러 틀린 말을 하는 질문을 쓰지 않습니다 (#133). 문제가 생겼을 때 끄는 스위치입니다.
+    brain_misstatement: bool = True
     # 판단 모델의 reasoning_effort입니다. 비우면 모델 기본값을 씁니다.
     # 기본값 low 근거: Gemini 3.6 Flash 판단 호출의 중앙값이 4.6초에서 2.3초로 줄었습니다 (docs/evals/latency.md).
     llm_judge_reasoning_effort: str | None = "low"

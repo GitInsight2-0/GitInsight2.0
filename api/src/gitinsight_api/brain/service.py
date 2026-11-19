@@ -12,6 +12,13 @@
    다른 주제가 다루는 코드를 가리키는 미리 만든 꼬리질문은 쓰지 않습니다 (usable_followups).
 7. 행동에 맞는 발화문과 하이라이트를 만듭니다. 하이라이트는 항상 분석 결과의 SymbolRef입니다.
 8. 턴, 판단, 대체 사유를 저장하고 응답합니다.
+
+일부러 틀린 말 (#133):
+- 주제를 마칠 때 규칙이 MISSTATE를 정하면, 분석 결과의 틀린 말을 그대로 읽습니다. 면접 한 번에 최대 한 번입니다.
+- 다음 답변은 요점 판단 대신 틀린 말을 짚었는지만 판단합니다 (brain/misstatement.py).
+- 그 답변 뒤에는 짚었으면 인정하는 문장, 아니면 분석 결과의 정답을 다음 질문(또는 마무리) 앞에 붙여 말합니다.
+  판단하지 못했어도 정답을 말합니다. 면접자가 틀린 내용을 맞는 것으로 기억하지 않게 하기 위해서입니다.
+- LLM을 쓰지 않는 면접(force_prepared)과 다시 보기 면접에서는 하지 않습니다.
 """
 
 import logging
@@ -24,6 +31,7 @@ from gitinsight_api.brain import utterance
 from gitinsight_api.brain.analysis_source import AnalysisSource
 from gitinsight_api.brain.config import InterviewConfig
 from gitinsight_api.brain.judge import judge_answer
+from gitinsight_api.brain.misstatement import catch_status, judge_misstatement
 from gitinsight_api.brain.planner import ReviewSource, plan_interview
 from gitinsight_api.brain.protocol import (
     AnalysisNotFoundError,
@@ -33,12 +41,18 @@ from gitinsight_api.brain.protocol import (
 )
 from gitinsight_api.brain.quotes import EXACT, QuoteMatcher
 from gitinsight_api.brain.repository import SessionRepository
-from gitinsight_api.brain.rules import Decision, RuleInput, decide
+from gitinsight_api.brain.rules import (
+    Decision,
+    MisstatementInput,
+    RuleInput,
+    decide,
+    decide_after_misstatement,
+)
 from gitinsight_api.brain.state import SessionState, TopicProgress, TurnRecord
 from gitinsight_api.llm import LLMClient
-from gitinsight_contracts.analysis import AnalysisResult, PreparedFollowup, Topic
+from gitinsight_contracts.analysis import AnalysisResult, Misstatement, PreparedFollowup, Topic
 from gitinsight_contracts.interview import Action, BrainReply, SessionCreate, TurnRequest
-from gitinsight_contracts.llm import Intent, Judgment
+from gitinsight_contracts.llm import CatchStatus, Intent, Judgment, MisstatementJudgment
 from gitinsight_contracts.report import FallbackReason
 
 logger = logging.getLogger(__name__)
@@ -202,29 +216,54 @@ class InterviewBrain:
             now = self._clock()
             remaining = state.remaining_sec(now)
             judgment: Judgment | None = None
+            catch: MisstatementJudgment | None = None
             reason: FallbackReason | None = None
             judge_ms: float | None = None
+            # 틀린 말에 답한 뒤 다음 발화 앞에 붙이는 문장(인정 또는 정정)입니다.
+            reveal: str | None = None
             prepared = usable_followups(analysis, state.topic_order, topic)
-            if remaining > 0:
-                judgment, reason, judge_ms = await self._judge(state, topic, question, request)
-
-            decision = decide(
-                RuleInput(
-                    remaining_sec=remaining,
-                    topic_elapsed_sec=state.elapsed_sec(now) - state.progress.started_at_sec,
-                    progress=state.progress,
-                    point_ids=[p.point_id for p in topic.expected_points],
-                    has_next_topic=state.has_next_topic(),
-                    judgment=judgment,
-                    prepared_followups_left=len(prepared) - state.progress.prepared_used,
-                    coverage_unknown=state.progress.unjudged_answers > 0,
-                ),
-                self._config,
-            )
-            if judgment is None:
-                state.progress.unjudged_answers += 1
+            # 바로 앞에서 면접관이 일부러 틀린 말을 했으면, 이 답변은 그 말을 짚었는지만 봅니다 (#133).
+            pending = topic.misstatement if state.misstatement_pending else None
+            if pending is not None:
+                if remaining > 0:
+                    catch, reason, judge_ms = await self._judge_misstatement(
+                        topic, pending, request
+                    )
+                decision = decide_after_misstatement(
+                    MisstatementInput(
+                        remaining_sec=remaining,
+                        progress=state.progress,
+                        has_next_topic=state.has_next_topic(),
+                        judgment=catch,
+                    ),
+                    self._config,
+                )
+                if decision.action is not Action.REPEAT:
+                    state.misstatement_pending = False
+                    caught = catch_status(catch) is CatchStatus.CAUGHT
+                    reveal = utterance.MISSTATE_CAUGHT if caught else pending.correction
+            else:
+                state.misstatement_pending = False
+                if remaining > 0:
+                    judgment, reason, judge_ms = await self._judge(state, topic, question, request)
+                decision = decide(
+                    RuleInput(
+                        remaining_sec=remaining,
+                        topic_elapsed_sec=state.elapsed_sec(now) - state.progress.started_at_sec,
+                        progress=state.progress,
+                        point_ids=[p.point_id for p in topic.expected_points],
+                        has_next_topic=state.has_next_topic(),
+                        judgment=judgment,
+                        prepared_followups_left=len(prepared) - state.progress.prepared_used,
+                        coverage_unknown=state.progress.unjudged_answers > 0,
+                        misstatement_ready=self._misstatement_ready(state, topic),
+                    ),
+                    self._config,
+                )
+                if judgment is None:
+                    state.progress.unjudged_answers += 1
             reply = self._apply(
-                state, analysis, topic, prepared, decision, judgment, request.turn_id, now
+                state, analysis, topic, prepared, decision, judgment, request.turn_id, now, reveal
             )
             server_ms = (self._perf_counter() - received) * 1000
             turn = TurnRecord(
@@ -235,6 +274,8 @@ class InterviewBrain:
                 question=question,
                 transcript=request.transcript,
                 judgment=judgment,
+                misstatement=pending is not None,
+                catch=catch,
                 fallback_reason=reason,
                 reply=reply,
                 received_at=now,
@@ -276,6 +317,39 @@ class InterviewBrain:
         )
         return outcome.judgment, outcome.fallback_reason, outcome.elapsed_ms
 
+    def _misstatement_ready(self, state: SessionState, topic: Topic) -> bool:
+        """이 주제에서 일부러 틀린 말을 할 수 있는지입니다. 언제 할지는 규칙이 정합니다."""
+        return (
+            topic.misstatement is not None
+            and state.misstatement_topic_id is None
+            # 판단 LLM이 있어야 짚었는지 볼 수 있습니다.
+            and not self._force_prepared
+            # 다시 보기 면접은 지난 면접에서 부족했던 질문만 다시 묻습니다.
+            and not state.review_only
+        )
+
+    async def _judge_misstatement(
+        self, topic: Topic, misstatement: Misstatement, request: TurnRequest
+    ) -> tuple[MisstatementJudgment | None, FallbackReason | None, float | None]:
+        if self._force_prepared:
+            return None, FallbackReason.FORCED, None
+        if not request.transcript.strip():
+            # 아무 말도 인식되지 않았으면 LLM 없이 다시 말합니다.
+            silent = MisstatementJudgment(
+                intent=Intent.REPEAT, status=CatchStatus.MISSED, evidence_quote=None
+            )
+            return silent, None, None
+        outcome = await judge_misstatement(
+            self._llm,
+            topic,
+            misstatement,
+            request.transcript,
+            timeout_s=self._judge_timeout_s,
+            model=self._judge_model,
+            quote_matcher=self._quote_matcher,
+        )
+        return outcome.judgment, outcome.fallback_reason, outcome.elapsed_ms
+
     def _apply(
         self,
         state: SessionState,
@@ -286,8 +360,12 @@ class InterviewBrain:
         judgment: Judgment | None,
         turn_id: UUID,
         now: datetime,
+        reveal: str | None = None,
     ) -> BrainReply:
-        """결정을 상태에 반영하고 응답을 만듭니다. state를 직접 고칩니다."""
+        """결정을 상태에 반영하고 응답을 만듭니다. state를 직접 고칩니다.
+
+        reveal은 일부러 한 틀린 말에 답한 뒤 다음 발화 앞에 붙이는 한 문장입니다 (인정 또는 정정).
+        """
         progress = state.progress
         progress.covered_points = list(decision.covered_after)
         action = decision.action
@@ -297,7 +375,16 @@ class InterviewBrain:
         if action is Action.WRAP_UP:
             state.closed = True
             state.last_action = action
-            text = utterance.WRAP_UP_TIMEOUT if remaining <= 0 else utterance.WRAP_UP_DONE
+            if reveal is not None:
+                # 2문장 제한을 지키려고 한 문장짜리 마무리를 붙입니다.
+                closing = (
+                    utterance.WRAP_UP_TIMEOUT_SHORT
+                    if remaining <= 0
+                    else utterance.WRAP_UP_DONE_SHORT
+                )
+                text = utterance.join(reveal, closing)
+            else:
+                text = utterance.WRAP_UP_TIMEOUT if remaining <= 0 else utterance.WRAP_UP_DONE
             return BrainReply(
                 turn_id=turn_id,
                 action=action,
@@ -347,11 +434,21 @@ class InterviewBrain:
                 topic_id=topic.topic_id, started_at_sec=state.elapsed_sec(now)
             )
             highlight = topic.symbol
-            intro = utterance.topic_intro(
+            # 틀린 말에 답한 뒤에는 주제를 시작하는 문장 자리에 인정 또는 정정을 말합니다.
+            intro = reveal or utterance.topic_intro(
                 topic.contribution_label, first=False, review=state.review_only
             )
             text = utterance.join(intro, topic.base_question)
             state.last_question = topic.base_question
+        elif action is Action.MISSTATE:
+            if topic.misstatement is None:
+                raise ValueError(f"틀린 말이 없는 주제입니다: {topic.topic_id}")
+            state.misstatement_topic_id = topic.topic_id
+            state.misstatement_pending = True
+            # 틀린 말은 주제 코드에 대한 것입니다.
+            highlight = topic.symbol
+            text = utterance.join(utterance.MISSTATE_INTRO, topic.misstatement.statement)
+            state.last_question = topic.misstatement.statement
         else:
             raise ValueError(f"턴 처리에서 나올 수 없는 행동입니다: {action}")
 

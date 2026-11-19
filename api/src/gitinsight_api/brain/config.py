@@ -19,3 +19,5 @@ class InterviewConfig:
     max_off_topic: int = 1
     # 남은 시간이 이 값(초) 이하면 새 주제를 시작하지 않고 마무리합니다.
     min_sec_for_new_topic: int = 30
+    # 면접관이 일부러 틀린 말을 하는 질문을 씁니다 (#133). 면접 한 번에 최대 한 번입니다.
+    misstatement: bool = True

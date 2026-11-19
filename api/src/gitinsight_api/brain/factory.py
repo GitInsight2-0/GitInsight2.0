@@ -1,6 +1,7 @@
 """설정으로 면접 두뇌와 LLM 클라이언트를 만듭니다. CLI와 평가 스크립트가 같이 씁니다."""
 
 from gitinsight_api.brain.analysis_source import AnalysisSource, FixtureAnalysisSource
+from gitinsight_api.brain.config import InterviewConfig
 from gitinsight_api.brain.planner import ReviewSource
 from gitinsight_api.brain.repository import InMemorySessionRepository, SessionRepository
 from gitinsight_api.brain.service import InterviewBrain
@@ -135,6 +136,7 @@ def build_fixture_brain(
         analyses=analyses,
         repository=repository if repository is not None else InMemorySessionRepository(),
         llm=llm if llm is not None else FakeLLM(),
+        config=InterviewConfig(misstatement=settings.brain_misstatement),
         judge_timeout_s=settings.judge_timeout_s,
         plan_timeout_s=settings.plan_timeout_s,
         judge_model=settings.llm_judge_model,

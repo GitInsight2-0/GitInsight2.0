@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from gitinsight_contracts.common import SymbolRef
 from gitinsight_contracts.interview import Action, BrainReply, InterviewMode
-from gitinsight_contracts.llm import Judgment
+from gitinsight_contracts.llm import Judgment, MisstatementJudgment
 from gitinsight_contracts.report import FallbackReason
 
 
@@ -53,6 +53,10 @@ class SessionState(BaseModel):
     plan_source: str = "rules"
     # 지난 면접에서 답변이 부족했던 주제만 묻는 다시 보기 면접입니다 (#107). 주제를 시작하는 문장을 고르는 데 씁니다.
     review_only: bool = False
+    # 면접관이 일부러 틀린 말을 한 주제입니다 (#133). 면접 한 번에 최대 한 번이라, 값이 있으면 다시 하지 않습니다.
+    misstatement_topic_id: str | None = None
+    # 틀린 말을 했고 아직 답을 받지 못했습니다. 다음 답변은 그 말을 짚었는지만 봅니다.
+    misstatement_pending: bool = False
     turn_count: int = 0
     closed: bool = False
 
@@ -79,6 +83,10 @@ class TurnRecord(BaseModel):
     question: str
     transcript: str
     judgment: Judgment | None
+    # 면접관이 일부러 한 틀린 말에 답한 턴입니다 (#133). 이 턴은 judgment가 없고 점수와 코드 지도에 쓰지 않습니다.
+    misstatement: bool = False
+    # 틀린 말을 짚었는지에 대한 판단입니다. 시간 초과·검증 실패면 None입니다.
+    catch: MisstatementJudgment | None = None
     fallback_reason: FallbackReason | None
     reply: BrainReply
     received_at: datetime
