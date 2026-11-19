@@ -525,6 +525,33 @@
   color: var(--gi-notice-ink);
 }
 
+/* ── 일부러 틀린 말 확인 (#133) ── */
+
+.misHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.misWrong {
+  margin: 0;
+  line-height: 1.6;
+  word-break: keep-all;
+  text-decoration: line-through;
+  text-decoration-color: var(--gi-muted);
+}
+
+.misNote {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: var(--gi-radius);
+  background: var(--gi-notice-bg);
+  color: var(--gi-notice-ink);
+  font-size: 13.5px;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+
 /* ── 답변 기록 ── */
 
 .turn {

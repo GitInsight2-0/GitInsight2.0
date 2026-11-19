@@ -1,9 +1,11 @@
 "use client";
 
 import type {
+  CatchStatus,
   CodeMap,
   CompetencyScore,
   ExplainStatus,
+  MisstatementResult,
   ProgressEntry,
   Report,
   SymbolRef,
@@ -15,6 +17,7 @@ import { interviewHref } from "@/lib/analyses";
 import GrowthChart from "./GrowthChart";
 import {
   ACTION_LABEL,
+  CATCH_STATUS_LABEL,
   COMPETENCY_LABEL,
   COMPETENCY_ORDER,
   EXPLAIN_STATUS_LABEL,
@@ -161,6 +164,8 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
 
       {report.code_map && <CodeMapSection codeMap={report.code_map} topics={report.topics} />}
 
+      {report.misstatement && <MisstatementSection result={report.misstatement} turnNumber={turnNumber} />}
+
       {(report.strengths.length > 0 || report.improvements.length > 0 || report.next_topics.length > 0) && (
         <section aria-label="총평" className={styles.columns}>
           <Bullets title="잘한 점" items={report.strengths} />
@@ -185,7 +190,13 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
           <h2 id="turns">답변 기록</h2>
           <ol className={styles.stack}>
             {report.turns.map((t, i) => (
-              <TurnCard key={t.turn_id} turn={t} index={i + 1} afterHint={hinted.has(t.turn_id)} />
+              <TurnCard
+                key={t.turn_id}
+                turn={t}
+                index={i + 1}
+                afterHint={hinted.has(t.turn_id)}
+                misstatement={isMisstatementTurn(t, report.misstatement) ? report.misstatement : null}
+              />
             ))}
           </ol>
         </section>
@@ -388,6 +399,74 @@ function CodeMapSection({ codeMap, topics }: { codeMap: CodeMap; topics: TopicRe
   );
 }
 
+const CATCH_CLASS: Record<CatchStatus, string> = {
+  caught: styles.statusExplained,
+  partial: styles.statusAfterHint,
+  missed: styles.statusStuck,
+};
+
+/** 면접관이 일부러 한 틀린 말에 답한 턴인지. 다시 말해 달라고 한 턴도 같은 문장을 질문으로 가집니다 */
+function isMisstatementTurn(turn: TurnRow, result: MisstatementResult | null): boolean {
+  if (!result) return false;
+  return turn.turn_id === result.turn_id || (turn.topic_id === result.topic_id && turn.question === result.statement);
+}
+
+/**
+ * 면접관이 일부러 한 틀린 말과 그 결과 (#133).
+ * 틀린 말, 정답, 짚었는지는 서버가 준 값을 그대로 보여 줍니다. 짚지 못했어도 정답은 늘 보여 줍니다.
+ */
+function MisstatementSection({
+  result,
+  turnNumber,
+}: {
+  result: MisstatementResult;
+  turnNumber: Map<string, number>;
+}) {
+  const n = result.turn_id ? turnNumber.get(result.turn_id) : undefined;
+  return (
+    <section aria-labelledby="misstatement" className={styles.section}>
+      <h2 id="misstatement">일부러 틀린 말 확인</h2>
+      <p className={styles.muted}>
+        면접관이 확인을 위해 코드에 대해 일부러 틀린 말을 한 번 했어요. 이 결과는 역량 수준에 반영하지 않아요.
+      </p>
+      <div className={styles.card}>
+        <div className={styles.misHead}>
+          {result.status ? (
+            <span className={CATCH_CLASS[result.status]}>{CATCH_STATUS_LABEL[result.status]}</span>
+          ) : (
+            <span className={styles.statusAfterHint}>
+              {result.turn_id ? "짚었는지 판단하지 못했어요" : "답하기 전에 면접이 끝났어요"}
+            </span>
+          )}
+        </div>
+        <div>
+          <p className={styles.label}>면접관이 한 틀린 말</p>
+          <p className={styles.misWrong}>{result.statement}</p>
+        </div>
+        <div className={styles.model}>
+          <p className={styles.label}>정답</p>
+          <p>{result.correction}</p>
+        </div>
+        {result.quote && (
+          <ul className={styles.evidence}>
+            <li>
+              <blockquote>{result.quote}</blockquote>
+              <div className={styles.source}>
+                {n !== undefined && <a href={`#turn-${result.turn_id}`}>{n}번째 답변</a>}
+              </div>
+            </li>
+          </ul>
+        )}
+        {!result.quote && n !== undefined && (
+          <p className={styles.source}>
+            <a href={`#turn-${result.turn_id}`}>{n}번째 답변</a>
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function Bullets({ title, items }: { title: string; items: string[] }) {
   if (items.length === 0) return null;
   return (
@@ -520,10 +599,26 @@ function PointList({ title, items, tone, empty }: { title: string; items: string
   );
 }
 
-function TurnCard({ turn, index, afterHint }: { turn: TurnRow; index: number; afterHint: boolean }) {
+function TurnCard({
+  turn,
+  index,
+  afterHint,
+  misstatement,
+}: {
+  turn: TurnRow;
+  index: number;
+  afterHint: boolean;
+  /** 이 답변이 받은 질문이 면접관이 일부러 한 틀린 말이면 그 결과 (#133) */
+  misstatement: MisstatementResult | null;
+}) {
   return (
     <li id={`turn-${turn.turn_id}`} className={styles.turn}>
       <p className={styles.label}>{index}번째 답변</p>
+      {misstatement && (
+        <p className={styles.misNote}>
+          면접관이 일부러 한 틀린 말이에요. 정답: {misstatement.correction}
+        </p>
+      )}
       <p className={styles.turnQuestion}>{turn.question}</p>
       <p className={styles.turnAnswer}>{turn.transcript || "(받아 적은 답변이 없어요)"}</p>
       <p className={styles.turnMeta}>

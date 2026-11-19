@@ -1,6 +1,7 @@
 /** 리포트와 이전 면접 비교 불러오기 (계약 Report, ProgressEntry). 서버: GET /api/reports/{id}, GET /api/me/progress */
 import type {
   Action,
+  CatchStatus,
   Competency,
   ExplainStatus,
   FallbackReason,
@@ -111,6 +112,13 @@ export const EXPLAIN_STATUS_LABEL: Record<ExplainStatus, string> = {
   explained: "설명함",
   explained_after_hint: "힌트 받고 설명함",
   stuck: "막힘",
+};
+
+/** 면접관이 일부러 한 틀린 말을 짚었는지 (#133). 역량 수준에는 반영하지 않습니다 */
+export const CATCH_STATUS_LABEL: Record<CatchStatus, string> = {
+  caught: "짚었어요",
+  partial: "틀렸다고는 했지만 이유가 달랐어요",
+  missed: "짚지 못했어요",
 };
 
 /** 면접 중에 이 답변을 판단하지 못한 까닭 */
