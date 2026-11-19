@@ -157,7 +157,7 @@ function JobView({ job, onRetry, onBack }: { job: Exclude<Job, { kind: "idle" }>
   const failed = job.kind === "error" || status === "failed";
   const message =
     job.kind === "error" ? job.message : job.kind === "running" && status === "failed" ? job.state?.error ?? "" : "";
-  // Python 코드가 없는 레포는 다시 분석해도 같은 결과라, 다른 레포를 고르게 먼저 안내합니다 (#71).
+  // 지원하는 언어의 코드가 없는 레포는 다시 분석해도 같은 결과라, 다른 레포를 고르게 먼저 안내합니다 (#71).
   const unsupported = job.kind === "running" && status === "failed" && isUnsupportedCode(job.state?.error);
   return (
     <div className={styles.picker}>
@@ -188,7 +188,7 @@ function JobView({ job, onRetry, onBack }: { job: Exclude<Job, { kind: "idle" }>
       {failed &&
         (unsupported ? (
           <p role="alert" className={styles.error}>
-            이 레포에서 Python 코드를 찾지 못했어요. 다른 레포를 골라 주세요.
+            이 레포에서 분석할 수 있는 코드(Python, TypeScript, JavaScript)를 찾지 못했어요. 다른 레포를 골라 주세요.
           </p>
         ) : (
           <p role="alert" className={styles.error}>
