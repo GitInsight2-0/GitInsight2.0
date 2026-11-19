@@ -4,7 +4,7 @@
 - 상태는 판단 의도(답변, 모르겠다고 답함), 힌트 행동, 다룬 포인트로 정합니다. 기여 라벨은 쓰지 않습니다.
 - 판단이 없는 답변만 있는 함수는 설명했는지 알 수 없어서 지도에 넣지 않습니다.
 - 누적 숫자는 같은 사용자가 같은 레포로 본 면접의 코드 지도를 합쳐, 함수마다 가장 최근 상태로 셉니다.
-- 다시 면접을 볼 때 먼저 물을 주제(막혔던 함수, 지난 면접 이후 커밋이 들어온 함수)도 여기서 고릅니다.
+- 다시 보기 면접에서 물을 주제(막혔거나 힌트를 받고 설명한 함수의 주제)도 여기서 고릅니다.
 """
 
 from collections.abc import Sequence
@@ -12,8 +12,6 @@ from itertools import pairwise
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from gitinsight_api.brain.analysis_source import AnalysisSource
-from gitinsight_api.brain.planner import RevisitTargets
 from gitinsight_api.brain.state import SessionState, TurnRecord
 from gitinsight_contracts.analysis import AnalysisResult
 from gitinsight_contracts.common import SymbolRef
@@ -27,6 +25,8 @@ if TYPE_CHECKING:
 
 # 지난 코드 지도를 찾을 때 보는 최근 리포트 수입니다.
 HISTORY_LIMIT = 20
+# 다시 보기 면접에서 다시 묻는 상태입니다. 힌트를 받고 설명한 함수도 힌트 없이 다시 설명해 보게 합니다.
+REVIEW_STATUSES = frozenset({ExplainStatus.STUCK, ExplainStatus.EXPLAINED_AFTER_HINT})
 
 
 def after_hint_turn_ids(turns: list[TurnRecord]) -> set[UUID]:
@@ -178,56 +178,32 @@ def repo_code_maps(reports: Sequence[Report], repo_full_name: str) -> list[CodeM
     ]
 
 
-def changed_symbol_ids(old: AnalysisResult, new: AnalysisResult) -> set[str]:
-    """두 분석 사이에 커밋이 들어온 주제 코드입니다.
+def review_topic_ids(analysis: AnalysisResult, maps: Sequence[CodeMap]) -> frozenset[str]:
+    """다시 보기 면접에서 물을 주제입니다. maps는 이 레포의 지난 코드 지도입니다 (오래된 것부터).
 
-    주제의 commits는 그 줄 범위를 고친 최근 커밋입니다. 지난 분석에 없던 커밋이 있으면 그 뒤에 고친 것입니다.
-    지난 분석에 없던 함수는 비교할 값이 없어서 넣지 않습니다.
+    함수마다 가장 최근 상태가 막힘이거나 힌트 받고 설명함이면 답변이 부족했던 것으로 봅니다.
+    다시 보기 면접에서 힌트 없이 설명하면 그 함수는 다음 다시 보기에서 빠집니다.
     """
-    if old.commit_sha == new.commit_sha:
-        return set()
-    old_commits: dict[str, set[str]] = {}
-    for topic in old.topics:
-        old_commits.setdefault(topic.symbol.symbol_id, set()).update(topic.commits)
-    return {
-        topic.symbol.symbol_id
-        for topic in new.topics
-        if topic.symbol.symbol_id in old_commits
-        and set(topic.commits) - old_commits[topic.symbol.symbol_id]
-    }
-
-
-def revisit_targets(
-    analysis: AnalysisResult, maps: Sequence[CodeMap], last_analysis: AnalysisResult | None
-) -> RevisitTargets:
-    """다시 면접을 볼 때 먼저 물을 주제입니다. maps는 이 레포의 지난 코드 지도입니다 (오래된 것부터)."""
-    stuck_symbols = {
+    weak_symbols = {
         symbol_id
         for symbol_id, status in latest_statuses(maps).items()
-        if status is ExplainStatus.STUCK
+        if status in REVIEW_STATUSES
     }
     main_ids = {topic.symbol.symbol_id for topic in analysis.topics}
-    stuck: list[str] = []
+    weak: list[str] = []
     for topic in analysis.topics:
-        # 꼬리질문으로 본 코드에서 막혔고 그 코드가 주제의 주 코드가 아니면, 그 코드를 관련 코드로 가진 주제에서 다시 묻습니다.
+        # 꼬리질문으로 본 코드에서 부족했고 그 코드가 주제의 주 코드가 아니면, 그 코드를 관련 코드로 가진 주제에서 다시 묻습니다.
         related = {s.symbol_id for s in topic.related_symbols} - main_ids
-        if topic.symbol.symbol_id in stuck_symbols or related & stuck_symbols:
-            stuck.append(topic.topic_id)
-    changed_symbols = changed_symbol_ids(last_analysis, analysis) if last_analysis else set()
-    changed = [
-        topic.topic_id
-        for topic in analysis.topics
-        if topic.symbol.symbol_id in changed_symbols and topic.topic_id not in stuck
-    ]
-    return RevisitTargets(stuck=frozenset(stuck), changed=frozenset(changed))
+        if topic.symbol.symbol_id in weak_symbols or related & weak_symbols:
+            weak.append(topic.topic_id)
+    return frozenset(weak)
 
 
 class ReportHistory:
-    """저장된 리포트에서 지난 코드 지도를 읽습니다. 면접 두뇌(RevisitSource)와 리포트 서비스가 같이 씁니다."""
+    """저장된 리포트에서 지난 코드 지도를 읽습니다. 면접 두뇌(ReviewSource)와 리포트 서비스가 같이 씁니다."""
 
-    def __init__(self, store: "ReportStore", analyses: AnalysisSource) -> None:
+    def __init__(self, store: "ReportStore") -> None:
         self._store = store
-        self._analyses = analyses
 
     async def code_maps(self, owner_id: str | None, repo_full_name: str) -> list[CodeMap]:
         """그 사용자가 그 레포로 본 지난 면접의 코드 지도입니다 (오래된 것부터). 로그인 사용자가 없으면 비어 있습니다."""
@@ -236,13 +212,9 @@ class ReportHistory:
         saved = await self._store.list_by_owner(owner_id, HISTORY_LIMIT)
         return repo_code_maps([item.report for item in saved], repo_full_name)
 
-    async def targets(self, owner_id: str | None, analysis: AnalysisResult) -> RevisitTargets:
+    async def review_topic_ids(
+        self, owner_id: str | None, analysis: AnalysisResult
+    ) -> frozenset[str]:
+        """그 사용자가 그 레포로 본 지난 면접에서 답변이 부족했던 주제입니다."""
         maps = await self.code_maps(owner_id, analysis.repo_full_name)
-        if not maps:
-            return RevisitTargets()
-        last_id = maps[-1].analysis_id
-        # 같은 분석으로 다시 보는 면접이면 그 사이에 들어온 커밋이 없습니다.
-        last_analysis = (
-            await self._analyses.get(last_id) if last_id != analysis.analysis_id else None
-        )
-        return revisit_targets(analysis, maps, last_analysis)
+        return review_topic_ids(analysis, maps)

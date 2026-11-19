@@ -91,9 +91,12 @@ const noop = () => undefined;
 export default function InterviewScreen({
   analysisId,
   repo,
+  reviewOnly = false,
 }: {
   analysisId: string;
   repo: string | null;
+  /** 다시 보기 면접: 지난 면접에서 답변이 부족했던 주제만 묻습니다 (#107). 어느 주제인지는 서버가 정합니다 */
+  reviewOnly?: boolean;
 }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [reply, setReply] = useState<BrainReply | null>(null);
@@ -227,7 +230,7 @@ export default function InterviewScreen({
     setBusy(true);
     setError(null);
     try {
-      const created = await createSession({ analysis_id: analysisId, mode: "text" });
+      const created = await createSession({ analysis_id: analysisId, mode: "text", review_only: reviewOnly });
       sessionRef.current = created.session_id;
       setSessionId(created.session_id);
       showReply(created.first);
@@ -400,6 +403,7 @@ export default function InterviewScreen({
     try {
       voice.current = await startVoiceSession(connectGemini, ui, {
         analysisId,
+        reviewOnly,
         labDelayMs: 0,
         scenario: () => "interview",
         vad: DEFAULT_VAD,
@@ -455,8 +459,12 @@ export default function InterviewScreen({
         <main className={styles.layout}>
           <section className={styles.stage}>
             <div className={styles.intro}>
-              <h1>모의 기술면접</h1>
-              <p>레포 분석 결과를 바탕으로 질문합니다. 음성으로 답하거나 텍스트로 답할 수 있고, 도중에 바꿀 수 있습니다.</p>
+              <h1>{reviewOnly ? "부족했던 질문 다시 보기" : "모의 기술면접"}</h1>
+              <p>
+                {reviewOnly
+                  ? "지난 면접에서 막혔거나 힌트를 받고 답한 질문만 다시 묻습니다. 음성으로 답하거나 텍스트로 답할 수 있고, 도중에 바꿀 수 있습니다."
+                  : "레포 분석 결과를 바탕으로 질문합니다. 음성으로 답하거나 텍스트로 답할 수 있고, 도중에 바꿀 수 있습니다."}
+              </p>
               <div className={styles.introActions}>
                 <button type="button" className={styles.primary} onClick={() => void startVoice()} disabled={busy}>
                   음성으로 시작

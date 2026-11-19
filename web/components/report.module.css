@@ -486,6 +486,10 @@
   font-weight: 600;
 }
 
+.mapQuestion {
+  flex: 1 1 240px;
+}
+
 .mapAgain {
   display: flex;
   flex-direction: column;

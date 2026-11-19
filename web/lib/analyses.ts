@@ -55,10 +55,16 @@ export function isUnsupportedCode(error: string | null | undefined): boolean {
   return error === UNSUPPORTED_CODE_ERROR;
 }
 
-/** 면접 화면 주소. 코드 뷰어가 코드를 받을 레포 이름을 같이 넘깁니다 */
-export function interviewHref(analysisId: string, repo?: string): string {
-  const q = repo ? `?repo=${encodeURIComponent(repo)}` : "";
-  return `/interview/${encodeURIComponent(analysisId)}${q}`;
+/**
+ * 면접 화면 주소. 코드 뷰어가 코드를 받을 레포 이름을 같이 넘깁니다.
+ * review를 주면 지난 면접에서 답변이 부족했던 주제만 묻는 다시 보기 면접입니다 (#107).
+ */
+export function interviewHref(analysisId: string, repo?: string, opts?: { review?: boolean }): string {
+  const q = new URLSearchParams();
+  if (repo) q.set("repo", repo);
+  if (opts?.review) q.set("review", "1");
+  const query = q.toString();
+  return `/interview/${encodeURIComponent(analysisId)}${query ? `?${query}` : ""}`;
 }
 
 async function detailOf(res: Response): Promise<string> {

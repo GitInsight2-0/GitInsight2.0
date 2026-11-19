@@ -477,6 +477,7 @@ export interface SessionCreate {
   duration_min?: number;
   jd_text?: string | null;
   mode: InterviewMode;
+  review_only?: boolean;
 }
 /**
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema

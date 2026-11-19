@@ -3,8 +3,8 @@
 기본 순서는 규칙으로 정합니다. 기여 근거가 있는 주제를 앞에 두고, 같은 라벨 안에서는 쉬운 주제부터 묻습니다.
 라벨은 순서에만 쓰고 점수에는 쓰지 않습니다.
 JD가 있으면 LLM이 허용된 topic_id 안에서만 순서를 바꾸고, 검증에 실패하면 규칙 순서를 씁니다.
-같은 레포로 다시 보는 면접이면 지난 면접에서 막혔던 함수의 주제와 그 뒤 커밋이 들어온 함수의 주제를 맨 앞에 둡니다 (#107).
-이 순서는 서버가 지난 리포트에서 정하고, 위의 두 순서보다 먼저입니다.
+다시 보기 면접(SessionCreate.review_only)이면 지난 면접에서 답변이 부족했던 주제만 규칙 순서로 묻습니다 (#107).
+어느 주제가 부족했는지는 서버가 지난 리포트의 코드 지도에서 정하고, JD로 순서를 바꾸지 않습니다.
 """
 
 import json
@@ -31,30 +31,12 @@ _LABEL_RANK = {
 }
 
 
-@dataclass(frozen=True)
-class RevisitTargets:
-    """같은 레포로 다시 면접을 볼 때 먼저 물을 주제입니다 (#107). 서버가 지난 리포트의 코드 지도에서 고릅니다."""
+class ReviewSource(Protocol):
+    """지난 면접 기록에서 답변이 부족했던 주제를 찾습니다 (#107). 구현은 report/code_map.py의 ReportHistory입니다."""
 
-    # 지난 면접에서 막혔던 함수의 주제입니다.
-    stuck: frozenset[str] = frozenset()
-    # 지난 면접 이후 커밋이 들어온 함수의 주제입니다.
-    changed: frozenset[str] = frozenset()
-
-    def rank(self, topic_id: str) -> int:
-        if topic_id in self.stuck:
-            return 0
-        if topic_id in self.changed:
-            return 1
-        return 2
-
-
-NO_REVISIT = RevisitTargets()
-
-
-class RevisitSource(Protocol):
-    """지난 면접 기록에서 먼저 물을 주제를 찾습니다. 구현은 report/code_map.py의 ReportHistory입니다."""
-
-    async def targets(self, owner_id: str | None, analysis: AnalysisResult) -> RevisitTargets: ...
+    async def review_topic_ids(
+        self, owner_id: str | None, analysis: AnalysisResult
+    ) -> frozenset[str]: ...
 
 
 @dataclass(frozen=True)
@@ -69,11 +51,6 @@ def rule_order(analysis: AnalysisResult) -> list[str]:
     indexed = list(enumerate(analysis.topics))
     indexed.sort(key=lambda it: (_LABEL_RANK[it[1].contribution_label], it[1].difficulty, it[0]))
     return [topic.topic_id for _, topic in indexed]
-
-
-def revisit_first(order: list[str], revisit: RevisitTargets) -> list[str]:
-    """막혔던 함수의 주제, 커밋이 들어온 함수의 주제, 나머지 순서로 놓습니다. 같은 묶음 안의 순서는 그대로 둡니다."""
-    return sorted(order, key=revisit.rank)
 
 
 def _limit(order: list[str], config: InterviewConfig) -> tuple[list[str], int]:
@@ -123,9 +100,13 @@ async def plan_interview(
     config: InterviewConfig,
     timeout_s: float,
     model: str | None = None,
-    revisit: RevisitTargets = NO_REVISIT,
+    only: frozenset[str] | None = None,
 ) -> InterviewPlan:
-    rules = revisit_first(rule_order(analysis), revisit)
+    """only를 주면 그 주제만 규칙 순서로 묻습니다 (다시 보기 면접). 이때 JD로 순서를 바꾸지 않습니다."""
+    rules = rule_order(analysis)
+    if only is not None:
+        order, main = _limit([t for t in rules if t in only], config)
+        return InterviewPlan(order, main, [], "rules")
     if not jd_text or not jd_text.strip():
         order, main = _limit(rules, config)
         return InterviewPlan(order, main, [], "rules")
@@ -146,5 +127,5 @@ async def plan_interview(
         logger.info("plan_fallback reason=invalid_topic_order")
         order, main = _limit(rules, config)
         return InterviewPlan(order, main, [], "rules")
-    order, main = _limit(revisit_first(validated, revisit), config)
+    order, main = _limit(validated, config)
     return InterviewPlan(order, main, _clean_keywords(result.value.persona_keywords), "llm")

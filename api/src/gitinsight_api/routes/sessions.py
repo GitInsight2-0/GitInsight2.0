@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from gitinsight_api.brain.protocol import (
     AnalysisNotFoundError,
+    NothingToReviewError,
     SessionClosedError,
     SessionNotFoundError,
 )
@@ -41,6 +42,8 @@ router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 MAX_LAB_DELAY_MS = 5000
 SESSION_FORBIDDEN = "이 세션에 접근할 수 없습니다"
 ANALYSIS_NOT_FOUND = "분석 결과를 찾을 수 없습니다"
+# 다시 보기 면접(review_only)을 요청했는데 지난 면접에서 답변이 부족했던 주제가 없을 때입니다 (#107).
+NOTHING_TO_REVIEW = "다시 볼 질문이 없습니다"
 
 
 def _settings(request: Request) -> Settings:
@@ -59,11 +62,14 @@ async def create_session(
         session_id, first = await brain.start(body, owner_id=user.user_id)
     except AnalysisNotFoundError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ANALYSIS_NOT_FOUND) from None
+    except NothingToReviewError:
+        raise HTTPException(status.HTTP_409_CONFLICT, NOTHING_TO_REVIEW) from None
     logger.info(
-        "session start session=%s analysis=%s mode=%s",
+        "session start session=%s analysis=%s mode=%s review_only=%s",
         session_id,
         body.analysis_id,
         body.mode.value,
+        body.review_only,
     )
     return SessionCreated(session_id=session_id, first=first)
 
