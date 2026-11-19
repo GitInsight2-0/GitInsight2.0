@@ -214,6 +214,157 @@ def test_same_input_gives_same_choice(tmp_path: Path) -> None:
     assert first.absent_symbol.name == "save_a"
 
 
+# ---- #144: 고르기 규칙 다듬기 ----
+
+
+def test_same_file_name_in_other_package_is_not_an_imported_module(tmp_path: Path) -> None:
+    # 주제는 worker 쪽 misstatement를 import합니다. api 쪽 misstatement.py는 파일 이름만 같습니다.
+    stage2 = "from gitinsight_worker.misstatement import plan_one\n\n\n" + _body(
+        "validate_material"
+    ).replace("v0 = 0", "v0 = plan_one()")
+    files = {
+        "worker/src/gitinsight_worker/stage2.py": stage2,
+        "worker/src/gitinsight_worker/misstatement.py": _body("plan_one")
+        + "\n\n"
+        + _body("plan_other"),
+        "api/src/gitinsight_api/brain/misstatement.py": _body("judge_misstatement"),
+    }
+
+    plan = plan_for(tmp_path, files, "worker/src/gitinsight_worker/stage2.py::validate_material")
+
+    assert plan.absent_symbol is not None
+    assert plan.absent_symbol.name == "plan_other"
+
+
+def test_from_package_import_module_counts_as_imported_module(tmp_path: Path) -> None:
+    service = "from app.brain import judge\n\n\n" + _body("run_turn").replace(
+        "v0 = 0", "v0 = judge.judge_answer()"
+    )
+    files = {
+        "app/brain/service.py": service,
+        "app/brain/judge.py": _body("judge_answer") + "\n\n" + _body("validate_judgment"),
+        # 같은 폴더지만 import하지 않은, 더 긴 함수입니다.
+        "app/brain/planner.py": _body("plan_interview").replace(
+            "    return v0\n", "    v9 = 9\n    v10 = 10\n    return v0\n"
+        ),
+    }
+
+    plan = plan_for(tmp_path, files, "app/brain/service.py::run_turn")
+
+    assert plan.absent_symbol is not None
+    assert plan.absent_symbol.name == "validate_judgment"
+
+
+def test_function_that_calls_the_topic_is_skipped(tmp_path: Path) -> None:
+    # session.ts가 connectGemini를 부릅니다. connectGemini 주제에 startVoiceSession을 고르면 거꾸로입니다.
+    files = {
+        "web/lib/gemini.ts": _ts("connectGemini"),
+        "web/lib/session.ts": 'import { connectGemini } from "./gemini";\n\n'
+        + _ts("startVoiceSession").replace("const a = 1;", "const a = connectGemini();", 1),
+        "web/lib/meter.ts": _ts("measureLevel"),
+    }
+
+    plan = plan_for(tmp_path, files, "web/lib/gemini.ts::connectGemini")
+
+    assert plan.absent_symbol is not None
+    assert plan.absent_symbol.name == "measureLevel"
+
+
+def test_function_passed_together_with_topic_is_skipped(tmp_path: Path) -> None:
+    # 화면이 startVoiceSession(connectGemini)로 넘기고, 안에서는 매개변수 이름(connect)으로 부릅니다.
+    files = {
+        "web/lib/gemini.ts": _ts("connectGemini"),
+        "web/lib/session.ts": _ts("startVoiceSession").replace(
+            "export function startVoiceSession()", "export function startVoiceSession(connect)"
+        ),
+        "web/lib/meter.ts": _ts("measureLevel"),
+        "web/app/screen.ts": "export function wire() {\n  return startVoiceSession(connectGemini);\n}\n",
+    }
+
+    plan = plan_for(tmp_path, files, "web/lib/gemini.ts::connectGemini")
+
+    assert plan.absent_symbol is not None
+    assert plan.absent_symbol.name == "measureLevel"
+
+
+def test_python_functions_nobody_calls_by_name_are_skipped(tmp_path: Path) -> None:
+    files = {
+        "app/main.py": _body("create_app"),
+        # 데코레이터가 붙은 라우트 함수는 프레임워크가 부릅니다.
+        "app/routes.py": "@router.get('/x')\n" + _body("github_callback"),
+        # 아무도 부르지 않는 함수입니다.
+        "app/unused.py": _body("orphan_helper"),
+        "app/auth.py": _body("read_session"),
+        "app/caller.py": "from app.auth import read_session\n\nread_session()\n",
+    }
+    write_repo(tmp_path, files)
+    stage1 = analyze_tree(tmp_path, SHA)
+    target = next(s for s in stage1.symbols if s.name == "create_app")
+
+    plan = MisstatementPlanner(tmp_path, stage1.symbols, stage1.references).plan(target)
+
+    assert plan.absent_symbol is not None
+    assert plan.absent_symbol.name == "read_session"
+
+
+def test_multiline_script_import_is_read(tmp_path: Path) -> None:
+    screen = textwrap.dedent(
+        """\
+        import {
+          postTurn,
+          isAbort,
+        } from "@/lib/voice/api";
+
+        export function runScreen() {
+          const a = postTurn();
+          const b = isAbort();
+          const c = a + b;
+          const d = c * 2;
+          const e = d - 1;
+          const f = e + 3;
+          const g = f * 4;
+          return g;
+        }
+        """
+    )
+    files = {
+        "web/components/screen.ts": screen,
+        "web/lib/voice/api.ts": _ts("postTurn") + _ts("isAbort") + _ts("fetchToken"),
+        # 같은 최상위 폴더지만 import하지 않은, 더 긴 함수입니다.
+        "web/lib/other.ts": _ts("longerHelper").replace(
+            "  return a;", "  const b = 2;\n" * 5 + "  return a;"
+        ),
+    }
+
+    plan = plan_for(tmp_path, files, "web/components/screen.ts::runScreen")
+
+    assert plan.absent_symbol is not None
+    assert plan.absent_symbol.name == "fetchToken"
+
+
+def test_function_already_chosen_for_another_topic_goes_back(tmp_path: Path) -> None:
+    files = {
+        "app/z_one.py": _body("topic_one"),
+        "app/z_two.py": _body("topic_two"),
+        "app/long.py": _body("long_helper").replace(
+            "    return v0\n", "    v9 = 9\n    return v0\n"
+        ),
+        "app/short.py": _body("short_helper"),
+    }
+    write_repo(tmp_path, files)
+    stage1 = analyze_tree(tmp_path, SHA)
+    by_name = {s.name: s for s in stage1.symbols}
+    planner = MisstatementPlanner(tmp_path, stage1.symbols)
+
+    first = planner.plan(by_name["topic_one"]).absent_symbol
+    second = planner.plan(by_name["topic_two"]).absent_symbol
+
+    assert first is not None and second is not None
+    assert first.name == "long_helper"
+    # 같은 거리면 다른 주제에 아직 고르지 않은 함수가 먼저입니다.
+    assert second.name == "short_helper"
+
+
 # ---- 검증 ----
 
 
@@ -303,6 +454,12 @@ def test_inverted_point_maps_index_to_server_point_id(tmp_path: Path) -> None:
 
 # ---- 생성 흐름 ----
 
+# handle과 helper를 부르는 파일을 더한 레포입니다. 참조 수가 1 이상이라 Python 함수도 고를 수 있습니다.
+CALLED_FILES = {
+    **REPO_FILES,
+    "main.py": "from app.handler import handle\nfrom app.util import helper\n\nhandle(None)\nhelper()\n",
+}
+
 _UNTRUSTED = re.compile(r"<untrusted_data [^>]*>.*?</untrusted_data>", re.S)
 _ABSENT = re.compile(r'<untrusted_data kind="absent_function">\n(.*?)\n</untrusted_data>', re.S)
 
@@ -321,7 +478,7 @@ def answer_with_misstatement(_purpose: str, _schema: object, messages: list[Mess
 
 
 async def test_topics_get_misstatements_and_names_stay_in_untrusted_block(tmp_path: Path) -> None:
-    write_repo(tmp_path)
+    write_repo(tmp_path, CALLED_FILES)
     stage1 = analyze_tree(tmp_path, SHA)
     llm = FakeLLM(responder=answer_with_misstatement)
 
@@ -339,7 +496,7 @@ async def test_topics_get_misstatements_and_names_stay_in_untrusted_block(tmp_pa
 
 
 async def test_invalid_misstatement_keeps_topic_without_extra_call(tmp_path: Path) -> None:
-    write_repo(tmp_path)
+    write_repo(tmp_path, CALLED_FILES)
     stage1 = analyze_tree(tmp_path, SHA)
     # 모든 주제가 absent_call인데 함수 이름 없는 틀린 말을 돌려줍니다.
     llm = FakeLLM(responder=lambda *_: FakeStep(material()))
