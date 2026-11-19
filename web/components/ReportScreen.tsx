@@ -12,9 +12,9 @@ import type {
   TopicReport,
   TurnRow,
 } from "@gitinsight/contracts";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { interviewHref } from "@/lib/analyses";
-import GrowthChart from "./GrowthChart";
+import GrowthChart, { MIN_GROWTH_ENTRIES } from "./GrowthChart";
 import {
   ACTION_LABEL,
   CATCH_STATUS_LABEL,
@@ -116,6 +116,33 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
   const unscored = COMPETENCY_ORDER.filter((name) => !scoredNames.has(name));
   const previous = progress ? previousEntry(progress, report.session_id) : null;
   const hinted = afterHintTurnIds(report.turns);
+  const codeMap = report.code_map;
+
+  // 근거 인용문의 "n번째 답변" 링크는 접힌 답변 기록 안을 가리킵니다. 가리키는 곳이 접혀 있으면 펼칩니다 (#132).
+  useEffect(() => {
+    const open = (id: string) => {
+      const el = id ? document.getElementById(id) : null;
+      if (!el) return;
+      for (let d = el.closest("details"); d; d = d.parentElement?.closest("details") ?? null) d.open = true;
+      el.scrollIntoView({ block: "start" });
+    };
+    const fromHash = () => open(decodeURIComponent(window.location.hash.slice(1)));
+    // 같은 링크를 다시 누르면 주소의 #이 그대로라 hashchange가 오지 않습니다. 누를 때 바로 펼칩니다 (#155 리뷰).
+    const onClick = (e: MouseEvent) => {
+      const a = (e.target as Element | null)?.closest?.('a[href^="#"]');
+      if (!a) return;
+      const id = decodeURIComponent((a.getAttribute("href") ?? "").slice(1));
+      // 기본 동작(주소의 # 바꾸기)이 끝난 뒤 펼치고 이동합니다.
+      setTimeout(() => open(id), 0);
+    };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    document.addEventListener("click", onClick);
+    return () => {
+      window.removeEventListener("hashchange", fromHash);
+      document.removeEventListener("click", onClick);
+    };
+  }, []);
 
   return (
     <>
@@ -160,12 +187,6 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
         </section>
       )}
 
-      {progress && <GrowthChart entries={progress} sessionId={report.session_id} />}
-
-      {report.code_map && <CodeMapSection codeMap={report.code_map} topics={report.topics} />}
-
-      {report.misstatement && <MisstatementSection result={report.misstatement} turnNumber={turnNumber} />}
-
       {(report.strengths.length > 0 || report.improvements.length > 0 || report.next_topics.length > 0) && (
         <section aria-label="총평" className={styles.columns}>
           <Bullets title="잘한 점" items={report.strengths} />
@@ -174,33 +195,65 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
         </section>
       )}
 
-      {report.topics.length > 0 && (
-        <section aria-labelledby="topics" className={styles.section}>
-          <h2 id="topics">주제별 내용</h2>
-          <ul className={styles.stack}>
-            {report.topics.map((t, i) => (
-              <TopicCard key={t.topic_id} topic={t} index={i + 1} stuck={stuckQuestions(report.turns, t.topic_id)} />
-            ))}
-          </ul>
-        </section>
-      )}
+      {codeMap && canReviewAgain(codeMap) && <ReviewAgain codeMap={codeMap} />}
 
-      {report.turns.length > 0 && (
-        <section aria-labelledby="turns" className={styles.section}>
-          <h2 id="turns">답변 기록</h2>
-          <ol className={styles.stack}>
-            {report.turns.map((t, i) => (
-              <TurnCard
-                key={t.turn_id}
-                turn={t}
-                index={i + 1}
-                afterHint={hinted.has(t.turn_id)}
-                misstatement={isMisstatementTurn(t, report.misstatement) ? report.misstatement : null}
-              />
-            ))}
-          </ol>
-        </section>
-      )}
+      <div className={styles.folds}>
+        <p className={styles.foldsLead}>자세한 내용은 눌러서 펼쳐 보세요.</p>
+
+        {progress && hasGrowth(progress) && (
+          <Fold title="역량 변화" hint={`면접 ${progress.length}번`}>
+            <GrowthChart entries={progress} sessionId={report.session_id} />
+          </Fold>
+        )}
+
+        {codeMap && (
+          <Fold
+            title="코드 지도"
+            hint={
+              codeMap.key_function_count > 0
+                ? `핵심 함수 ${codeMap.key_function_count}개 중 ${codeMap.explained_count + codeMap.after_hint_count}개 설명`
+                : `질문받은 함수 ${codeMap.entries.length}개`
+            }
+          >
+            <CodeMapSection codeMap={codeMap} topics={report.topics} />
+          </Fold>
+        )}
+
+        {report.misstatement && (
+          <Fold
+            title="일부러 틀린 말 확인"
+            hint={report.misstatement.status ? CATCH_STATUS_LABEL[report.misstatement.status] : "판단 없음"}
+          >
+            <MisstatementSection result={report.misstatement} turnNumber={turnNumber} />
+          </Fold>
+        )}
+
+        {report.topics.length > 0 && (
+          <Fold title="주제별 내용" hint={`주제 ${report.topics.length}개`}>
+            <ul className={styles.stack}>
+              {report.topics.map((t, i) => (
+                <TopicCard key={t.topic_id} topic={t} index={i + 1} stuck={stuckQuestions(report.turns, t.topic_id)} />
+              ))}
+            </ul>
+          </Fold>
+        )}
+
+        {report.turns.length > 0 && (
+          <Fold title="답변 기록" hint={`답변 ${report.turns.length}개`}>
+            <ol className={styles.stack}>
+              {report.turns.map((t, i) => (
+                <TurnCard
+                  key={t.turn_id}
+                  turn={t}
+                  index={i + 1}
+                  afterHint={hinted.has(t.turn_id)}
+                  misstatement={isMisstatementTurn(t, report.misstatement) ? report.misstatement : null}
+                />
+              ))}
+            </ol>
+          </Fold>
+        )}
+      </div>
     </>
   );
 }
@@ -225,6 +278,10 @@ function CompetencyCard({
         <LevelMeter level={score.level} />
       </div>
       {compared && <Change now={score.level} before={previousLevel} />}
+      {/* 근거가 없으면 빈 칸이 펼쳐지지 않게 접기를 두지 않습니다 (#155 리뷰) */}
+      {score.evidence.length > 0 && (
+      <details className={styles.evidenceFold}>
+        <summary>근거가 된 답변 {score.evidence.length}개 보기</summary>
       <ul className={styles.evidence}>
         {score.evidence.map((e, i) => {
           const n = turnNumber.get(e.turn_id);
@@ -239,7 +296,50 @@ function CompetencyCard({
           );
         })}
       </ul>
+      </details>
+      )}
     </li>
+  );
+}
+
+/**
+ * 접어 두는 세부 내용 (#132). 제목 옆에 한 줄 요약을 보여 주고, 누르면 펼칩니다.
+ * 안쪽 구역의 제목(h2)은 이 제목과 겹쳐서 CSS로 감춥니다 (aria-labelledby로는 그대로 쓰입니다).
+ */
+function Fold({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
+  return (
+    <details className={styles.fold}>
+      <summary>
+        <span className={styles.foldTitle}>{title}</span>
+        <span className={styles.foldHint}>{hint}</span>
+        <span className={styles.foldArrow} aria-hidden="true" />
+      </summary>
+      <div className={styles.foldBody}>{children}</div>
+    </details>
+  );
+}
+
+/** 역량 변화 그래프를 그릴 만한 기록이 있는지 (GrowthChart가 아무것도 그리지 않을 때 빈 접기를 두지 않게) */
+function hasGrowth(entries: ProgressEntry[]): boolean {
+  return entries.length >= MIN_GROWTH_ENTRIES && entries.some((e) => e.competencies.length > 0);
+}
+
+/** 다시 볼 질문이 있는지. 지난 면접에서 부족했던 함수가 남아 있어도 다시 볼 수 있습니다 */
+function canReviewAgain(codeMap: CodeMap): boolean {
+  return codeMap.entries.some((e) => e.status !== "explained") || codeMap.stuck_count + codeMap.after_hint_count > 0;
+}
+
+/** 다시 보기 면접 버튼. 코드 지도를 접어 두어도 보이게 총평 아래에 둡니다 */
+function ReviewAgain({ codeMap }: { codeMap: CodeMap }) {
+  return (
+    <div className={styles.mapAgain}>
+      <a className={styles.secondary} href={interviewHref(codeMap.analysis_id, codeMap.repo_full_name, { review: true })}>
+        부족했던 질문만 다시 면접 보기
+      </a>
+      <p className={styles.muted}>
+        이 레포로 본 면접에서 막혔거나 힌트를 받고 답한 질문만 다시 물어봐요. 힌트 없이 설명하면 다음 다시 보기에서 빠져요.
+      </p>
+    </div>
   );
 }
 
@@ -293,8 +393,6 @@ function CodeMapSection({ codeMap, topics }: { codeMap: CodeMap; topics: TopicRe
   // 다시 볼 질문: 이번 면접에서 막혔거나 힌트를 받고 설명한 함수입니다. 질문 문장은 그 주제의 질문에서 가져옵니다.
   const questionOf = new Map(topics.map((t) => [t.topic_id, t.question]));
   const weak = codeMap.entries.filter((entry) => entry.status !== "explained");
-  // 지난 면접에서 부족했던 함수가 남아 있어도 다시 볼 수 있습니다 (숫자는 이 레포로 본 면접을 모두 합친 값).
-  const canReview = weak.length > 0 || codeMap.stuck_count + codeMap.after_hint_count > 0;
   const total = codeMap.key_function_count;
   const explained = codeMap.explained_count + codeMap.after_hint_count;
   const notAsked = Math.max(0, total - explained - codeMap.stuck_count);
@@ -382,19 +480,6 @@ function CodeMapSection({ codeMap, topics }: { codeMap: CodeMap; topics: TopicRe
         )}
       </div>
 
-      {canReview && (
-        <div className={styles.mapAgain}>
-          <a
-            className={styles.secondary}
-            href={interviewHref(codeMap.analysis_id, codeMap.repo_full_name, { review: true })}
-          >
-            부족했던 질문만 다시 면접 보기
-          </a>
-          <p className={styles.muted}>
-            이 레포로 본 면접에서 막혔거나 힌트를 받고 답한 질문만 다시 물어봐요. 힌트 없이 설명하면 다음 다시 보기에서 빠져요.
-          </p>
-        </div>
-      )}
     </section>
   );
 }
