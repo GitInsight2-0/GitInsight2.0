@@ -52,11 +52,11 @@ export const STATUS_TEXT: Record<AnalysisStatus, string> = {
   failed: "분석하지 못했어요",
 };
 
-/** 지원하는 언어 안내. 워커는 지금 Python 심볼만 뽑습니다 (#9). 다른 언어는 해커톤 뒤 (#72) */
-export const SUPPORTED_LANGUAGE_NOTE = "지금은 Python 코드가 있는 레포만 분석할 수 있어요.";
+/** 지원하는 언어 안내. 워커는 Python(#9)과 TypeScript·JavaScript(#72) 심볼을 뽑습니다 */
+export const SUPPORTED_LANGUAGE_NOTE = "Python, TypeScript, JavaScript 코드가 있는 레포를 분석할 수 있어요.";
 
 /**
- * Python 코드가 없어 분석하지 못했을 때 AnalysisState.error에 오는 예외 이름 (#70, #71).
+ * 지원하는 언어의 코드가 없어 분석하지 못했을 때 AnalysisState.error에 오는 예외 이름 (#70, #71).
  * 서버는 예외 종류 이름만 보내므로 이 이름으로 문구를 고릅니다. 워커의 이름이 바뀌면 여기도 바꿉니다.
  */
 export const UNSUPPORTED_CODE_ERROR = "NoSupportedCodeError";

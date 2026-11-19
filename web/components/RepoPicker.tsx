@@ -323,7 +323,7 @@ function JobView({
       {failed &&
         (unsupported ? (
           <p role="alert" className={styles.error}>
-            이 레포에서 Python 코드를 찾지 못했어요. 다른 레포를 골라 주세요.
+            이 레포에서 분석할 수 있는 코드(Python, TypeScript, JavaScript)를 찾지 못했어요. 다른 레포를 골라 주세요.
           </p>
         ) : lost ? (
           <p role="alert" className={styles.error}>
