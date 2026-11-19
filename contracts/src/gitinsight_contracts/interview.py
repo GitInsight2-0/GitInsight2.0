@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import Field, model_validator
 
 from gitinsight_contracts.base import Contract, count_sentences
-from gitinsight_contracts.common import SymbolRef
+from gitinsight_contracts.common import LineSpan, SymbolRef
 
 MAX_UTTERANCE_SENTENCES = 2
 
@@ -49,7 +49,10 @@ class BrainReply(Contract):
     turn_id: UUID | None
     action: Action
     utterance: Annotated[str, Field(min_length=1, max_length=400)]
+    # 화면에 띄울 코드입니다. 늘 심볼 전체이고, 줄 범위를 좁혀 담지 않습니다.
     highlight: SymbolRef | None
+    # highlight 안에서 이 발화와 관계있는 줄입니다 (#156). 없으면 highlight 전체를 봅니다.
+    focus: LineSpan | None = None
     topic_id: str | None
     depth: Annotated[int, Field(ge=0)]
     remaining_sec: Annotated[int, Field(ge=0)]
@@ -62,6 +65,10 @@ class BrainReply(Contract):
             raise ValueError(
                 f"utterance는 {MAX_UTTERANCE_SENTENCES}문장 이내여야 합니다 (현재 {sentences}문장)"
             )
+        if self.focus is not None and (
+            self.highlight is None or not self.focus.within(self.highlight)
+        ):
+            raise ValueError("focus는 highlight의 줄 범위 안에 있어야 합니다")
         return self
 
 

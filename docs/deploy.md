@@ -68,6 +68,7 @@
 | 변수 | 값 | 비고 |
 |---|---|---|
 | `API_ORIGIN` | `https://<Railway API 주소>` | 끝에 `/` 없이. **빌드할 때 정해지므로** 바꾸면 다시 배포해야 함 |
+| `NEXT_PUBLIC_GITHUB_APP_SLUG` | 넣지 않음 | 첫 화면의 "GitHub에서 레포 연결하기" 버튼이 갈 App 이름 (#150). 비우면 코드 기본값 `gitinsight-sclp`를 씀 (#159). 다른 App으로 시험할 때만 넣고, 빌드할 때 정해지므로 바꾸면 다시 배포 |
 | `GEMINI_API_KEY` | 결제 등록 키 | 음성 토큰(`/voice-token`) |
 | `LAB_ENABLED` | 넣지 않음 | 넣지 않으면 실험 화면(`/lab/*`)이 닫히고 음성 토큰에 로그인이 필요 |
 

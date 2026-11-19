@@ -227,7 +227,7 @@ export default function InterviewScreen({
   useEffect(() => {
     const box = threadRef.current;
     if (box) box.scrollTop = box.scrollHeight;
-  }, [history.length, lastAnswer, thinking, busy, aiSpeaking, report.kind]);
+  }, [history.length, lastAnswer, thinking, busy, aiSpeaking]);
 
   async function requestReport() {
     const id = sessionRef.current;
@@ -709,6 +709,31 @@ export default function InterviewScreen({
   const sendingText = mode === "text" && busy && draft.trim() ? draft.trim() : null;
   const lastInterviewer = history.reduce((at, h, i) => (h.who === "interviewer" ? i : at), -1);
 
+  // 면접이 끝나면 대화 칸과 코드 뷰어를 치우고 리포트 준비 화면만 보여 줍니다 (#132).
+  // 음성으로 끝났으면 면접관의 마지막 인사는 이 화면에서도 끝까지 들립니다.
+  if (done) {
+    return (
+      <div className={styles.page}>
+        <header className={styles.topbar}>
+          <a className={styles.brand} href="/">
+            <Logo size={22} />
+            GitInsight
+          </a>
+        </header>
+        <main className={styles.introWrap}>
+          <EndScreen
+            report={report}
+            answers={history.filter((h) => h.who === "me").length}
+            history={history}
+            href={reportHref}
+            onRetry={() => void requestReport()}
+            needLogin={needLogin}
+          />
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.page}>
       <header className={styles.topbar}>
@@ -874,7 +899,6 @@ export default function InterviewScreen({
               </div>
             )}
 
-            {done && <ReportStatus report={report} href={reportHref} onRetry={() => void requestReport()} />}
           </div>
 
           {!done && (
@@ -968,39 +992,105 @@ function LoginLink() {
 }
 
 /** 면접이 끝난 뒤 리포트가 어디까지 됐는지 보여 줍니다 */
-function ReportStatus({
+/**
+ * 면접이 끝난 뒤 리포트를 기다리는 화면 (#132).
+ * 서버는 리포트 진행률을 주지 않아서, 지난 시간과 하는 일을 보여 줘 멈춘 게 아니라는 것을 알립니다.
+ */
+function EndScreen({
   report,
+  answers,
+  history,
   href,
   onRetry,
+  needLogin,
 }: {
   report: ReportState;
+  /** 서버로 보낸 답변 수 */
+  answers: number;
+  history: HistoryItem[];
   /** 리포트 화면 주소 (/reports/{id}) */
   href: (reportId: string) => string;
   onRetry: () => void;
+  needLogin: boolean;
 }) {
+  const making = report.kind === "idle" || report.kind === "making";
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!making) return;
+    const t0 = Date.now();
+    setElapsed(0);
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [making]);
+
   return (
-    <div role="status" aria-live="polite" className={styles.reportBox}>
-      <p className={styles.done}>수고하셨습니다.</p>
-      {(report.kind === "idle" || report.kind === "making") && (
-        <p className={styles.reportNote}>리포트를 만들고 있어요. 길면 1분쯤 걸릴 수 있어요.</p>
+    <section className={`${styles.intro} ${styles.endCard}`} aria-labelledby="end-title">
+      <Logo size={52} className={styles.introMark} />
+      <h1 id="end-title">면접이 끝났어요</h1>
+      <p>수고하셨어요. {answers > 0 ? `답변 ${answers}개를 바탕으로 리포트를 만들어요.` : "리포트를 만들어요."}</p>
+
+      <div role="status" aria-live="polite" className={styles.endStatus}>
+        {making && (
+          <>
+            <div className={styles.endRow}>
+              <span className={styles.spinner} aria-hidden="true" />
+              <b>리포트를 만들고 있어요</b>
+              <span className={styles.elapsed}>{elapsed}초</span>
+            </div>
+            <div className={styles.endTrack} aria-hidden="true">
+              <span />
+            </div>
+            <p className={styles.reportNote}>
+              답변을 다시 읽고 역량별 수준과 근거가 된 말을 정리하고 있어요. 길면 1분쯤 걸려요. 이 화면을 닫지 말고 기다려 주세요.
+            </p>
+          </>
+        )}
+        {report.kind === "ready" && (
+          <>
+            <div className={styles.endRow}>
+              <span className={styles.check} aria-hidden="true">
+                ✓
+              </span>
+              <b>리포트가 준비됐어요</b>
+            </div>
+            <a className={styles.primary} href={href(report.reportId)}>
+              리포트 보기
+            </a>
+          </>
+        )}
+        {report.kind === "unavailable" && (
+          <p className={styles.reportNote}>실험용 서버(LAB_ENABLED)에서는 리포트를 만들지 않아요.</p>
+        )}
+        {report.kind === "error" && (
+          <>
+            <p className={styles.error}>리포트를 만들지 못했어요. ({report.message})</p>
+            {needLogin ? (
+              <LoginLink />
+            ) : (
+              <button type="button" className={styles.secondary} onClick={onRetry}>
+                다시 시도
+              </button>
+            )}
+          </>
+        )}
+      </div>
+
+      {history.some((h) => h.who !== "system") && (
+        <details className={styles.endLog}>
+          <summary>대화 기록 보기</summary>
+          <ol>
+            {history
+              .filter((h) => h.who !== "system")
+              .map((h, i) => (
+                <li key={i} className={h.who === "me" ? styles.endMe : undefined}>
+                  <b>{h.who === "me" ? "나" : "면접관"}</b>
+                  {h.text}
+                </li>
+              ))}
+          </ol>
+        </details>
       )}
-      {report.kind === "ready" && (
-        <a className={styles.primary} href={href(report.reportId)}>
-          리포트 보기
-        </a>
-      )}
-      {report.kind === "unavailable" && (
-        <p className={styles.reportNote}>실험용 서버(LAB_ENABLED)에서는 리포트를 만들지 않아요.</p>
-      )}
-      {report.kind === "error" && (
-        <>
-          <p className={styles.error}>리포트를 만들지 못했어요. ({report.message})</p>
-          <button type="button" className={styles.secondary} onClick={onRetry}>
-            다시 시도
-          </button>
-        </>
-      )}
-    </div>
+    </section>
   );
 }
 

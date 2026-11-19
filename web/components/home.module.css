@@ -203,6 +203,20 @@
   word-break: keep-all;
 }
 
+.small {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--gi-muted);
+  word-break: keep-all;
+}
+
+.textLink {
+  color: var(--gi-accent-text);
+  font-weight: 600;
+  text-underline-offset: 3px;
+}
+
 .notice {
   margin: 0;
   width: min(560px, 100%);
