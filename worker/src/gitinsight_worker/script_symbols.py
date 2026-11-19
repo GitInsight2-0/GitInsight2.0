@@ -225,7 +225,7 @@ def identifier_lines(root: Node) -> Iterator[tuple[str, int]]:
 
 
 def extract_script(source: bytes, path: str, commit_sha: str) -> ExtractedFile:
-    """확장자에 맞는 문법으로 읽습니다. 모르는 확장자는 JavaScript로 읽습니다."""
+    """함수, 메서드, 클래스의 SymbolRef와 정의 수를 뽑습니다. 문법은 `parse_script`가 고릅니다."""
     tree = parse_script(source, path)
     symbols: list[SymbolRef] = []
     seen: set[str] = set()
