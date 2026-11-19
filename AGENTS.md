@@ -105,7 +105,7 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 분석 기록과 결과는 `analyses` 테이블에 둡니다(`gitinsight_api.analyses.postgres.PostgresAnalysisStore`, 규칙은 `analyses/store.py`의 `AnalysisStore`).
 `DATABASE_URL`이 있고 `LAB_ENABLED=false`이면 면접 두뇌와 리포트도 샘플 파일 대신 이 테이블의 분석 결과를 읽습니다(`analyses/source.py`의 `StoredAnalysisSource`).
 이때 `POST /api/sessions`는 분석을 요청한 본인만 쓸 수 있고, 다른 사람의 분석과 없는 분석은 같은 404입니다. 샘플 분석도 `scripts/seed_demo_analysis.py`로 넣은 계정만 씁니다.
-분석 결과를 읽다가 DB 오류가 나면 503을 돌려줍니다.
+분석 결과를 읽다가 DB에 연결하지 못하면 503을 돌려줍니다.
 분석 요청은 `POST /api/analyses`(본문 `repo_id`), 진행 상태는 `GET /api/analyses/{id}`입니다(`routes/analyses.py`). 상태는 요청한 본인만 보고, 다른 사람의 분석은 404입니다.
 서버는 로그인 쿠키의 GitHub 사용자 토큰으로 레포 이름과 기본 브랜치의 최신 커밋을 확인하고(`github_repos.py`), 같은 토큰으로 레포를 내려받습니다. 토큰은 분석 작업의 메모리에만 있고, git에는 환경 변수로만 넘깁니다.
 분석 실행기는 워커 패키지에 있어서 `gitinsight_worker.server:app_factory`로 띄울 때만 붙습니다. `DATABASE_URL`이 없거나 실험 모드이거나 `gitinsight_api.main:app_factory`로 띄우면 분석 요청 API는 503입니다.
@@ -119,6 +119,8 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 결과는 `Report.misstatement`에만 적고 역량 점수와 코드 지도에는 쓰지 않습니다. LLM 없이 진행하는 면접과 다시 보기 면접에서는 하지 않고, `BRAIN_MISSTATEMENT=false`로 끌 수 있습니다.
 틀린 말은 2단계 분석이 만듭니다(#142). 주제 파일에 이름이 한 번도 나오지 않는 레포 함수를 "직접 부르죠?"라고 말하고(absent_call), 고를 함수가 없으면 요점 하나를 반대로 말합니다(inverted_point). 틀린 말만 검증에 실패하면 주제는 그대로 두고 틀린 말만 비웁니다.
 세션 API가 DB에 연결하지 못하면 503을 돌려줍니다. 턴은 `turn_id`로 한 번만 처리하므로 같은 요청을 다시 보내면 됩니다.
+연결이 아닌 DB 오류(테이블 없음, 쿼리와 스키마 불일치)는 다시 보내도 같으므로 사유가 있는 500(`database_error`)입니다 (#101). 로그에는 예외 종류만 남깁니다.
+서버는 시작할 때 DB의 마이그레이션 번호를 코드의 마지막 번호와 비교해, 다르면 `schema_not_migrated`·`schema_outdated` 오류 로그를 남깁니다(`schema_check.py`). 마이그레이션을 직접 돌리지는 않고, 서버는 그대로 뜹니다.
 DB 연결과 테이블 정의는 `api/src/gitinsight_api/db.py`, `tables.py`, 마이그레이션은 `api/migrations/versions/`에 있습니다. 새 테이블은 두 곳을 같이 바꾸고 `alembic check`로 맞는지 확인합니다.
 기본 `pytest`는 DB 없이 돕니다(`api/tests/conftest.py`가 `DATABASE_URL`을 비웁니다). 실제 Postgres 테스트는 `postgres` 표시로 따로 돌립니다. 공용 픽스처 `test_database_url`, `pg_engine`(마이그레이션 적용 후 모든 테이블을 비움)도 `conftest.py`에 있습니다.
 서버는 `--loop gitinsight_api.event_loop:server_loop_factory`로 띄웁니다. psycopg 3 비동기 연결이 Windows 기본 루프(Proactor)를 지원하지 않아 Windows에서는 Selector 루프를 씁니다(다른 OS는 uvicorn 기본값). 테스트는 `conftest.py`가 같은 루프를 씁니다. 이 옵션 없이 Windows에서 `DATABASE_URL`을 넣으면 `/api/metrics`가 계속 503입니다.

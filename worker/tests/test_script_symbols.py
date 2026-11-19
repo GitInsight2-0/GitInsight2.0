@@ -3,7 +3,7 @@
 import textwrap
 
 from gitinsight_contracts.common import SymbolKind
-from gitinsight_worker.script_symbols import extract_script
+from gitinsight_worker.script_symbols import extract_script, identifier_lines, parse_script
 from gitinsight_worker.symbols import MAX_SYMBOL_ID_LENGTH
 
 SHA = "a" * 40
@@ -372,3 +372,102 @@ def test_very_deep_expression_does_not_hit_recursion_limit() -> None:
     source = ("const x = " + " + ".join(["1"] * 5000) + ";\n\nfunction f() {}\n").encode()
 
     assert "a.ts::f" in by_id(source, "a.ts")
+
+
+def names(source: str, path: str) -> list[tuple[str, int]]:
+    return list(identifier_lines(parse_script(textwrap.dedent(source).encode(), path).root_node))
+
+
+def test_identifiers_skip_definition_names_and_imports() -> None:
+    source = """\
+import { helper } from "./helper";
+        export { reexported } from "./other";
+
+        export function top(repo: Repo): Item[] {
+          const inner = () => helper(repo);
+          return repo.all().map(inner);
+        }
+
+        class Service {
+          handle = (event: Event) => this.save(event);
+          save(event: Event) {
+            return store.put(event);
+          }
+        }
+
+        exports.legacy = function () {
+          return top(null);
+        };
+        """
+
+    assert names(source, "a.ts") == [
+        ("repo", 4),
+        ("Repo", 4),
+        ("Item", 4),
+        ("helper", 5),
+        ("repo", 5),
+        ("repo", 6),
+        ("all", 6),
+        ("map", 6),
+        ("inner", 6),
+        ("event", 10),
+        ("Event", 10),
+        ("save", 10),
+        ("event", 10),
+        ("event", 11),
+        ("Event", 11),
+        ("store", 12),
+        ("put", 12),
+        ("event", 12),
+        ("exports", 16),
+        ("top", 17),
+    ]
+
+
+def test_identifiers_include_jsx_destructuring_and_private_names() -> None:
+    source = """\
+function View({ items }) {
+          const { first, rest: others } = split(items);
+          return <List.Item value={first} {...others} />;
+        }
+
+        class Counter {
+          #count = 0;
+          bump() {
+            return this.#count++;
+          }
+        }
+        """
+
+    found = names(source, "a.tsx")
+
+    assert ("items", 1) in found
+    assert ("first", 2) in found
+    assert ("rest", 2) in found
+    assert ("split", 2) in found
+    assert ("List", 3) in found
+    assert ("Item", 3) in found
+    assert ("value", 3) in found
+    assert ("#count", 7) in found
+    assert ("#count", 9) in found
+    assert "View" not in {name for name, _ in found}
+    assert "bump" not in {name for name, _ in found}
+
+
+def test_identifiers_skip_labels_and_read_by_suffix() -> None:
+    js = """\
+outer: for (const x of xs) {
+          if (check(x)) break outer;
+        }
+        """
+
+    assert names(js, "a.js") == [("x", 1), ("xs", 1), ("check", 2), ("x", 2)]
+    # .ts 문법은 `<T>x` 형변환을 읽고, 같은 소스를 .tsx로 읽으면 JSX로 봅니다.
+    assert ("T", 1) in names("const y = <T>value;\n", "a.ts")
+
+
+def test_identifiers_handle_deep_expression() -> None:
+    source = "const x = " + " + ".join(["n"] * 5000) + ";\n"
+
+    # 함수가 아닌 값을 담은 변수 이름(x)은 Python처럼 식별자로 셉니다.
+    assert len(names(source, "a.ts")) == 5001
