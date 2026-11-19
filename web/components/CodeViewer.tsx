@@ -7,6 +7,20 @@ import styles from "./interview.module.css";
 
 /** 강조 범위 앞뒤로 보여 줄 줄 수 */
 const CONTEXT_LINES = 4;
+/**
+ * 강조 범위가 이보다 길면 정의 줄만 진하게, 몸통은 옅게 칠합니다 (#157).
+ * 서버는 심볼 전체를 주므로 긴 함수는 100줄 넘게 덮여 어디를 보라는 건지 알기 어렵습니다.
+ */
+const LONG_RANGE = 15;
+
+const KIND_LABEL: Record<SymbolRef["kind"], string> = {
+  function: "함수",
+  method: "메서드",
+  class: "클래스",
+};
+
+/** 강조 범위의 줄 수 */
+const rangeLength = (t: SymbolRef) => t.end_line - t.start_line + 1;
 
 type State =
   | { kind: "idle" }
@@ -86,9 +100,16 @@ export default function CodeViewer({
 
   const from = Math.max(1, target.start_line - CONTEXT_LINES);
   const to = Math.min(state.lines.length, target.end_line + CONTEXT_LINES);
-  const rows: { no: number; text: string; hit: boolean }[] = [];
+  const long = rangeLength(target) > LONG_RANGE;
+  /** head: 진하게 칠할 줄, body: 긴 범위의 몸통(옅게), null: 범위 밖 */
+  const rows: { no: number; text: string; hit: "head" | "body" | null }[] = [];
   for (let no = from; no <= to; no++) {
-    rows.push({ no, text: state.lines[no - 1] ?? "", hit: no >= target.start_line && no <= target.end_line });
+    const inRange = no >= target.start_line && no <= target.end_line;
+    rows.push({
+      no,
+      text: state.lines[no - 1] ?? "",
+      hit: !inRange ? null : long && no !== target.start_line ? "body" : "head",
+    });
   }
   const outOfRange = target.end_line > state.lines.length;
 
@@ -104,7 +125,13 @@ export default function CodeViewer({
           <div
             key={r.no}
             ref={r.no === target.start_line ? firstLineRef : undefined}
-            className={r.hit ? `${styles.row} ${styles.rowHit}` : styles.row}
+            className={
+              r.hit === "head"
+                ? `${styles.row} ${styles.rowHit}`
+                : r.hit === "body"
+                  ? `${styles.row} ${styles.rowBody}`
+                  : styles.row
+            }
           >
             <span className={styles.lineNo}>{r.no}</span>
             <span className={styles.lineText}>{r.text}</span>
@@ -127,6 +154,9 @@ function Panel({ target, status, children }: { target: SymbolRef | null; status:
               {target.start_line}–{target.end_line}줄
             </span>
             <span className={styles.codeName}>{target.name}</span>
+            <span className={styles.codeSpan}>
+              {KIND_LABEL[target.kind]} 전체 {rangeLength(target)}줄
+            </span>
           </div>
         )}
       </div>

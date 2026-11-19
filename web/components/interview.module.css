@@ -591,6 +591,15 @@
   color: var(--gi-muted);
 }
 
+.codeSpan {
+  padding: 1px 8px;
+  border: 1px solid var(--gi-line-strong);
+  border-radius: var(--gi-radius-pill);
+  font-family: var(--gi-font-sans);
+  font-size: 11.5px;
+  color: var(--gi-muted);
+}
+
 /* 화면에는 보이지 않고 화면 낭독기만 읽는 글 */
 .srOnly {
   position: absolute;
@@ -659,6 +668,12 @@
 
 .rowHit .lineNo {
   color: var(--gi-accent-text);
+}
+
+/* 긴 강조 범위의 몸통 (#157). 범위 안이라는 것만 왼쪽 선으로 알리고 바탕은 아주 옅게 칠합니다 */
+.rowBody {
+  background: var(--gi-accent-softest);
+  box-shadow: inset 2px 0 0 rgba(240, 100, 24, 0.45);
 }
 
 .lineText {
