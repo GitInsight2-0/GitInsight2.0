@@ -57,8 +57,13 @@ def material(
     related: list[str] | None = None,
     followup_symbol: str | None = None,
     misstatement: MisstatementDraft | None = None,
+    focus_ids: list[str | None] | None = None,
 ) -> TopicMaterial:
-    """검증을 통과하는 LLM 출력입니다. 인자로 한 군데씩 바꿔 실패 경우를 만듭니다."""
+    """검증을 통과하는 LLM 출력입니다. 인자로 한 군데씩 바꿔 실패 경우를 만듭니다.
+
+    focus_ids는 요점 순서대로 고른 강조 범위 후보 id입니다. 주지 않으면 모두 null입니다.
+    """
+    ids = focus_ids or []
     return TopicMaterial(
         title=title,
         difficulty=1,
@@ -66,7 +71,11 @@ def material(
         base_question=base_question,
         question_intent=question_intent,
         expected_points=[
-            PointDraft(text=f"요점 {i}", probe_question=f"요점 {i}은 어떻게 처리되나요?")
+            PointDraft(
+                text=f"요점 {i}",
+                probe_question=f"요점 {i}은 어떻게 처리되나요?",
+                focus_id=ids[i - 1] if i <= len(ids) else None,
+            )
             for i in range(1, points + 1)
         ],
         prepared_followups=[

@@ -32,7 +32,7 @@ from pathlib import PurePosixPath
 
 import tree_sitter_javascript
 import tree_sitter_typescript
-from tree_sitter import Language, Node, Parser
+from tree_sitter import Language, Node, Parser, Tree
 
 from gitinsight_contracts.common import SymbolKind, SymbolRef
 from gitinsight_worker.symbols import MAX_SYMBOL_ID_LENGTH, Container, ExtractedFile, line_range
@@ -161,10 +161,15 @@ def _start_line(node: Node) -> int:
     return node.start_point.row + 1
 
 
-def extract_script(source: bytes, path: str, commit_sha: str) -> ExtractedFile:
-    """확장자에 맞는 문법으로 읽습니다. 모르는 확장자는 JavaScript로 읽습니다."""
+def parse_script(source: bytes, path: str) -> Tree:
+    """확장자에 맞는 문법으로 읽습니다. 모르는 확장자는 JavaScript로 읽습니다. 강조 범위 후보(focus.py)도 씁니다."""
     language = _LANGUAGE_BY_SUFFIX.get(PurePosixPath(path).suffix.lower(), _JAVASCRIPT)
-    tree = Parser(language).parse(source)
+    return Parser(language).parse(source)
+
+
+def extract_script(source: bytes, path: str, commit_sha: str) -> ExtractedFile:
+    """함수, 메서드, 클래스의 SymbolRef와 정의 수를 뽑습니다."""
+    tree = parse_script(source, path)
     symbols: list[SymbolRef] = []
     seen: set[str] = set()
     # 내보낸 최상위 함수 이름입니다. 이 함수 바로 안의 함수만 중첩 정의 중에서 내보냅니다.

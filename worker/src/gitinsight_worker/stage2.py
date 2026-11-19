@@ -10,13 +10,15 @@
 - 면접관이 일부러 하는 틀린 말(#133, #142)도 같은 요청에서 받습니다. 방식과 부른다고 말할 함수는 서버가 정합니다
   (misstatement.py). 틀린 말만 검증에 실패하면 다시 요청하지 않고 틀린 말만 비운 채 주제를 씁니다.
   틀린 말 때문에 주제를 잃거나 호출이 늘지 않게 하기 위해서입니다.
+- 요점마다 강조할 범위(#156)도 같은 요청에서 받습니다. 범위 후보와 줄 번호는 서버가 뽑고(focus.py),
+  LLM은 후보 id만 고릅니다. 모르는 id나 null이면 그 요점은 범위 없이 두고, 다시 요청하지 않습니다.
 """
 
 import asyncio
 import json
 import logging
 import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -38,6 +40,7 @@ from gitinsight_contracts.base import LLMOutput, count_sentences
 from gitinsight_contracts.common import SymbolRef
 from gitinsight_worker.candidates import Candidate, has_enough_logic, select_candidates
 from gitinsight_worker.definitions import external_definitions_text, top_level_index
+from gitinsight_worker.focus import FocusCandidate, focus_candidates
 from gitinsight_worker.languages import PYTHON, language_of
 from gitinsight_worker.misstatement import MisstatementPlan, MisstatementPlanner
 from gitinsight_worker.stage1 import Stage1Result
@@ -98,6 +101,7 @@ TOPIC_SYSTEM_PROMPT = f"""당신은 한국어 기술 모의면접의 질문 재�
 - 이 요점도 다른 요점처럼 좋은 답변이 말해야 할 내용으로 씁니다. 예: "레포 안에 이 코드를 부르는 곳이 없다는 것을 알고, 어디에 연결하려던 것인지 말한다". "~확인 필요", "~설명"처럼 과제나 메모로 쓰지 않습니다.
 - 이 사실을 묻는 질문은 코드가 어딘가에서 불린다고 전제하지 않습니다. 예: "레포 안에서 부르는 곳을 찾지 못했는데, 지금 실제로 쓰이고 있나요?". "쓰이지 않는다", "0곳으로 확인된다"처럼 단정하지 말고 "부르는 곳을 찾지 못했다"처럼 씁니다.
 - 각 요점의 probe_question은 지원자가 그 요점을 빠뜨렸을 때 그대로 묻는 질문입니다. 요점의 답을 질문에 넣지 않습니다.
+- 각 요점의 focus_id는 그 요점이 가리키는 코드 부분입니다. focus_candidates 목록에서 그 부분을 담은 후보의 id를 고릅니다. 요점이 코드 전체에 대한 것이거나, 맞는 후보가 없거나, focus_candidates가 없으면 null로 둡니다. 목록에 없는 id는 쓰지 않습니다.
 - prepared_followups는 1~{MAX_FOLLOWUPS}개의 꼬리질문입니다. 특정 관련 심볼을 보여 주며 물을 때만 symbol_id에 related_symbols의 symbol_id를 쓰고, 아니면 null로 둡니다.
 - related_symbol_ids에는 related_symbols 중 이 주제와 관련 깊은 것을 최대 {MAX_RELATED}개 고릅니다. 목록에 없는 ID는 쓰지 않습니다.
 - difficulty는 base_question이 묻는 수준입니다: 1(무엇을 어떤 순서로 하는지), 2(왜 이렇게 설계했는지, 다른 방법과 비교), 3(실패, 예외, 부하 상황에서 어떻게 되는지).
@@ -119,6 +123,8 @@ misstatement 규칙 (면접관이 확인을 위해 일부러 하는 틀린 말):
 class PointDraft(LLMOutput):
     text: str
     probe_question: str
+    # 이 요점이 가리키는 강조 범위 후보 id입니다(focus_candidates의 b1, b2, ...). 없으면 null입니다 (#156).
+    focus_id: str | None
 
 
 class FollowupDraft(LLMOutput):
@@ -241,6 +247,19 @@ def read_readme(root: Path) -> str:
     return ""
 
 
+def visible_focus(root: Path, candidate: Candidate, code: str) -> list[FocusCandidate]:
+    """LLM에 보낸 코드 안에서 시작하는 강조 범위 후보입니다. 코드가 길어 잘렸으면 잘린 뒤의 후보는 뺍니다."""
+    symbol = candidate.symbol
+    try:
+        found = focus_candidates((root / symbol.path).read_bytes(), symbol)
+    except OSError:
+        return []
+    # 잘린 표시 줄을 빼고, 보낸 코드의 마지막 줄 번호를 셉니다.
+    sent = code.count("\n") + 1 - (1 if len(code) > MAX_CODE_CHARS else 0)
+    last_visible = symbol.start_line + sent - 1
+    return [f for f in found if f.start_line <= last_visible]
+
+
 # ---- 프롬프트 ----
 
 
@@ -274,6 +293,7 @@ def build_topic_messages(
     references: Mapping[str, int] | None = None,
     external: str = "",
     plan: MisstatementPlan | None = None,
+    focus: list[FocusCandidate] | None = None,
 ) -> list[Message]:
     symbol = candidate.symbol
     target = {"symbol_id": symbol.symbol_id, "name": symbol.name, "kind": symbol.kind.value}
@@ -290,6 +310,13 @@ def build_topic_messages(
         "관련 심볼 목록입니다. related_symbol_ids와 symbol_id는 이 안에서만 고르세요.",
         untrusted_block("related_symbols", json.dumps(related, ensure_ascii=False)),
     ]
+    if focus:
+        # 후보의 첫 줄은 레포 코드라 블록 안에만 넣습니다. 줄 번호는 LLM에 보여 주지 않습니다.
+        listed = [{"id": f.focus_id, "first_line": f.head} for f in focus]
+        parts += [
+            "요점이 가리키는 부분을 고를 후보입니다. focus_id는 이 안에서만 고르세요. 각 후보는 target_code 안의 한 부분이고 first_line은 그 첫 줄입니다.",
+            untrusted_block("focus_candidates", json.dumps(listed, ensure_ascii=False)),
+        ]
     facts = reference_facts(candidate, references or {})
     if facts is not None:
         parts.append(facts)
@@ -491,6 +518,52 @@ def attach_misstatement(material: TopicMaterial, topic: Topic, plan: Misstatemen
         ) from None
 
 
+def point_focus(
+    material: TopicMaterial, topic: Topic, focus: Iterable[FocusCandidate]
+) -> dict[str, FocusCandidate]:
+    """요점(point_id)마다 LLM이 고른 강조 범위 후보입니다. 모르는 id와 null은 빼서, 그 요점은 범위 없이 둡니다.
+
+    요점은 겹친 것을 빼고 point_id를 붙였으므로 글로 짝을 찾습니다.
+    """
+    by_id = {f.focus_id: f for f in focus}
+    by_text = {p.text: p.point_id for p in topic.expected_points}
+    chosen: dict[str, FocusCandidate] = {}
+    unknown = 0
+    for draft in material.expected_points:
+        point_id = by_text.get(draft.text.strip())
+        if point_id is None or point_id in chosen or draft.focus_id is None:
+            continue
+        found = by_id.get(draft.focus_id.strip())
+        if found is None:
+            unknown += 1
+            continue
+        chosen[point_id] = found
+    if unknown:
+        logger.info("focus_unknown_ids count=%d", unknown)
+    return chosen
+
+
+def attach_focus(material: TopicMaterial, topic: Topic, focus: Iterable[FocusCandidate]) -> Topic:
+    """요점에 강조 범위(ExpectedPoint.focus)를 붙입니다. 고른 것이 없으면 주제를 그대로 돌려줍니다.
+
+    계약 검증(주제 심볼 범위 안)을 다시 거칩니다. 후보는 늘 그 범위 안이라 실패하지 않지만,
+    실패하면 범위 없이 주제를 씁니다. 강조 범위 때문에 주제를 잃지 않습니다.
+    """
+    chosen = point_focus(material, topic, focus)
+    if not chosen:
+        return topic
+    data = topic.model_dump(mode="json")
+    for point in data["expected_points"]:
+        found = chosen.get(point["point_id"])
+        if found is not None:
+            point["focus"] = {"start_line": found.start_line, "end_line": found.end_line}
+    try:
+        return Topic.model_validate(data)
+    except ValidationError:
+        logger.warning("focus_invalid topic=%s", topic.topic_id)
+        return topic
+
+
 def _dedupe[T](items: list[T], *, key: Callable[[T], str]) -> list[T]:
     seen: set[str] = set()
     out: list[T] = []
@@ -563,10 +636,12 @@ async def generate_topic(
     model: str | None = None,
     breaker: _QuotaBreaker | None = None,
     plan: MisstatementPlan | None = None,
+    focus: tuple[FocusCandidate, ...] = (),
 ) -> Topic | None:
     """주제 하나를 만듭니다. 검증 실패는 한 번 다시 요청하고, 그래도 실패하거나 LLM 오류면 None입니다.
 
     plan이 있으면 틀린 말도 붙입니다. 틀린 말만 검증에 실패하면 다시 요청하지 않고 틀린 말 없이 주제를 돌려줍니다.
+    focus가 있으면 요점마다 고른 강조 범위를 붙입니다. 모르는 id는 범위 없이 둡니다.
     """
     breaker = breaker or _QuotaBreaker()
     for attempt in (1, 2):
@@ -585,6 +660,7 @@ async def generate_topic(
                 {"role": "user", "content": _feedback(error.problems)},
             ]
             continue
+        topic = attach_focus(result.value, topic, focus)
         if plan is None:
             return topic
         try:
@@ -602,6 +678,7 @@ class _Prepared:
     candidate: Candidate
     messages: list[Message]
     plan: MisstatementPlan | None = None
+    focus: tuple[FocusCandidate, ...] = ()
 
 
 def _prepare(
@@ -629,10 +706,11 @@ def _prepare(
         difficulty = DIFFICULTY_CYCLE[len(prepared) % len(DIFFICULTY_CYCLE)]
         external = external_definitions_text(root, candidate.symbol, index) if index else ""
         plan = planner.plan(candidate.symbol)
+        focus = visible_focus(root, candidate, code)
         messages = build_topic_messages(
-            candidate, code, readme, difficulty, references, external, plan
+            candidate, code, readme, difficulty, references, external, plan, focus
         )
-        prepared.append(_Prepared(candidate, messages, plan))
+        prepared.append(_Prepared(candidate, messages, plan, tuple(focus)))
     if hollow:
         logger.info("stage2_hollow_candidates skipped=%d", hollow)
     return prepared
@@ -675,6 +753,7 @@ async def generate_topics(
                 model=model,
                 breaker=breaker,
                 plan=item.plan,
+                focus=item.focus,
             )
 
     # 부족한 만큼만 다음 후보를 한 번에 요청합니다. 결과 순서는 후보 순서를 따릅니다.
