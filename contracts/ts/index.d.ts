@@ -27,17 +27,17 @@ export type AnalysisStatus = "queued" | "stage1" | "stage2" | "done" | "failed";
  */
 export type ContributionLabel = "verified" | "shared" | "unverified";
 /**
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "SymbolKind".
+ */
+export type SymbolKind = "function" | "method" | "class";
+/**
  * 틀린 말을 만든 방식입니다.
  *
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema
  * via the `definition` "MisstatementKind".
  */
 export type MisstatementKind = "absent_call" | "inverted_point";
-/**
- * This interface was referenced by `GitInsightContracts`'s JSON-Schema
- * via the `definition` "SymbolKind".
- */
-export type SymbolKind = "function" | "method" | "class";
 /**
  * 면접관이 일부러 한 틀린 말을 면접자가 짚었는지입니다 (#133). 점수에는 쓰지 않습니다.
  *
@@ -199,20 +199,11 @@ export interface ExpectedPoint {
  * via the `definition` "Misstatement".
  */
 export interface Misstatement {
+  absent_symbol: SymbolRef | null;
   correction: string;
   kind: MisstatementKind;
   point_id: string | null;
   statement: string;
-}
-/**
- * LLM 없이도 쓸 수 있게 미리 만든 꼬리질문입니다.
- *
- * This interface was referenced by `GitInsightContracts`'s JSON-Schema
- * via the `definition` "PreparedFollowup".
- */
-export interface PreparedFollowup {
-  question: string;
-  symbol_id: string | null;
 }
 /**
  * 분석 결과에서 얻은 코드 위치입니다. LLM이 만들지 않습니다.
@@ -228,6 +219,16 @@ export interface SymbolRef {
   path: string;
   start_line: number;
   symbol_id: string;
+}
+/**
+ * LLM 없이도 쓸 수 있게 미리 만든 꼬리질문입니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "PreparedFollowup".
+ */
+export interface PreparedFollowup {
+  question: string;
+  symbol_id: string | null;
 }
 /**
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema
