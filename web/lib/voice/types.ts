@@ -38,6 +38,11 @@ export interface AdapterHandle {
   /** 서버가 정한 문장을 말하게 합니다. */
   say(text: string): void;
   respondTool(callId: string, name: string, output: Record<string, unknown>): void;
+  /**
+   * 마이크를 끄거나 켭니다 (#145). 꺼진 동안에는 소리를 보내지 않습니다.
+   * 말하던 중에 끄면 그때까지 한 말이 한 턴으로 넘어갑니다. 연결을 새로 열면 켜진 상태입니다.
+   */
+  setMuted(on: boolean): void;
   /** 측정용 소리 크기 */
   userAnalyser(): AnalyserNode | null;
   aiAnalyser(): AnalyserNode | null;
