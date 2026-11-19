@@ -26,7 +26,7 @@
    4. 빌드와 시작은 `railway.json`이 정합니다. 대시보드의 Build·Start 명령은 비워 둡니다
    5. **Settings → Deploy의 Pre-deploy Command가 `alembic -c api/alembic.ini upgrade head`인지 꼭 확인합니다.**
       빈 서비스(Empty Service)에 저장소를 연결해 만들었을 때 이 값이 비어 있었고, 마이그레이션 없이 떠서 분석 API가 500·503이었습니다 (#19).
-      비어 있으면 직접 넣고 재배포합니다. 서버 로그에 `analysis_recover_failed error=ProgrammingError`가 보이면 이 경우입니다
+      비어 있으면 직접 넣고 재배포합니다. 서버 시작 로그에 `schema_not_migrated`나 `schema_outdated`가 보이면 이 경우입니다 (#101)
 2. **Railway API 서비스 Variables**: 아래 "환경 변수" 표대로 넣습니다. `WEB_ORIGIN`은 3번 뒤에 넣어도 됩니다
 3. **Vercel 프로젝트**
    1. Add New → Project → 이 저장소
@@ -88,7 +88,7 @@
 2. `curl -i https://<Vercel 주소>/api/me` → 401 (웹이 서버로 넘기고 있음)
 3. 브라우저로 Vercel 주소 → GitHub 로그인 → 첫 화면에 사용자 이름
 4. 레포 목록에서 Python 레포를 골라 분석 → 텍스트 면접 몇 턴 → 끝내기 → 리포트
-5. Railway 로그 첫 줄들에 오류가 없고, 토큰·code·키가 찍히지 않음
+5. Railway 로그 첫 줄들에 `schema_current revision=<마지막 번호>`가 있고 오류가 없으며, 토큰·code·키가 찍히지 않음
 
 ## 롤백
 

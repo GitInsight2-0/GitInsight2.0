@@ -27,6 +27,7 @@ from gitinsight_api.report.postgres import PostgresReportStore
 from gitinsight_api.report.service import ReportService, ReportStore
 from gitinsight_api.routes import analyses as analyses_routes
 from gitinsight_api.routes import auth, github, metrics, reports, sessions
+from gitinsight_api.schema_check import check_schema
 from gitinsight_api.settings import Settings
 from gitinsight_contracts.fixtures import load_analysis
 
@@ -120,6 +121,9 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        if engine is not None:
+            # 마이그레이션이 빠졌으면 첫 요청이 실패하기 전에 시작 로그로 알립니다 (#101).
+            await check_schema(engine)
         if launcher is not None:
             try:
                 await launcher.recover()
@@ -173,6 +177,17 @@ def create_app(
         return JSONResponse(
             {"detail": "데이터베이스에 연결하지 못했습니다"},
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    @app.exception_handler(SQLAlchemyError)
+    async def database_error(_request: Request, error: Exception) -> JSONResponse:
+        # 연결 문제가 아닌 DB 오류입니다. 테이블이 없거나(마이그레이션 누락) 쿼리가 스키마와 맞지 않는 경우입니다.
+        # 다시 보내도 같은 결과라 503이 아니라 500이고, 웹은 다시 시도하지 않습니다.
+        # 연결 오류(위 처리기)는 더 구체적인 예외 종류라 그쪽이 먼저 잡습니다.
+        logger.error("database_error error=%s", type(error).__name__)
+        return JSONResponse(
+            {"detail": "데이터베이스 오류로 처리하지 못했습니다. 관리자에게 알려 주세요"},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
     @app.get("/api/health")

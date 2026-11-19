@@ -10,9 +10,15 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from pydantic import SecretStr
+from sqlalchemy.exc import ProgrammingError
 
 from gitinsight_api.analyses.service import NO_CONTEXT, LaunchContext
-from gitinsight_api.analyses.store import AnalysisRecord, AnalysisStore, InMemoryAnalysisStore
+from gitinsight_api.analyses.store import (
+    AnalysisKey,
+    AnalysisRecord,
+    AnalysisStore,
+    InMemoryAnalysisStore,
+)
 from gitinsight_api.login_cookie import SESSION_COOKIE, LoginSession, seal_session
 from gitinsight_api.main import create_app
 from gitinsight_api.settings import Settings
@@ -241,6 +247,22 @@ async def test_launch_failure_is_503_and_can_be_retried(tmp_path: Path) -> None:
     assert failed.status_code == 503
     assert retry.status_code == 202
     assert len(harness.launcher.launched) == 2
+
+
+async def test_missing_table_is_500_with_reason(harness: Harness) -> None:
+    # 첫 배포에서 마이그레이션이 빠졌을 때 본문 없는 500이 나갔습니다 (#101).
+    async def missing_table(_key: AnalysisKey) -> tuple[AnalysisRecord, bool]:
+        raise ProgrammingError("INSERT INTO analyses", {}, Exception("relation does not exist"))
+
+    harness.store.get_or_create = missing_table  # type: ignore[method-assign]
+    async with harness.client(harness.cookie()) as client:
+        response = await client.post("/api/analyses", json={"repo_id": REPO_ID})
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": "데이터베이스 오류로 처리하지 못했습니다. 관리자에게 알려 주세요"
+    }
+    assert harness.launcher.launched == []
 
 
 async def test_without_launcher_requests_are_503(harness: Harness) -> None:
