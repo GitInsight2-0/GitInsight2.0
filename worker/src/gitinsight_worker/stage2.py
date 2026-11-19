@@ -7,6 +7,9 @@
 - 검증에 실패하면 문제를 알려 주고 한 번 다시 요청합니다. 그래도 실패하면 그 후보를 버리고 다음 후보로 채웁니다.
 - 1단계가 센 레포 안 참조 수는 서버가 만든 사실로 untrusted_block 밖에 넣습니다 (#58).
   심볼 이름은 레포에서 온 값이라 그 밖에 쓰지 않고, 블록 안 목록의 순서로만 가리킵니다.
+- 면접관이 일부러 하는 틀린 말(#133, #142)도 같은 요청에서 받습니다. 방식과 부른다고 말할 함수는 서버가 정합니다
+  (misstatement.py). 틀린 말만 검증에 실패하면 다시 요청하지 않고 틀린 말만 비운 채 주제를 씁니다.
+  틀린 말 때문에 주제를 잃거나 호출이 늘지 않게 하기 위해서입니다.
 """
 
 import asyncio
@@ -27,6 +30,7 @@ from gitinsight_contracts.analysis import (
     AnalysisResult,
     ContributionLabel,
     ExpectedPoint,
+    MisstatementKind,
     PreparedFollowup,
     Topic,
 )
@@ -35,6 +39,7 @@ from gitinsight_contracts.common import SymbolRef
 from gitinsight_worker.candidates import Candidate, has_enough_logic, select_candidates
 from gitinsight_worker.definitions import external_definitions_text, top_level_index
 from gitinsight_worker.languages import PYTHON, language_of
+from gitinsight_worker.misstatement import MisstatementPlan, MisstatementPlanner
 from gitinsight_worker.stage1 import Stage1Result
 
 logger = logging.getLogger(__name__)
@@ -100,6 +105,14 @@ TOPIC_SYSTEM_PROMPT = f"""당신은 한국어 기술 모의면접의 질문 재�
 - title은 20자 안팎의 짧은 한국어 제목입니다.
 - hint는 답을 알려 주지 않고, 코드의 어느 부분을 보면 되는지 한 문장으로 알려 줍니다.
 
+misstatement 규칙 (면접관이 확인을 위해 일부러 하는 틀린 말):
+- statement는 면접관이 그대로 읽는 틀린 말, correction은 지원자가 짚지 못했을 때 면접관이 바로 이어서 읽는 정답입니다. 둘 다 존댓말 한 문장, {MAX_SPOKEN_CHARS}자 이하입니다.
+- statement는 확인하는 말투로 씁니다. "틀렸다", "일부러", "맞나요 아닌가요" 같은 말로 틀린 말이라는 것을 드러내지 않습니다.
+- correction은 그 문장만 들어도 앞의 말을 바로잡는 것으로 들려야 합니다. "방금 말씀드린 것과 달리"로 시작합니다.
+- 함수 이름은 백틱이나 따옴표 없이 글자 그대로 씁니다.
+- 서버가 absent_function을 주면: statement는 주제 코드가 그 함수를 직접 호출한다고 말하는 확인 질문입니다. 예: "여기서 직접 save_report를 호출해서 결과를 저장하죠?" correction은 주제 코드가 그 함수를 직접 호출하지 않는다고 말합니다. 예: "방금 말씀드린 것과 달리 이 코드는 save_report를 직접 호출하지 않습니다." statement와 correction 모두 absent_function의 name을 그대로 넣습니다. 그 함수의 본문은 보이지 않으므로 그 함수가 하는 일을 지어내지 않습니다. point_index는 null입니다.
+- 서버가 absent_function을 주지 않으면: 내가 쓴 expected_points 중 하나를 골라 point_index(1부터)에 번호를 쓰고, statement는 그 요점을 반대로 말합니다. target_code에서 분명히 확인되는 사실(무엇을 돌려주는지, 어떤 조건에서 무엇을 하는지)만 뒤집어서 틀린 것이 확실해야 합니다. 설계 의도나 좋고 나쁨 같은 의견은 뒤집지 않습니다. correction은 그 요점을 바르게 말합니다.
+
 {UNTRUSTED_NOTICE}"""
 
 
@@ -111,6 +124,13 @@ class PointDraft(LLMOutput):
 class FollowupDraft(LLMOutput):
     question: str
     symbol_id: str | None
+
+
+class MisstatementDraft(LLMOutput):
+    statement: str
+    correction: str
+    # inverted_point일 때 반대로 말한 요점 번호입니다(expected_points 순서, 1부터). absent_call이면 null입니다.
+    point_index: int | None
 
 
 class TopicMaterial(LLMOutput):
@@ -125,6 +145,7 @@ class TopicMaterial(LLMOutput):
     prepared_followups: list[FollowupDraft]
     hint: str
     related_symbol_ids: list[str]
+    misstatement: MisstatementDraft
 
 
 class TopicMaterialError(Exception):
@@ -252,6 +273,7 @@ def build_topic_messages(
     difficulty: int = 1,
     references: Mapping[str, int] | None = None,
     external: str = "",
+    plan: MisstatementPlan | None = None,
 ) -> list[Message]:
     symbol = candidate.symbol
     target = {"symbol_id": symbol.symbol_id, "name": symbol.name, "kind": symbol.kind.value}
@@ -276,6 +298,19 @@ def build_topic_messages(
             "주제 코드가 쓰는 다른 파일의 레포 정의 요약입니다. 이름으로 찾아 틀릴 수 있고, 본문은 넣지 않았습니다.",
             untrusted_block("external_definitions", external),
         ]
+    absent = plan.absent_symbol if plan is not None else None
+    if absent is not None:
+        # 함수 이름과 경로는 레포에서 온 값이라 블록 안에만 넣습니다. 블록 밖에는 서버가 확인한 사실만 씁니다.
+        info = {"name": absent.name, "path": absent.path}
+        parts += [
+            "틀린 말 방식: absent_call. 아래 absent_function은 이 레포의 다른 파일에 있는 함수이고, "
+            "서버가 확인한 결과 주제 코드의 파일에는 이 이름이 한 번도 나오지 않습니다.",
+            untrusted_block("absent_function", json.dumps(info, ensure_ascii=False)),
+        ]
+    else:
+        parts.append(
+            "틀린 말 방식: inverted_point. 서버가 absent_function을 주지 않았습니다. 요점 하나를 반대로 말하세요."
+        )
     if readme:
         parts += [
             "레포 README 앞부분입니다. 코드의 목적을 이해하는 데만 참고하세요.",
@@ -392,6 +427,70 @@ def validate_material(material: TopicMaterial, candidate: Candidate, ctx: TopicC
         ) from None
 
 
+# 틀린 말이라는 것을 드러내는 말입니다. 면접관이 이렇게 말하면 답을 알려 주게 됩니다.
+_GIVEAWAY = re.compile(r"일부러|틀린 말|틀렸|틀리게")
+
+
+def _inverted_point_id(material: TopicMaterial, topic: Topic) -> str | None:
+    """LLM이 고른 요점 번호를 서버의 point_id로 바꿉니다. 겹쳐서 뺀 요점이 있어도 글로 찾습니다."""
+    index = material.misstatement.point_index
+    if index is None or not 1 <= index <= len(material.expected_points):
+        return None
+    text = material.expected_points[index - 1].text.strip()
+    return next((p.point_id for p in topic.expected_points if p.text == text), None)
+
+
+def attach_misstatement(material: TopicMaterial, topic: Topic, plan: MisstatementPlan) -> Topic:
+    """검증한 틀린 말을 주제에 붙입니다. 문제가 있으면 TopicMaterialError를 올립니다."""
+    draft = material.misstatement
+    # 면접관이 소리 내어 읽는 문장이라 이름을 감싼 백틱은 뺍니다.
+    statement = draft.statement.replace("`", "").strip()
+    correction = draft.correction.replace("`", "").strip()
+    problems = _spoken_problems("misstatement.statement", statement)
+    problems += _spoken_problems("misstatement.correction", correction)
+    for field, text in (("statement", statement), ("correction", correction)):
+        if LINE_NUMBER.search(text):
+            problems.append(f"misstatement.{field}: 줄 번호를 쓰면 안 됨")
+        if COMMENT_MARKER.search(text):
+            problems.append(f"misstatement.{field}: [A] 같은 코드 주석 표시를 쓰면 안 됨")
+    if _GIVEAWAY.search(statement):
+        problems.append("misstatement.statement: 틀린 말이라는 것을 드러내면 안 됨")
+    if statement == correction:
+        problems.append("misstatement: statement와 correction이 같음")
+    point_id: str | None = None
+    absent = plan.absent_symbol
+    if plan.kind is MisstatementKind.ABSENT_CALL and absent is not None:
+        if draft.point_index is not None:
+            problems.append("misstatement.point_index: absent_call이면 null이어야 함")
+        for field, text in (("statement", statement), ("correction", correction)):
+            if absent.name not in text:
+                problems.append(f"misstatement.{field}: absent_function의 name이 없음")
+    else:
+        point_id = _inverted_point_id(material, topic)
+        if point_id is None:
+            problems.append("misstatement.point_index: expected_points 안의 번호여야 함")
+    if problems:
+        raise TopicMaterialError(problems)
+    data = topic.model_dump(mode="json")
+    data["misstatement"] = {
+        "kind": plan.kind.value,
+        "statement": statement,
+        "correction": correction,
+        "point_id": point_id,
+        "absent_symbol": absent.model_dump(mode="json") if absent is not None else None,
+    }
+    try:
+        # 계약 검증(150자, 이름이 statement에 있음, 주제 자신이 아님)도 거칩니다.
+        return Topic.model_validate(data)
+    except ValidationError as error:
+        raise TopicMaterialError(
+            [
+                f"misstatement.{'.'.join(str(p) for p in e['loc']) or '(root)'}: {e['type']}"
+                for e in error.errors(include_input=False, include_url=False)[:10]
+            ]
+        ) from None
+
+
 def _dedupe[T](items: list[T], *, key: Callable[[T], str]) -> list[T]:
     seen: set[str] = set()
     out: list[T] = []
@@ -463,8 +562,12 @@ async def generate_topic(
     timeout_s: float = TOPIC_TIMEOUT_S,
     model: str | None = None,
     breaker: _QuotaBreaker | None = None,
+    plan: MisstatementPlan | None = None,
 ) -> Topic | None:
-    """주제 하나를 만듭니다. 검증 실패는 한 번 다시 요청하고, 그래도 실패하거나 LLM 오류면 None입니다."""
+    """주제 하나를 만듭니다. 검증 실패는 한 번 다시 요청하고, 그래도 실패하거나 LLM 오류면 None입니다.
+
+    plan이 있으면 틀린 말도 붙입니다. 틀린 말만 검증에 실패하면 다시 요청하지 않고 틀린 말 없이 주제를 돌려줍니다.
+    """
     breaker = breaker or _QuotaBreaker()
     for attempt in (1, 2):
         result = await _complete_with_backoff(
@@ -473,7 +576,7 @@ async def generate_topic(
         if result is None:
             return None
         try:
-            return validate_material(result.value, candidate, ctx)
+            topic = validate_material(result.value, candidate, ctx)
         except TopicMaterialError as error:
             logger.info("topic_invalid attempt=%d problems=%d", attempt, len(error.problems))
             messages = [
@@ -481,6 +584,16 @@ async def generate_topic(
                 {"role": "assistant", "content": result.value.model_dump_json()},
                 {"role": "user", "content": _feedback(error.problems)},
             ]
+            continue
+        if plan is None:
+            return topic
+        try:
+            return attach_misstatement(result.value, topic, plan)
+        except TopicMaterialError as error:
+            logger.info(
+                "misstatement_invalid kind=%s problems=%d", plan.kind.value, len(error.problems)
+            )
+            return topic
     return None
 
 
@@ -488,6 +601,7 @@ async def generate_topic(
 class _Prepared:
     candidate: Candidate
     messages: list[Message]
+    plan: MisstatementPlan | None = None
 
 
 def _prepare(
@@ -499,6 +613,8 @@ def _prepare(
     readme = read_readme(root)
     # 다른 파일의 정의를 이름으로 찾는 색인입니다 (#66). 1단계 심볼 목록이 없으면 붙이지 않습니다.
     index = top_level_index(symbols) if symbols else {}
+    # 틀린 말 방식과 부른다고 말할 함수를 정합니다 (#142).
+    planner = MisstatementPlanner(root, symbols or [])
     prepared: list[_Prepared] = []
     hollow = 0
     for candidate in candidates:
@@ -512,8 +628,11 @@ def _prepare(
             continue
         difficulty = DIFFICULTY_CYCLE[len(prepared) % len(DIFFICULTY_CYCLE)]
         external = external_definitions_text(root, candidate.symbol, index) if index else ""
-        messages = build_topic_messages(candidate, code, readme, difficulty, references, external)
-        prepared.append(_Prepared(candidate, messages))
+        plan = planner.plan(candidate.symbol)
+        messages = build_topic_messages(
+            candidate, code, readme, difficulty, references, external, plan
+        )
+        prepared.append(_Prepared(candidate, messages, plan))
     if hollow:
         logger.info("stage2_hollow_candidates skipped=%d", hollow)
     return prepared
@@ -555,6 +674,7 @@ async def generate_topics(
                 timeout_s=timeout_s,
                 model=model,
                 breaker=breaker,
+                plan=item.plan,
             )
 
     # 부족한 만큼만 다음 후보를 한 번에 요청합니다. 결과 순서는 후보 순서를 따릅니다.
@@ -570,7 +690,12 @@ async def generate_topics(
         topics += [t for t in (task.result() for task in tasks) if t is not None]
         if progress is not None:
             await progress(min(len(topics) / target, 1.0))
-    logger.info("stage2_topics made=%d tried=%d", len(topics), next_index)
+    logger.info(
+        "stage2_topics made=%d tried=%d misstatements=%d",
+        len(topics),
+        next_index,
+        sum(t.misstatement is not None for t in topics),
+    )
     return topics
 
 

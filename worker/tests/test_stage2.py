@@ -249,7 +249,10 @@ async def test_external_definitions_go_only_into_untrusted_block(tmp_path: Path)
     await generate_topics(tmp_path, stage1, llm, target=4)
 
     [call] = [
-        c for c in llm.calls_for(TOPIC_PURPOSE) if '"name": "run_all"' in user_text(c.messages)
+        c
+        for c in llm.calls_for(TOPIC_PURPOSE)
+        # 다른 주제의 absent_function에도 run_all이 나오므로 주제 심볼 정보로 찾습니다.
+        if '"name": "run_all", "kind"' in user_text(c.messages)
     ]
     user = user_text(call.messages)
     assert '<untrusted_data kind="external_definitions">\n# app/util.py\ndef helper(): ...' in user

@@ -31,7 +31,7 @@ from pathlib import Path
 
 from gitinsight_api.llm import InMemoryCostRecorder, LiteLLMClient
 from gitinsight_api.settings import Settings
-from gitinsight_contracts.analysis import AnalysisResult
+from gitinsight_contracts.analysis import AnalysisResult, Topic
 from gitinsight_contracts.api import AnalysisState
 from gitinsight_contracts.fixtures import load_analysis
 from gitinsight_worker.contribution import Requester
@@ -67,7 +67,9 @@ def render(result: AnalysisResult, recorder: InMemoryCostRecorder, model: str) -
         f"- 호출당 최대 지연: {max((r.latency_ms for r in records), default=0):.0f} ms",
         "",
         "사람이 확인할 것: 기대 포인트가 코드에 실제로 있는가, 질문이 존댓말 한 문장이고 자연스러운가,",
-        "힌트가 답을 알려 주지 않는가, 관련 심볼이 꼬리질문과 맞는가.",
+        "힌트가 답을 알려 주지 않는가, 관련 심볼이 꼬리질문과 맞는가,",
+        "틀린 말이 정말 틀렸는가(absent_call은 주제 코드가 그 함수를 직접 부르지 않는가), 정답만 들어도 정정으로 들리는가.",
+        f"- 틀린 말: {sum(t.misstatement is not None for t in result.topics)}/{len(result.topics)}개 주제",
     ]
     for topic in result.topics:
         lines += [
@@ -84,8 +86,22 @@ def render(result: AnalysisResult, recorder: InMemoryCostRecorder, model: str) -
             *(f"  - {p.text} → {p.probe_question}" for p in topic.expected_points),
             "- 꼬리질문:",
             *(f"  - {f.question} ({f.symbol_id or '-'})" for f in topic.prepared_followups),
+            *misstatement_lines(topic),
         ]
     return lines
+
+
+def misstatement_lines(topic: Topic) -> list[str]:
+    """면접관이 일부러 하는 틀린 말입니다 (#142). 사람이 코드와 대조해 정말 틀린 말인지 봅니다."""
+    m = topic.misstatement
+    if m is None:
+        return ["- 틀린 말: 없음 (검증 실패 또는 만들지 않음)"]
+    target = m.absent_symbol.symbol_id if m.absent_symbol is not None else m.point_id
+    return [
+        f"- 틀린 말 ({m.kind.value}, `{target}`):",
+        f"  - 말: {m.statement}",
+        f"  - 정답: {m.correction}",
+    ]
 
 
 def compare(result: AnalysisResult, sample: AnalysisResult) -> list[str]:
