@@ -1,6 +1,6 @@
 "use client";
 
-import type { Action, BrainReply, SymbolRef, TurnRequest } from "@gitinsight/contracts";
+import type { Action, BrainReply, LineSpan, SymbolRef, TurnRequest } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import CodeViewer from "@/components/CodeViewer";
 import { interviewHref } from "@/lib/analyses";
@@ -37,11 +37,14 @@ interface HistoryItem {
   /** 면접관 말풍선 아래에 적을 질문 종류와 코드 위치 (서버가 준 값) */
   action?: Action;
   where?: SymbolRef | null;
+  /** where 안에서 이 발화와 관계있는 줄 (#156). 없으면 where 전체입니다 */
+  focus?: LineSpan | null;
 }
 
 /** 면접관 발화를 대화 기록 한 줄로 */
 function said(r: BrainReply): HistoryItem {
-  return { who: "interviewer", text: r.utterance, action: r.action, where: r.highlight };
+  // 옛 서버는 focus를 보내지 않을 수 있어 null로 읽습니다.
+  return { who: "interviewer", text: r.utterance, action: r.action, where: r.highlight, focus: r.focus ?? null };
 }
 
 type Mode = "text" | "voice";
@@ -800,7 +803,10 @@ export default function InterviewScreen({
                   <p className={styles.bubble}>{h.text}</p>
                   {h.where && (
                     <span className={styles.ref}>
-                      {h.where.path} <b>{h.where.start_line}–{h.where.end_line}줄</b>
+                      {h.where.path}{" "}
+                      <b>
+                        {(h.focus ?? h.where).start_line}–{(h.focus ?? h.where).end_line}줄
+                      </b>
                     </span>
                   )}
                 </div>
@@ -976,7 +982,12 @@ export default function InterviewScreen({
           )}
         </section>
 
-        <CodeViewer analysisId={analysisId} repo={repo} target={reply?.highlight ?? null} />
+        <CodeViewer
+          analysisId={analysisId}
+          repo={repo}
+          target={reply?.highlight ?? null}
+          focus={reply?.highlight ? (reply.focus ?? null) : null}
+        />
       </main>
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import type { SymbolRef } from "@gitinsight/contracts";
+import type { LineSpan, SymbolRef } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import { fetchFileLines } from "@/lib/github/code";
 import styles from "./interview.module.css";
@@ -31,18 +31,23 @@ type State =
 
 /**
  * 서버가 준 highlight(경로, 줄 범위, 커밋)만 강조합니다. 줄 번호를 화면에서 바꾸지 않습니다.
+ * focus가 있으면 그 줄만 진하게 칠하고 그 줄로 스크롤합니다 (#156). 나머지 심볼은 옅게 칠합니다.
+ * focus가 highlight 안이라는 것은 계약과 서버가 보장합니다.
  * 코드를 못 받으면 위치만 보여 줍니다 (런북 "코드 뷰어" 1차 대비책).
  */
 export default function CodeViewer({
   analysisId,
   repo,
   target,
+  focus = null,
 }: {
   /** 서버 /api/code에 넘길 분석 id (비공개 레포도 됨) */
   analysisId: string | null;
   /** 공개 레포 대비책(raw.githubusercontent.com)에 쓸 레포 이름 */
   repo: string | null;
   target: SymbolRef | null;
+  /** target 안에서 지금 질문과 관계있는 줄. 없으면 null */
+  focus?: LineSpan | null;
 }) {
   const [state, setState] = useState<State>({ kind: "idle" });
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -72,7 +77,7 @@ export default function CodeViewer({
     if (!box || !line) return;
     // 상자가 position: relative라서 줄의 offsetTop은 상자 기준입니다.
     box.scrollTop = Math.max(0, line.offsetTop - box.clientHeight / 3);
-  }, [state, target?.start_line]);
+  }, [state, target?.start_line, focus?.start_line]);
 
   if (!target) {
     return (
@@ -101,20 +106,32 @@ export default function CodeViewer({
   const from = Math.max(1, target.start_line - CONTEXT_LINES);
   const to = Math.min(state.lines.length, target.end_line + CONTEXT_LINES);
   const long = rangeLength(target) > LONG_RANGE;
-  /** head: 진하게 칠할 줄, body: 긴 범위의 몸통(옅게), null: 범위 밖 */
+  // focus가 있으면 그 줄이 진하게 칠할 곳이고, 처음 보여 줄 곳입니다.
+  const strong = (no: number) =>
+    focus ? no >= focus.start_line && no <= focus.end_line : !long || no === target.start_line;
+  const scrollTo = focus?.start_line ?? target.start_line;
+  /** head: 진하게 칠할 줄, body: 범위 안의 나머지(옅게), null: 범위 밖 */
   const rows: { no: number; text: string; hit: "head" | "body" | null }[] = [];
   for (let no = from; no <= to; no++) {
     const inRange = no >= target.start_line && no <= target.end_line;
     rows.push({
       no,
       text: state.lines[no - 1] ?? "",
-      hit: !inRange ? null : long && no !== target.start_line ? "body" : "head",
+      hit: !inRange ? null : strong(no) ? "head" : "body",
     });
   }
   const outOfRange = target.end_line > state.lines.length;
 
   return (
-    <Panel target={target} status={`${target.path} ${target.start_line}–${target.end_line}줄 코드를 불러왔습니다`}>
+    <Panel
+      target={target}
+      focus={focus}
+      status={
+        focus
+          ? `${target.path} ${focus.start_line}–${focus.end_line}줄을 강조한 코드를 불러왔습니다`
+          : `${target.path} ${target.start_line}–${target.end_line}줄 코드를 불러왔습니다`
+      }
+    >
       {outOfRange && (
         <p className={styles.codeWarn}>
           파일이 {state.lines.length}줄이라 강조 범위({target.start_line}-{target.end_line})와 맞지 않습니다. 분석 커밋을 확인하세요.
@@ -124,7 +141,7 @@ export default function CodeViewer({
         {rows.map((r) => (
           <div
             key={r.no}
-            ref={r.no === target.start_line ? firstLineRef : undefined}
+            ref={r.no === scrollTo ? firstLineRef : undefined}
             className={
               r.hit === "head"
                 ? `${styles.row} ${styles.rowHit}`
@@ -142,7 +159,17 @@ export default function CodeViewer({
   );
 }
 
-function Panel({ target, status, children }: { target: SymbolRef | null; status: string; children: React.ReactNode }) {
+function Panel({
+  target,
+  focus = null,
+  status,
+  children,
+}: {
+  target: SymbolRef | null;
+  focus?: LineSpan | null;
+  status: string;
+  children: React.ReactNode;
+}) {
   return (
     <aside aria-label="질문이 가리키는 코드" className={styles.code}>
       <div className={styles.codeHead}>
@@ -157,6 +184,11 @@ function Panel({ target, status, children }: { target: SymbolRef | null; status:
             <span className={styles.codeSpan}>
               {KIND_LABEL[target.kind]} 전체 {rangeLength(target)}줄
             </span>
+            {focus && (
+              <span className={styles.codeFocus}>
+                볼 곳 {focus.start_line}–{focus.end_line}줄
+              </span>
+            )}
           </div>
         )}
       </div>
