@@ -45,6 +45,24 @@ class Judgment(LLMOutput):
     followup: Followup | None
 
 
+class CatchStatus(StrEnum):
+    """면접관이 일부러 한 틀린 말을 면접자가 짚었는지입니다 (#133). 점수에는 쓰지 않습니다."""
+
+    CAUGHT = "caught"
+    # 틀렸다고는 했지만 이유가 정답과 다릅니다.
+    PARTIAL = "partial"
+    MISSED = "missed"
+
+
+class MisstatementJudgment(LLMOutput):
+    """틀린 말에 대한 답변 판단입니다. 정정할지와 다음 행동은 서버 규칙이 정합니다."""
+
+    intent: Intent
+    status: CatchStatus
+    # 지원자 답변에서 그대로 옮긴 문장입니다. 서버가 자막과 대조합니다.
+    evidence_quote: str | None
+
+
 class InterviewPlanOutput(LLMOutput):
     """JD가 있을 때 주제 순서를 바꾸는 LLM 출력입니다. 허용된 topic_id만 씁니다."""
 

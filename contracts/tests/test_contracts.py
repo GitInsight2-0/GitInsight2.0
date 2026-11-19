@@ -114,7 +114,12 @@ def test_metric_event_rejects_free_text_in_error_code() -> None:
         )
 
 
-LLM_OUTPUT_MODELS = [llm.Judgment, llm.InterviewPlanOutput, llm.ReportDraft]
+LLM_OUTPUT_MODELS = [
+    llm.Judgment,
+    llm.MisstatementJudgment,
+    llm.InterviewPlanOutput,
+    llm.ReportDraft,
+]
 
 
 def _object_schemas(schema: dict[str, Any]) -> list[dict[str, Any]]:

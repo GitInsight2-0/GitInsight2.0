@@ -11,6 +11,9 @@ from gitinsight_contracts.common import CommitSha, SymbolRef
 Id = Annotated[str, Field(min_length=1, max_length=100)]
 # 면접관이 그대로 읽는 문장입니다. 한 문장으로 제한해야 발화문 2문장 제한을 지킬 수 있습니다.
 OneSentence = Annotated[str, Field(min_length=1, max_length=200)]
+# 다음 질문 앞에 붙여 한 번에 말하는 문장입니다.
+# 질문(200자)과 합쳐 발화문 400자 제한에 들어가도록 더 짧게 둡니다.
+ShortSentence = Annotated[str, Field(min_length=1, max_length=150)]
 
 
 class ContributionLabel(StrEnum):
@@ -59,6 +62,48 @@ class PreparedFollowup(Contract):
         return self
 
 
+class MisstatementKind(StrEnum):
+    """틀린 말을 만든 방식입니다."""
+
+    # 주제 코드가 직접 부르지 않는 함수를 부른다고 말합니다.
+    ABSENT_CALL = "absent_call"
+    # 기대 답변 요점 하나를 반대로 말합니다.
+    INVERTED_POINT = "inverted_point"
+
+
+class Misstatement(Contract):
+    """면접관이 일부러 하는 틀린 말입니다 (#133).
+
+    2단계 분석에서 만들고 서버가 검증합니다. 면접 중에 지어내지 않습니다.
+    """
+
+    kind: MisstatementKind
+    # 면접관이 그대로 읽는 틀린 말입니다.
+    statement: ShortSentence
+    # 면접자가 짚지 못했을 때 면접관이 그대로 읽는 정답입니다. 리포트에도 보여 줍니다.
+    correction: ShortSentence
+    # 반대로 말한 요점입니다. inverted_point일 때만 있습니다.
+    point_id: Id | None = None
+    # 부른다고 말한 함수입니다. absent_call일 때만 있습니다.
+    # 함수 이름과 위치는 LLM 문장이 아니라 분석 결과에서 가져옵니다.
+    # 주제 코드가 이 함수를 직접 부르지 않는다는 것은 2단계 분석이 확인합니다.
+    absent_symbol: SymbolRef | None = None
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        for field in ("statement", "correction"):
+            _require_one_sentence(getattr(self, field), field)
+        inverted = self.kind is MisstatementKind.INVERTED_POINT
+        if inverted != (self.point_id is not None):
+            raise ValueError("point_id는 inverted_point일 때만, 그리고 반드시 있어야 합니다")
+        absent = self.kind is MisstatementKind.ABSENT_CALL
+        if absent != (self.absent_symbol is not None):
+            raise ValueError("absent_symbol은 absent_call일 때만, 그리고 반드시 있어야 합니다")
+        if self.absent_symbol is not None and self.absent_symbol.name not in self.statement:
+            raise ValueError("statement에 absent_symbol의 이름이 들어 있어야 합니다")
+        return self
+
+
 class Topic(Contract):
     """면접 주제 하나입니다. 2단계 분석에서 만들어집니다."""
 
@@ -79,6 +124,9 @@ class Topic(Contract):
     hint: OneSentence
     # 이 범위를 수정한 최근 커밋 SHA입니다.
     commits: list[CommitSha] = Field(default_factory=list)
+    # 이 주제에서 면접관이 일부러 할 수 있는 틀린 말입니다 (#133).
+    # 검증을 통과한 것이 없거나 이 필드가 생기기 전의 분석 결과면 null입니다.
+    misstatement: Misstatement | None = None
 
     @model_validator(mode="after")
     def _check(self) -> Self:
@@ -87,6 +135,12 @@ class Topic(Contract):
         point_ids = [p.point_id for p in self.expected_points]
         if len(point_ids) != len(set(point_ids)):
             raise ValueError(f"{self.topic_id}: point_id가 중복됩니다")
+        inverted = self.misstatement.point_id if self.misstatement is not None else None
+        if inverted is not None and inverted not in point_ids:
+            raise ValueError(f"{self.topic_id}: 틀린 말의 point_id {inverted}가 요점에 없습니다")
+        absent = self.misstatement.absent_symbol if self.misstatement is not None else None
+        if absent is not None and absent.symbol_id == self.symbol.symbol_id:
+            raise ValueError(f"{self.topic_id}: 틀린 말의 absent_symbol이 주제 코드 자신입니다")
         allowed = self.allowed_symbol_ids()
         for followup in self.prepared_followups:
             if followup.symbol_id is not None and followup.symbol_id not in allowed:

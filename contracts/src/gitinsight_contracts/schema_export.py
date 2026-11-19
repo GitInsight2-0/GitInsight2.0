@@ -40,6 +40,7 @@ RESPONSE_MODELS: list[type[BaseModel]] = [
     report.Report,
     report.ProgressEntry,
     llm.Judgment,
+    llm.MisstatementJudgment,
     llm.InterviewPlanOutput,
     llm.ReportDraft,
 ]

@@ -81,6 +81,8 @@ const ACTION_LABEL: Record<Action, string> = {
   CLARIFY: "설명",
   NEXT_TOPIC: "다음 주제",
   WRAP_UP: "마무리",
+  // 일부러 한 틀린 말이라는 것을 드러내면 답을 알려 주게 되어 PROBE와 같은 문구를 씁니다 (#133).
+  MISSTATE: "확인 질문",
 };
 
 /** 리포트 요청 상태 */

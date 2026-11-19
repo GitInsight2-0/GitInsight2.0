@@ -5,7 +5,15 @@
  * via the `definition` "Action".
  */
 export type Action =
-  "ASK" | "FOLLOW_UP" | "PROBE" | "HINT" | "NEXT_TOPIC" | "REPEAT" | "CLARIFY" | "WRAP_UP";
+  | "ASK"
+  | "FOLLOW_UP"
+  | "PROBE"
+  | "HINT"
+  | "NEXT_TOPIC"
+  | "REPEAT"
+  | "CLARIFY"
+  | "WRAP_UP"
+  | "MISSTATE";
 /**
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema
  * via the `definition` "AnalysisStatus".
@@ -23,6 +31,20 @@ export type ContributionLabel = "verified" | "shared" | "unverified";
  * via the `definition` "SymbolKind".
  */
 export type SymbolKind = "function" | "method" | "class";
+/**
+ * 틀린 말을 만든 방식입니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "MisstatementKind".
+ */
+export type MisstatementKind = "absent_call" | "inverted_point";
+/**
+ * 면접관이 일부러 한 틀린 말을 면접자가 짚었는지입니다 (#133). 점수에는 쓰지 않습니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "CatchStatus".
+ */
+export type CatchStatus = "caught" | "partial" | "missed";
 /**
  * 질문받은 함수를 얼마나 설명했는지입니다. 서버 규칙이 턴 기록으로 정하고, 점수와는 따로입니다.
  *
@@ -144,6 +166,7 @@ export interface Topic {
    */
   expected_points: ExpectedPoint[];
   hint: string;
+  misstatement: Misstatement | null;
   /**
    * @minItems 1
    * @maxItems 3
@@ -168,14 +191,19 @@ export interface ExpectedPoint {
   text: string;
 }
 /**
- * LLM 없이도 쓸 수 있게 미리 만든 꼬리질문입니다.
+ * 면접관이 일부러 하는 틀린 말입니다 (#133).
+ *
+ * 2단계 분석에서 만들고 서버가 검증합니다. 면접 중에 지어내지 않습니다.
  *
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema
- * via the `definition` "PreparedFollowup".
+ * via the `definition` "Misstatement".
  */
-export interface PreparedFollowup {
-  question: string;
-  symbol_id: string | null;
+export interface Misstatement {
+  absent_symbol: SymbolRef | null;
+  correction: string;
+  kind: MisstatementKind;
+  point_id: string | null;
+  statement: string;
 }
 /**
  * 분석 결과에서 얻은 코드 위치입니다. LLM이 만들지 않습니다.
@@ -191,6 +219,16 @@ export interface SymbolRef {
   path: string;
   start_line: number;
   symbol_id: string;
+}
+/**
+ * LLM 없이도 쓸 수 있게 미리 만든 꼬리질문입니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "PreparedFollowup".
+ */
+export interface PreparedFollowup {
+  question: string;
+  symbol_id: string | null;
 }
 /**
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema
@@ -385,6 +423,31 @@ export interface MetricEvent {
   value_ms?: number | null;
 }
 /**
+ * 틀린 말에 대한 답변 판단입니다. 정정할지와 다음 행동은 서버 규칙이 정합니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "MisstatementJudgment".
+ */
+export interface MisstatementJudgment {
+  evidence_quote: string | null;
+  intent: Intent;
+  status: CatchStatus;
+}
+/**
+ * 면접관이 일부러 한 틀린 말과 그 결과입니다 (#133). 역량 점수에는 쓰지 않습니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "MisstatementResult".
+ */
+export interface MisstatementResult {
+  correction: string;
+  quote: string | null;
+  statement: string;
+  status: CatchStatus | null;
+  topic_id: string;
+  turn_id: string | null;
+}
+/**
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema
  * via the `definition` "ProgressEntry".
  */
@@ -412,6 +475,7 @@ export interface Report {
   competencies: CompetencyScore[];
   improvements: string[];
   kind: ReportKind;
+  misstatement: MisstatementResult | null;
   next_topics: string[];
   report_id: string;
   session_id: string;
