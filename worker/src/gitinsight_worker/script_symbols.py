@@ -24,6 +24,9 @@
 
 `.tsx`, `.jsx`의 컴포넌트도 함수나 클래스로 똑같이 뽑습니다.
 이름 참조 세기(#58)는 Python 문법 기준이라 여기서는 하지 않습니다. `references`는 비어 있습니다.
+
+`identifier_lines`는 Python의 `symbols.identifier_lines`와 같은 일을 합니다 (#134).
+면접관의 틀린 말을 "주제 코드가 직접 부르지 않는 함수를 부른다"로 만들 때(#133), 그 이름이 주제 코드 범위에 없는지 확인하는 데 씁니다.
 """
 
 import logging
@@ -32,7 +35,7 @@ from pathlib import PurePosixPath
 
 import tree_sitter_javascript
 import tree_sitter_typescript
-from tree_sitter import Language, Node, Parser
+from tree_sitter import Language, Node, Parser, Tree
 
 from gitinsight_contracts.common import SymbolKind, SymbolRef
 from gitinsight_worker.symbols import MAX_SYMBOL_ID_LENGTH, Container, ExtractedFile, line_range
@@ -64,6 +67,20 @@ _METHOD = "method_definition"
 _METHOD_NAMES = frozenset({"property_identifier", "private_property_identifier"})
 # 이 안의 정의는 함수 안에 중첩된 것으로 봅니다.
 _FUNCTION_SCOPES = _FUNCTION_VALUES | {_METHOD, "class_static_block"}
+
+# 식별자로 보는 노드입니다. 속성 이름(`this.repo.all()`의 `all`), 타입 이름, JSX 속성 이름도 넣습니다.
+# "이 이름을 부르지 않는다"를 확인하는 데 쓰므로 빠뜨리는 쪽보다 넓게 잡는 쪽이 안전합니다.
+# 레이블(`statement_identifier`)은 넣지 않습니다.
+_IDENTIFIERS = frozenset(
+    {
+        "identifier",
+        "property_identifier",
+        "private_property_identifier",
+        "shorthand_property_identifier",
+        "shorthand_property_identifier_pattern",
+        "type_identifier",
+    }
+)
 
 type Definition = tuple[str, bool, Node | None]
 
@@ -161,10 +178,55 @@ def _start_line(node: Node) -> int:
     return node.start_point.row + 1
 
 
-def extract_script(source: bytes, path: str, commit_sha: str) -> ExtractedFile:
+def parse_script(source: bytes, path: str) -> Tree:
     """확장자에 맞는 문법으로 읽습니다. 모르는 확장자는 JavaScript로 읽습니다."""
     language = _LANGUAGE_BY_SUFFIX.get(PurePosixPath(path).suffix.lower(), _JAVASCRIPT)
-    tree = Parser(language).parse(source)
+    return Parser(language).parse(source)
+
+
+def _definition_name(node: Node) -> Node | None:
+    """`_definition`이 정의로 본 노드에서 이름 노드입니다."""
+    if node.type in _FIELDS:
+        return node.child_by_field_name("name") or node.child_by_field_name("property")
+    if node.type == "assignment_expression":
+        left = node.child_by_field_name("left")
+        return None if left is None else left.child_by_field_name("property")
+    return node.child_by_field_name("name")
+
+
+def _is_import(node: Node) -> bool:
+    """import 문과 다른 파일에서 다시 내보내기(`export { a } from "./x"`)입니다."""
+    if node.type == "import_statement":
+        return True
+    return node.type == "export_statement" and node.child_by_field_name("source") is not None
+
+
+def identifier_lines(root: Node) -> Iterator[tuple[str, int]]:
+    """정의 이름과 import 문을 뺀 식별자를 소스 순서대로 (이름, 줄 번호)로 돌려줍니다.
+
+    정의 이름은 `extract_script`가 정의로 보는 것과 같은 규칙으로 고릅니다.
+    내보내지 않는 중첩 정의의 이름도 정의 이름이라 뺍니다.
+    """
+    definition_names = {
+        name.id for node, *_ in _walk(root) if (name := _definition_name(node)) is not None
+    }
+    stack: list[Node] = [root]
+    while stack:
+        node = stack.pop()
+        if _is_import(node):
+            continue
+        if node.type in _IDENTIFIERS:
+            name = _text(node)
+            if name is not None and node.id not in definition_names:
+                yield name, node.start_point.row + 1
+            continue
+        # 소스 순서대로 돌려주도록 뒤에서부터 쌓습니다.
+        stack.extend(reversed(node.children))
+
+
+def extract_script(source: bytes, path: str, commit_sha: str) -> ExtractedFile:
+    """확장자에 맞는 문법으로 읽습니다. 모르는 확장자는 JavaScript로 읽습니다."""
+    tree = parse_script(source, path)
     symbols: list[SymbolRef] = []
     seen: set[str] = set()
     # 내보낸 최상위 함수 이름입니다. 이 함수 바로 안의 함수만 중첩 정의 중에서 내보냅니다.
