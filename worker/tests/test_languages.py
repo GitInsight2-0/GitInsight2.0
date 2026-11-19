@@ -19,3 +19,10 @@ def test_unknown_extensions_and_case() -> None:
     assert language_of("Makefile") is None
     assert language_of("SCRIPT.PY") == "Python"
     assert count_languages(["a.bin", "LICENSE"]) == []
+
+
+def test_script_extensions() -> None:
+    assert language_of("web/app/page.tsx") == "TypeScript"
+    assert language_of("lib/index.mts") == "TypeScript"
+    assert language_of("server.cjs") == "JavaScript"
+    assert language_of("vite.config.mjs") == "JavaScript"

@@ -170,3 +170,17 @@ def test_definitions_are_capped(tmp_path: Path) -> None:
     found = external_definitions(tmp_path, by_id["app/caller.py::run"], index)
 
     assert [s.name for s in found] == [f"f{i}" for i in range(MAX_DEFINITIONS)]
+
+
+def test_script_files_are_not_linked(tmp_path: Path) -> None:
+    # 정의 요약은 Python 문법으로 읽으므로 TypeScript·JavaScript와는 연결하지 않습니다 (#72).
+    extra = {
+        "web/store.ts": "export function get_store() {\n  return find_client();\n}\n",
+    }
+    _, by_id, index = repo(tmp_path, extra)
+
+    # 같은 이름의 TS 함수가 있어도 Python 주제는 Python 정의를 그대로 찾습니다.
+    assert [s.path for s in index["get_store"]] == ["app/service.py"]
+    assert external_definitions_text(tmp_path, by_id["app/user.py::find_client"], index)
+    # TS 주제에는 Python 정의를 붙이지 않습니다.
+    assert external_definitions_text(tmp_path, by_id["web/store.ts::get_store"], index) == ""

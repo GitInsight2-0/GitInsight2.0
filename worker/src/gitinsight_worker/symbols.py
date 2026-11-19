@@ -48,7 +48,7 @@ class ExtractedFile:
     implicitly_called: frozenset[str] = frozenset()
 
 
-def _line_range(node: Node) -> tuple[int, int]:
+def line_range(node: Node) -> tuple[int, int]:
     start = node.start_point.row + 1
     end_row, end_column = node.end_point
     # 노드가 다음 줄 맨 앞에서 끝나면 마지막 줄은 그 앞줄입니다.
@@ -126,7 +126,7 @@ def extract_python(source: bytes, path: str, commit_sha: str) -> ExtractedFile:
             kind = SymbolKind.METHOD
         else:
             kind = SymbolKind.FUNCTION
-        start, end = _line_range(node)
+        start, end = line_range(node)
         if _implicitly_called(node, name):
             implicit.add(symbol_id)
         symbols.append(
