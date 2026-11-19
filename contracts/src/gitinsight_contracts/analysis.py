@@ -6,7 +6,7 @@ from typing import Annotated, Self
 from pydantic import Field, model_validator
 
 from gitinsight_contracts.base import Contract, count_sentences
-from gitinsight_contracts.common import CommitSha, SymbolRef
+from gitinsight_contracts.common import CommitSha, LineSpan, SymbolRef
 
 Id = Annotated[str, Field(min_length=1, max_length=100)]
 # 면접관이 그대로 읽는 문장입니다. 한 문장으로 제한해야 발화문 2문장 제한을 지킬 수 있습니다.
@@ -43,6 +43,9 @@ class ExpectedPoint(Contract):
     text: Annotated[str, Field(min_length=1, max_length=300)]
     # 이 요점이 빠졌을 때 PROBE 행동에서 그대로 묻는 질문입니다.
     probe_question: OneSentence
+    # 주제 코드에서 이 요점과 관계있는 줄입니다 (#156). 주제 심볼의 줄 범위 안에 있습니다.
+    # 고르지 못했거나 이 필드가 생기기 전의 분석 결과면 null이고, 그때는 주제 심볼 전체를 봅니다.
+    focus: LineSpan | None = None
 
     @model_validator(mode="after")
     def _check(self) -> Self:
@@ -135,6 +138,11 @@ class Topic(Contract):
         point_ids = [p.point_id for p in self.expected_points]
         if len(point_ids) != len(set(point_ids)):
             raise ValueError(f"{self.topic_id}: point_id가 중복됩니다")
+        for point in self.expected_points:
+            if point.focus is not None and not point.focus.within(self.symbol):
+                raise ValueError(
+                    f"{self.topic_id}: {point.point_id}의 focus가 주제 코드 범위 밖입니다"
+                )
         inverted = self.misstatement.point_id if self.misstatement is not None else None
         if inverted is not None and inverted not in point_ids:
             raise ValueError(f"{self.topic_id}: 틀린 말의 point_id {inverted}가 요점에 없습니다")

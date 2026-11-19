@@ -186,9 +186,23 @@ export interface Topic {
  * via the `definition` "ExpectedPoint".
  */
 export interface ExpectedPoint {
+  focus: LineSpan | null;
   point_id: string;
   probe_question: string;
   text: string;
+}
+/**
+ * 심볼 안의 좁은 줄 범위입니다 (#156). 분석 결과에서 얻고, LLM이 만들지 않습니다.
+ *
+ * if·for·try 블록처럼 이름이 없는 범위라 symbol_id, name, kind가 없습니다.
+ * 파일과 커밋은 이 범위를 담은 심볼(SymbolRef)의 것을 씁니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "LineSpan".
+ */
+export interface LineSpan {
+  end_line: number;
+  start_line: number;
 }
 /**
  * 면접관이 일부러 하는 틀린 말입니다 (#133).
@@ -271,6 +285,7 @@ export interface BrainReply {
   action: Action;
   depth: number;
   done: boolean;
+  focus: LineSpan | null;
   highlight: SymbolRef | null;
   remaining_sec: number;
   topic_id: string | null;
