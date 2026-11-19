@@ -95,8 +95,11 @@
 
 - **서버**: Railway API 서비스 → Deployments → 이전 성공 배포 → Redeploy
 - **웹**: Vercel → Deployments → 이전 배포 → Promote to Production (Instant Rollback)
-- **DB 마이그레이션은 되돌리지 않습니다.** 지금까지의 마이그레이션(0001~0005)은 새 테이블이나 null 허용 열만 더해서, 이전 서버 버전도 그대로 돕니다.
+- **DB 마이그레이션은 되돌리지 않습니다.** 마이그레이션 0001~0005는 새 테이블이나 null 허용 열만 더해서, 이전 서버 버전도 그대로 돕니다.
   새 마이그레이션도 이 방식을 지키면 서버만 롤백하면 됩니다.
+- **예외: 0006(분석기 버전, #171) 이전 서버로 롤백할 때는 DB도 0005로 되돌립니다.**
+  0006은 분석 재사용 키(`uq_analyses_reusable_key`)에 `analyzer_version`을 더합니다. 이전 서버는 예전 키로 `INSERT … ON CONFLICT`를 하므로 맞는 인덱스가 없어 분석 요청이 실패합니다.
+  되돌리기: 백업을 만든 뒤 `uv run alembic -c api/alembic.ini downgrade 0005`. 키마다 가장 최근 기록만 남기고 나머지 재사용 기록은 failed(`AnalyzerVersionDowngraded`)로 닫습니다.
   꼭 되돌려야 하면 Railway Public URL로 `uv run alembic -c api/alembic.ini downgrade -1`을 직접 실행하고, 그 전에 Railway Postgres의 Backups에서 백업을 만듭니다.
 - 환경 변수만 잘못 넣었으면 롤백 대신 변수를 고치고 재배포합니다 (약 1~2분).
 

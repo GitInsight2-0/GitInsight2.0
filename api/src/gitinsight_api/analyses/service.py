@@ -32,6 +32,9 @@ NO_CONTEXT = LaunchContext()
 
 
 class Launcher(Protocol):
+    # 이 실행기가 만드는 분석 결과의 버전입니다 (#171). 캐시 키에 들어가서, 버전이 바뀌면 같은 커밋도 다시 분석합니다.
+    analyzer_version: str
+
     async def launch(self, record: AnalysisRecord, context: LaunchContext = NO_CONTEXT) -> None:
         """분석 작업을 시작하거나 대기열에 넣습니다. 끝까지 기다리지 않고 바로 돌아옵니다."""
         ...
@@ -70,7 +73,12 @@ class AnalysisService:
         같은 키로 진행 중인 분석이 있으면 새로 시작하지 않고 그 analysis_id를 돌려줍니다.
         context는 새로 분석을 시작할 때만 Launcher에 넘깁니다.
         """
-        key = AnalysisKey(repo_full_name=repo_full_name, commit_sha=commit_sha, user_id=user_id)
+        key = AnalysisKey(
+            repo_full_name=repo_full_name,
+            commit_sha=commit_sha,
+            user_id=user_id,
+            analyzer_version=self._launcher.analyzer_version,
+        )
         record, created = await self._store.get_or_create(key)
         if created:
             try:

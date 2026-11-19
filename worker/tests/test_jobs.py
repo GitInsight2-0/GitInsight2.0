@@ -12,7 +12,12 @@ from gitinsight_api.analyses.service import (
     AnalysisService,
     LaunchContext,
 )
-from gitinsight_api.analyses.store import AnalysisKey, AnalysisRecord, InMemoryAnalysisStore
+from gitinsight_api.analyses.store import (
+    UNVERSIONED,
+    AnalysisKey,
+    AnalysisRecord,
+    InMemoryAnalysisStore,
+)
 from gitinsight_api.brain.repository import InMemorySessionRepository
 from gitinsight_api.brain.service import InterviewBrain
 from gitinsight_api.llm import LLMTimeoutError
@@ -30,6 +35,7 @@ from gitinsight_worker.jobs import (
     github_cloner,
     requester_from_login,
 )
+from gitinsight_worker.version import ANALYZER_VERSION
 
 from worker_test_support import make_origin, material
 
@@ -63,6 +69,15 @@ def launcher_for(
         clone_for=local_cloner(origin),
         work_dir=work,
     )
+
+
+def test_launcher_reports_analyzer_version() -> None:
+    # 서비스가 이 값을 캐시 키에 넣어, 버전이 오르면 같은 커밋도 다시 분석합니다 (#171).
+    launcher = InProcessLauncher(InMemoryAnalysisStore(), FakeLLM())
+
+    assert launcher.analyzer_version == ANALYZER_VERSION
+    # "0"은 버전이 생기기 전 기록의 값이라, 지금 워커가 그 결과를 다시 쓰지 않습니다.
+    assert ANALYZER_VERSION != UNVERSIONED
 
 
 async def test_request_runs_analysis_and_result_starts_interview(

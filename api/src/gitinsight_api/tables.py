@@ -53,6 +53,8 @@ analyses = Table(
     Column("repo_full_name", Text, nullable=False),
     Column("commit_sha", Text, nullable=False),
     Column("user_id", Text, nullable=False),
+    # 분석 결과를 만든 워커 버전입니다 (#171). 캐시 키에 들어갑니다. 버전이 생기기 전 기록은 "0"입니다.
+    Column("analyzer_version", Text, nullable=False, server_default="0"),
     Column("status", Text, nullable=False),
     Column("progress", Double, nullable=False),
     # failed일 때 예외 종류 이름만 넣습니다.
@@ -72,6 +74,7 @@ analyses = Table(
         "repo_full_name",
         "commit_sha",
         "user_id",
+        "analyzer_version",
         unique=True,
         postgresql_where=text("status <> 'failed'"),
     ),

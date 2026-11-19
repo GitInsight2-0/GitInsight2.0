@@ -22,6 +22,7 @@ from gitinsight_contracts.api import AnalysisState, AnalysisStatus
 from gitinsight_worker.contribution import Requester
 from gitinsight_worker.git import GITHUB_HTTPS, Cloner, git_cloner
 from gitinsight_worker.pipeline import run_analysis
+from gitinsight_worker.version import ANALYZER_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,9 @@ class InProcessLauncher:
     대기 중인 분석은 동시 실행 수가 비면 시작합니다. 기다리는 동안에는 상태를 갱신하지 않으므로,
     대기가 STALE_AFTER(10분)를 넘지 않을 만큼 동시 실행 수를 둡니다.
     """
+
+    # 서비스가 캐시 키에 넣는 분석기 버전입니다 (#171).
+    analyzer_version = ANALYZER_VERSION
 
     def __init__(
         self,
