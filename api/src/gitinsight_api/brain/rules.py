@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from gitinsight_api.brain.config import InterviewConfig
 from gitinsight_api.brain.state import TopicProgress
 from gitinsight_contracts.interview import Action
-from gitinsight_contracts.llm import CoverageStatus, Intent, Judgment
+from gitinsight_contracts.llm import CoverageStatus, Intent, Judgment, MisstatementJudgment
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,19 @@ class RuleInput:
     prepared_followups_left: int
     # 이 주제에 판단 없이 지나간 답변이 있습니다. 그 답변이 다룬 포인트를 모르므로 충족률을 믿을 수 없습니다.
     coverage_unknown: bool = False
+    # 이 주제에 서버가 검증한 틀린 말이 있고, 이번 면접에서 아직 쓰지 않았습니다 (#133).
+    misstatement_ready: bool = False
+
+
+@dataclass(frozen=True)
+class MisstatementInput:
+    """면접관이 일부러 한 틀린 말에 답한 턴의 규칙 입력입니다."""
+
+    remaining_sec: int
+    progress: TopicProgress
+    has_next_topic: bool
+    # 검증을 통과한 판단입니다. 시간 초과·검증 실패면 None입니다.
+    judgment: MisstatementJudgment | None
 
 
 @dataclass(frozen=True)
@@ -120,9 +133,61 @@ def _decide(
     return _next_topic(rule_input, config, "topic_done")
 
 
+def _ends_topic(decision: Decision) -> bool:
+    """이 주제의 질문을 다 한 결정인지입니다. 시간이 모자라서 마무리하는 경우는 아닙니다."""
+    if decision.action is Action.NEXT_TOPIC:
+        return True
+    return decision.action is Action.WRAP_UP and decision.rule.endswith(":no_more_topics")
+
+
+def _should_misstate(
+    rule_input: RuleInput, config: InterviewConfig, decision: Decision, covered: tuple[str, ...]
+) -> bool:
+    """주제를 마칠 때 일부러 틀린 말을 한 번 할지 정합니다 (#133).
+
+    - 이 주제의 질문을 다 했을 때만 합니다. 질문 도중에는 끼어들지 않습니다.
+    - 방금 답변이 질문에 답한 것이고, 이 주제에서 맞게 설명한 요점이 하나라도 있어야 합니다.
+      모르겠다고 하거나 다른 이야기를 하다 넘어가는 주제에서는 짚을 수 없는 말을 하지 않습니다.
+    - 답을 듣고 정정할 시간이 남아 있어야 합니다.
+    """
+    judgment = rule_input.judgment
+    return (
+        config.misstatement
+        and rule_input.misstatement_ready
+        and _ends_topic(decision)
+        and judgment is not None
+        and judgment.intent is Intent.ANSWER
+        and bool(covered)
+        and rule_input.remaining_sec >= config.min_sec_for_new_topic
+    )
+
+
 def decide(rule_input: RuleInput, config: InterviewConfig) -> Decision:
     covered = covered_after(rule_input)
     total = len(rule_input.point_ids)
     ratio = len(covered) / total if total else 1.0
     decision = _decide(rule_input, config, ratio, set(covered))
+    if _should_misstate(rule_input, config, decision, covered):
+        decision = Decision(Action.MISSTATE, f"misstate:{decision.rule}")
     return replace(decision, covered_after=covered, coverage_ratio=ratio)
+
+
+def decide_after_misstatement(rule_input: MisstatementInput, config: InterviewConfig) -> Decision:
+    """면접관이 일부러 한 틀린 말에 답한 뒤의 행동입니다 (#133).
+
+    - 다시 말해 달라고 하거나 뜻을 되물으면 틀린 말을 다시 말합니다. 아직 답하지 않은 것입니다.
+    - 그 밖에는 짚었든 못 짚었든 이 주제를 마칩니다. 판단이 없어도 같습니다.
+      짚었는지에 따라 무엇을 말할지(인정 또는 정정)는 턴 처리에서 정합니다.
+    - 이 주제에서 다룬 요점은 그대로 둡니다. 이 답변은 요점 판단에 쓰지 않습니다.
+    """
+    kept = tuple(rule_input.progress.covered_points)
+    if rule_input.remaining_sec <= 0:
+        return Decision(Action.WRAP_UP, "misstate:time_over", covered_after=kept)
+    judgment = rule_input.judgment
+    if judgment is not None and judgment.intent in (Intent.REPEAT, Intent.CLARIFY):
+        return Decision(Action.REPEAT, "misstate:repeat", covered_after=kept)
+    if not rule_input.has_next_topic:
+        return Decision(Action.WRAP_UP, "misstate:answered:no_more_topics", covered_after=kept)
+    if rule_input.remaining_sec < config.min_sec_for_new_topic:
+        return Decision(Action.WRAP_UP, "misstate:answered:not_enough_time", covered_after=kept)
+    return Decision(Action.NEXT_TOPIC, "misstate:answered", covered_after=kept)

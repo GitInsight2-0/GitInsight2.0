@@ -8,6 +8,7 @@
   가장 잘한 답변 하나만 보고 높은 점수를 주지 않게 하기 위해서입니다.
 - 근거의 코드 위치는 면접 중 화면에 띄운 코드일 때만 붙입니다.
 - 질문받은 함수별 상태(코드 지도)는 LLM 없이 턴 기록으로 집계합니다 (report/code_map.py, #107).
+- 면접관이 일부러 한 틀린 말에 답한 턴은 점수 프롬프트와 근거에서 빼고, 결과만 따로 적습니다 (#133).
 """
 
 import asyncio
@@ -18,6 +19,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from gitinsight_api.brain.judge import judge_answer
+from gitinsight_api.brain.misstatement import catch_status, judge_misstatement
 from gitinsight_api.brain.quotes import EXACT, QuoteMatcher
 from gitinsight_api.brain.state import SessionState, TurnRecord
 from gitinsight_api.llm import LLMClient, LLMError, Message
@@ -31,6 +33,7 @@ from gitinsight_contracts.report import (
     CodeMap,
     CompetencyScore,
     Evidence,
+    MisstatementResult,
     Report,
     ReportKind,
     TopicReport,
@@ -118,7 +121,8 @@ def build_report_messages(
             "after_hint": t.turn_id in hinted,
         }
         for t in turns
-        if t.transcript.strip()
+        # 일부러 한 틀린 말에 답한 턴은 점수에 쓰지 않습니다 (#133).
+        if t.transcript.strip() and not t.misstatement
     ]
     user = "\n\n".join(
         [
@@ -150,7 +154,8 @@ def validate_competencies(
     근거의 코드 위치는 면접 중 그 주제에서 화면에 띄운 코드일 때만 붙입니다.
     띄운 적 없는 코드면 인용문은 남기고 코드 위치만 뺍니다.
     """
-    by_id = {str(t.turn_id): t for t in turns}
+    # 일부러 한 틀린 말에 답한 턴은 역량의 근거가 될 수 없습니다 (#133).
+    by_id = {str(t.turn_id): t for t in turns if not t.misstatement}
     scores: list[CompetencyScore] = []
     seen = set()
     for draft in drafts:
@@ -212,7 +217,7 @@ def turn_rows(turns: list[TurnRecord]) -> list[TurnRow]:
             topic_id=t.topic_id,
             question=t.question,
             transcript=t.transcript,
-            intent=t.judgment.intent if t.judgment else None,
+            intent=t.judgment.intent if t.judgment else (t.catch.intent if t.catch else None),
             covered_points=sorted(
                 c.point_id
                 for c in (t.judgment.coverage if t.judgment else [])
@@ -223,6 +228,34 @@ def turn_rows(turns: list[TurnRecord]) -> list[TurnRow]:
         )
         for t in turns
     ]
+
+
+def misstatement_result(
+    analysis: AnalysisResult, state: SessionState, turns: list[TurnRecord]
+) -> MisstatementResult | None:
+    """면접관이 일부러 한 틀린 말과 그 결과입니다 (#133). 하지 않은 면접이면 None입니다.
+
+    틀린 말과 정답은 분석 결과에서 그대로 가져옵니다. 답하지 않았거나 판단하지 못했어도 정답은 보여 줍니다.
+    여러 번 답했으면(다시 말해 달라고 한 뒤 답함) 짚었는지가 정해진 마지막 답변을 씁니다.
+    """
+    if state.misstatement_topic_id is None:
+        return None
+    misstatement = analysis.topic(state.misstatement_topic_id).misstatement
+    if misstatement is None:
+        return None
+    answers = [t for t in turns if t.misstatement]
+    decided = [t for t in answers if catch_status(t.catch) is not None]
+    final = decided[-1] if decided else (answers[-1] if answers else None)
+    status = catch_status(final.catch) if final is not None else None
+    quote = final.catch.evidence_quote if final is not None and final.catch is not None else None
+    return MisstatementResult(
+        topic_id=state.misstatement_topic_id,
+        turn_id=final.turn_id if final is not None else None,
+        statement=misstatement.statement,
+        correction=misstatement.correction,
+        status=status,
+        quote=quote if status is not None else None,
+    )
 
 
 @dataclass
@@ -243,7 +276,30 @@ class ReportBuilder:
         """판단이 비어 있는 턴(시간 초과, 검증 실패 등)을 다시 판단합니다. 저장된 턴은 바꾸지 않습니다."""
         semaphore = asyncio.Semaphore(MAX_REJUDGE_CONCURRENCY)
 
+        async def rejudge_catch(turn: TurnRecord) -> TurnRecord:
+            # 일부러 한 틀린 말에 답한 턴은 요점이 아니라 짚었는지만 다시 판단합니다 (#133).
+            if turn.catch is not None or not turn.transcript.strip() or turn.topic_id is None:
+                return turn
+            topic = analysis.topic(turn.topic_id)
+            if topic.misstatement is None:
+                return turn
+            async with semaphore:
+                outcome = await judge_misstatement(
+                    self.llm,
+                    topic,
+                    topic.misstatement,
+                    turn.transcript,
+                    timeout_s=self.rejudge_timeout_s,
+                    model=self.judge_model,
+                    quote_matcher=self.quote_matcher,
+                )
+            if outcome.judgment is None:
+                return turn
+            return turn.model_copy(update={"catch": outcome.judgment})
+
         async def rejudge(turn: TurnRecord) -> TurnRecord:
+            if turn.misstatement:
+                return await rejudge_catch(turn)
             if turn.judgment is not None or not turn.transcript.strip() or turn.topic_id is None:
                 return turn
             async with semaphore:
@@ -275,7 +331,7 @@ class ReportBuilder:
         if self.force_prepared:
             return self._turn_table(analysis, state, topic_ids, turns, previous_code_maps)
         turns = await self.rejudge_missing(analysis, state, turns)
-        answered = [t for t in turns if t.transcript.strip()]
+        answered = [t for t in turns if t.transcript.strip() and not t.misstatement]
         if not answered:
             return self._turn_table(analysis, state, topic_ids, turns, previous_code_maps)
         try:
@@ -305,6 +361,7 @@ class ReportBuilder:
             next_topics=_clean_list(draft.next_topics),
             turns=turn_rows(turns),
             code_map=build_code_map(analysis, state, turns, previous_code_maps),
+            misstatement=misstatement_result(analysis, state, turns),
         )
 
     def _turn_table(
@@ -327,4 +384,5 @@ class ReportBuilder:
             turns=turn_rows(turns),
             # 판단이 있는 답변만 집계하므로, 판단 없이 진행한 면접이면 질문받은 함수 목록은 비어 있습니다.
             code_map=build_code_map(analysis, state, turns, previous_code_maps),
+            misstatement=misstatement_result(analysis, state, turns),
         )

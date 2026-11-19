@@ -145,3 +145,12 @@ async def test_force_prepared_switch_keeps_llm_out_of_interview_and_report(
     assert fake.calls == []
     assert report.kind is ReportKind.TURN_TABLE
     assert report.turns[0].fallback_reason is FallbackReason.FORCED
+
+
+def test_misstatement_switch_reaches_the_brain_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert Settings(_env_file=None).brain_misstatement is True  # type: ignore[call-arg]
+    monkeypatch.setenv("BRAIN_MISSTATEMENT", "false")
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.brain_misstatement is False
+    brain = build_fixture_brain(settings, llm=None)
+    assert brain._config.misstatement is False  # pyright: ignore[reportPrivateUsage]
