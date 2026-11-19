@@ -33,6 +33,7 @@ from gitinsight_api.llm import InMemoryCostRecorder, LiteLLMClient
 from gitinsight_api.settings import Settings
 from gitinsight_contracts.analysis import AnalysisResult, Topic
 from gitinsight_contracts.api import AnalysisState
+from gitinsight_contracts.common import LineSpan
 from gitinsight_contracts.fixtures import load_analysis
 from gitinsight_worker.contribution import Requester
 from gitinsight_worker.git import git_cloner
@@ -83,12 +84,22 @@ def render(result: AnalysisResult, recorder: InMemoryCostRecorder, model: str) -
             f"- 힌트: {topic.hint}",
             f"- 관련 심볼: {', '.join(s.symbol_id for s in topic.related_symbols) or '없음'}",
             "- 기대 포인트:",
-            *(f"  - {p.text} → {p.probe_question}" for p in topic.expected_points),
+            *(
+                f"  - {p.text} → {p.probe_question} [{focus_text(topic, p.focus)}]"
+                for p in topic.expected_points
+            ),
             "- 꼬리질문:",
             *(f"  - {f.question} ({f.symbol_id or '-'})" for f in topic.prepared_followups),
             *misstatement_lines(topic),
         ]
     return lines
+
+
+def focus_text(topic: Topic, focus: LineSpan | None) -> str:
+    """요점의 강조 범위입니다 (#156). 사람이 코드와 대조해 요점과 맞는지 봅니다."""
+    if focus is None:
+        return "강조: 주제 전체"
+    return f"강조: {focus.start_line}–{focus.end_line}줄 (주제 {topic.symbol.start_line}–{topic.symbol.end_line}줄)"
 
 
 def misstatement_lines(topic: Topic) -> list[str]:

@@ -5,6 +5,7 @@ import textwrap
 
 from gitinsight_api.llm.fake import FakeLLM, FakeStep
 from gitinsight_contracts.analysis import ContributionLabel
+from gitinsight_contracts.common import LineSpan
 from gitinsight_worker import stage2
 from gitinsight_worker.candidates import select_candidates
 from gitinsight_worker.focus import MAX_CANDIDATES, MIN_SYMBOL_LINES, focus_candidates
@@ -253,12 +254,17 @@ def test_chosen_ids_map_to_points_and_unknown_ids_are_dropped(tmp_path) -> None:
     assert {k: (v.start_line, v.end_line) for k, v in chosen.items()} == {"p1": (10, 13)}
 
 
-async def test_focus_does_not_add_calls(tmp_path) -> None:
+async def test_points_get_focus_without_extra_calls(tmp_path) -> None:
     stage1, _ = _long_repo(tmp_path)
-    llm = FakeLLM(responder=lambda *_: FakeStep(material(focus_ids=["b1", "b2", "b3"])))
+    llm = FakeLLM(responder=lambda *_: FakeStep(material(focus_ids=["b1", "b9", "b3"])))
 
-    topics = await generate_topics(tmp_path, stage1, llm, target=1)
+    [topic] = await generate_topics(tmp_path, stage1, llm, target=1)
 
-    assert len(topics) == 1
+    # 줄 범위는 서버 후보에서 옵니다. 모르는 id(b9)인 요점은 범위 없이 둡니다.
+    assert [p.focus for p in topic.expected_points] == [
+        LineSpan(start_line=3, end_line=9),
+        None,
+        LineSpan(start_line=14, end_line=20),
+    ]
     [call] = llm.calls_for(TOPIC_PURPOSE)
     assert "focus_candidates" in "\n".join(m["content"] for m in call.messages)

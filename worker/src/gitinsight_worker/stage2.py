@@ -544,11 +544,24 @@ def point_focus(
 
 
 def attach_focus(material: TopicMaterial, topic: Topic, focus: Iterable[FocusCandidate]) -> Topic:
-    """요점에 강조 범위를 붙입니다. 계약 필드(#156, B)가 들어오면 ExpectedPoint.focus에 넣습니다."""
+    """요점에 강조 범위(ExpectedPoint.focus)를 붙입니다. 고른 것이 없으면 주제를 그대로 돌려줍니다.
+
+    계약 검증(주제 심볼 범위 안)을 다시 거칩니다. 후보는 늘 그 범위 안이라 실패하지 않지만,
+    실패하면 범위 없이 주제를 씁니다. 강조 범위 때문에 주제를 잃지 않습니다.
+    """
     chosen = point_focus(material, topic, focus)
-    if chosen:
-        logger.info("focus_chosen points=%d", len(chosen))
-    return topic
+    if not chosen:
+        return topic
+    data = topic.model_dump(mode="json")
+    for point in data["expected_points"]:
+        found = chosen.get(point["point_id"])
+        if found is not None:
+            point["focus"] = {"start_line": found.start_line, "end_line": found.end_line}
+    try:
+        return Topic.model_validate(data)
+    except ValidationError:
+        logger.warning("focus_invalid topic=%s", topic.topic_id)
+        return topic
 
 
 def _dedupe[T](items: list[T], *, key: Callable[[T], str]) -> list[T]:
