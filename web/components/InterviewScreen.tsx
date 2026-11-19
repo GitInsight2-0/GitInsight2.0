@@ -866,7 +866,9 @@ export default function InterviewScreen({
                     className={micOff ? `${styles.micButton} ${styles.micButtonOff}` : styles.micButton}
                     onClick={toggleMic}
                     disabled={voiceState !== "live" || review !== null}
-                    aria-label={micOff ? "마이크 켜기" : "마이크 끄기"}
+                    // 이름은 그대로 두고 눌림 상태로 켜짐·꺼짐을 알립니다. 화면 낭독기가 "마이크 끄기, 눌림"처럼 읽습니다.
+                    aria-label="마이크 끄기"
+                    aria-pressed={micOff}
                     title={micOff ? "마이크 켜기" : "마이크 끄기"}
                   >
                     {micOff ? <MicOffIcon /> : <MicIcon />}
@@ -881,7 +883,7 @@ export default function InterviewScreen({
                         ? "그대로 두면 보내요. 잘못 들렸으면 고치거나 지우세요"
                         : micOff
                         ? "답할 때 마이크 버튼을 눌러 켜세요. 꺼진 동안의 소리는 보내지 않아요"
-                        : `말을 마치고 ${SILENCE_SEC}초 쉬면 답변이 전송돼요. 말하지 않을 때는 마이크를 꺼 두세요`}
+                        : `말을 마치고 ${SILENCE_SEC}초 쉬면 답변이 전송돼요. 다 말했으면 마이크를 꺼도 바로 보내요`}
                     </div>
                   </div>
                 </div>
