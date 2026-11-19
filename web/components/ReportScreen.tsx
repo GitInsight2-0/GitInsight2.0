@@ -120,16 +120,28 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
 
   // 근거 인용문의 "n번째 답변" 링크는 접힌 답변 기록 안을 가리킵니다. 가리키는 곳이 접혀 있으면 펼칩니다 (#132).
   useEffect(() => {
-    const openTarget = () => {
-      const id = decodeURIComponent(window.location.hash.slice(1));
+    const open = (id: string) => {
       const el = id ? document.getElementById(id) : null;
       if (!el) return;
       for (let d = el.closest("details"); d; d = d.parentElement?.closest("details") ?? null) d.open = true;
       el.scrollIntoView({ block: "start" });
     };
-    openTarget();
-    window.addEventListener("hashchange", openTarget);
-    return () => window.removeEventListener("hashchange", openTarget);
+    const fromHash = () => open(decodeURIComponent(window.location.hash.slice(1)));
+    // 같은 링크를 다시 누르면 주소의 #이 그대로라 hashchange가 오지 않습니다. 누를 때 바로 펼칩니다 (#155 리뷰).
+    const onClick = (e: MouseEvent) => {
+      const a = (e.target as Element | null)?.closest?.('a[href^="#"]');
+      if (!a) return;
+      const id = decodeURIComponent((a.getAttribute("href") ?? "").slice(1));
+      // 기본 동작(주소의 # 바꾸기)이 끝난 뒤 펼치고 이동합니다.
+      setTimeout(() => open(id), 0);
+    };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    document.addEventListener("click", onClick);
+    return () => {
+      window.removeEventListener("hashchange", fromHash);
+      document.removeEventListener("click", onClick);
+    };
   }, []);
 
   return (
@@ -266,6 +278,8 @@ function CompetencyCard({
         <LevelMeter level={score.level} />
       </div>
       {compared && <Change now={score.level} before={previousLevel} />}
+      {/* 근거가 없으면 빈 칸이 펼쳐지지 않게 접기를 두지 않습니다 (#155 리뷰) */}
+      {score.evidence.length > 0 && (
       <details className={styles.evidenceFold}>
         <summary>근거가 된 답변 {score.evidence.length}개 보기</summary>
       <ul className={styles.evidence}>
@@ -283,6 +297,7 @@ function CompetencyCard({
         })}
       </ul>
       </details>
+      )}
     </li>
   );
 }
