@@ -442,9 +442,9 @@ export interface MisstatementResult {
   correction: string;
   quote: string | null;
   statement: string;
-  status: CatchStatus;
+  status: CatchStatus | null;
   topic_id: string;
-  turn_id: string;
+  turn_id: string | null;
 }
 /**
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema

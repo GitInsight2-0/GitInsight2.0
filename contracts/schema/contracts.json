@@ -898,14 +898,28 @@
           "type": "string"
         },
         "status": {
-          "$ref": "#/$defs/CatchStatus"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatchStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "topic_id": {
           "type": "string"
         },
         "turn_id": {
-          "format": "uuid",
-          "type": "string"
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

@@ -110,12 +110,13 @@ class MisstatementResult(Contract):
     """면접관이 일부러 한 틀린 말과 그 결과입니다 (#133). 역량 점수에는 쓰지 않습니다."""
 
     topic_id: str
-    # 면접자가 틀린 말에 답한 턴입니다.
-    turn_id: UUID
+    # 면접자가 틀린 말에 답한 턴입니다. 답하기 전에 면접이 끝났으면 null입니다.
+    turn_id: UUID | None
     statement: str
     # 면접자가 틀린 내용을 맞는 것으로 기억하지 않게 늘 보여 줍니다.
     correction: str
-    status: CatchStatus
+    # 답하지 않았거나 판단하지 못했으면 null입니다. 못 짚음으로 치지 않습니다.
+    status: CatchStatus | None
     # 판단의 근거가 된 답변 인용문입니다. 자막과 대조해 통과한 것만 남깁니다.
     quote: str | None
 
