@@ -567,10 +567,6 @@ export default function InterviewScreen({
                   <MicIcon />
                   음성은 Chrome에서 이어폰을 끼고 쓰세요. 스피커로 들으면 AI가 자기 목소리를 듣고 끊길 수 있습니다.
                 </p>
-                {/* 언제, 어느 질문에서 하는지는 알리지 않습니다 (#133). 다시 보기 면접에서는 하지 않습니다. */}
-                {!reviewOnly && (
-                  <p className={styles.note}>면접관이 확인을 위해 일부러 틀린 말을 할 수 있습니다.</p>
-                )}
               </>
             )}
             <p role="status" aria-live="polite" className={styles.error}>
