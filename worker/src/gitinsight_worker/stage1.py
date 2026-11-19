@@ -32,15 +32,31 @@ from gitinsight_worker.contribution import (
     blame_file,
     summarize,
 )
-from gitinsight_worker.languages import PYTHON, count_languages, language_of
-from gitinsight_worker.symbols import extract_python
+from gitinsight_worker.languages import (
+    JAVASCRIPT,
+    PYTHON,
+    TYPESCRIPT,
+    count_languages,
+    language_of,
+)
+from gitinsight_worker.script_symbols import extract_script
+from gitinsight_worker.symbols import ExtractedFile, extract_python
 
 logger = logging.getLogger(__name__)
 
 # 의존성과 빌드 결과는 레포 작성자의 코드가 아니므로 건너뜁니다.
 IGNORED_DIRS = frozenset(
-    {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".tox"}
+    {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".tox", ".next"}
 )
+
+# 언어별 심볼 추출기입니다. 여기 없는 언어는 파일 수만 셉니다.
+_EXTRACTORS: dict[str, Callable[[bytes, str, str], ExtractedFile]] = {
+    PYTHON: extract_python,
+    JAVASCRIPT: extract_script,
+    TYPESCRIPT: extract_script,
+}
+# 압축한 배포용 파일은 사람이 쓴 코드가 아니라 심볼을 뽑지 않습니다.
+_MINIFIED_SUFFIXES = (".min.js", ".min.mjs", ".min.cjs")
 
 PROGRESS_STARTED = 0.0
 PROGRESS_CLONED = 0.2
@@ -57,14 +73,14 @@ class Stage1Result:
     contributions: dict[str, Contribution] = field(default_factory=dict)
     # symbol_id별로 레포 안 다른 곳에서 이름으로 참조한 횟수입니다 (#58). 2단계 프롬프트에만 쓰고 저장하지 않습니다.
     # 데코레이터가 붙었거나 특수 메서드라 프레임워크가 부를 수 있는 심볼은 넣지 않습니다(알 수 없음).
+    # 참조는 Python 파일에서만 세므로 TypeScript·JavaScript 심볼도 넣지 않습니다 (#72).
     references: dict[str, int] = field(default_factory=dict)
 
 
 class NoSupportedCodeError(Exception):
-    """레포에 지원하는 언어(지금은 Python)의 함수·클래스가 없습니다 (#70).
+    """레포에 지원하는 언어(Python, TypeScript, JavaScript)의 함수·클래스가 없습니다 (#70, #72).
 
     분석 기록의 error에는 이 예외 종류 이름이 저장되고, 웹은 이 이름으로 "지원하지 않는 언어" 안내를 보여 줍니다.
-    TypeScript·JavaScript 지원은 #72입니다.
     """
 
 
@@ -119,9 +135,10 @@ def analyze_tree(
     implicit: set[str] = set()
     symbol_count = 0
     for path in paths:
-        if language_of(path) != PYTHON:
+        extract = _EXTRACTORS.get(language_of(path) or "")
+        if extract is None or path.lower().endswith(_MINIFIED_SUFFIXES):
             continue
-        extracted = extract_python((root / path).read_bytes(), path, commit_sha)
+        extracted = extract((root / path).read_bytes(), path, commit_sha)
         symbols.extend(extracted.symbols)
         symbol_count += extracted.definition_count
         name_references.update(extracted.references)
@@ -145,7 +162,7 @@ def analyze_tree(
         references={
             s.symbol_id: name_references[s.name] - self_references.get(s.symbol_id, 0)
             for s in symbols
-            if s.symbol_id not in implicit
+            if s.symbol_id not in implicit and language_of(s.path) == PYTHON
         },
     )
 

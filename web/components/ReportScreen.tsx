@@ -12,6 +12,7 @@ import type {
 } from "@gitinsight/contracts";
 import { useEffect, useState } from "react";
 import { interviewHref } from "@/lib/analyses";
+import GrowthChart from "./GrowthChart";
 import {
   ACTION_LABEL,
   COMPETENCY_LABEL,
@@ -155,6 +156,8 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
           )}
         </section>
       )}
+
+      {progress && <GrowthChart entries={progress} sessionId={report.session_id} />}
 
       {report.code_map && <CodeMapSection codeMap={report.code_map} topics={report.topics} />}
 

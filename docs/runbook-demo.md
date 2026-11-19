@@ -17,8 +17,8 @@
 | 판단 LLM | 꼬리질문이 미리 만든 질문으로만 나옴, 로그에 `fallback=timeout/error` | 판단 모델 바꾸기 (아래 A) | `BRAIN_FORCE_PREPARED=true` (아래 B) | 텍스트 모드 + 미리 만든 질문 | B | 1차·2차 준비됨 (서버 API에도 적용), 화면 연결은 로그인(#18) 후. 판단·리포트 LLM은 Gemini만 쓰기로 해서 다른 제공사 대비책은 없음 (#63) |
 | 리포트 LLM | 종료 후 리포트가 판단 표(`kind=turn_table`)로 나옴 | 그대로 진행 (판단 표가 대비책) | 리포트 모델을 바꾼 뒤 다음 세션 (아래 A) | | B·D | 판단 표 생성 준비됨, 화면은 D |
 | 음성 제공사 (Gemini Live) | 연결 실패, 소리 없음, 자막 멈춤 | 텍스트 모드 | 녹화 영상 | - | C | 1차 구현 (#30): 면접 화면에서 음성 연결이 끊기거나 실패하면 같은 세션으로 텍스트 모드 자동 전환, "텍스트로 바꾸기"로 직접 전환. 소리 없음·자막 멈춤은 자동 감지하지 않으므로 발표자가 직접 전환. 음성 AI는 Gemini만 쓰기로 해서 다른 제공사 대비책은 없음 |
-| 분석 | 분석이 끝나지 않음, 실패 | `(레포, SHA)` 캐시 | DB에 넣어 둔 데모 분석 스냅샷 | | A | 저장소·스냅샷 준비됨 (#12): `(레포, SHA, 요청자)` 기록 재사용, `scripts/seed_demo_analysis.py`로 스냅샷 넣기. 분석 요청 API(`POST /api/analyses`)와 레포 선택 화면 연결됨 |
-| GitHub App·비공개 레포 | 로그인 실패, 레포 목록 비어 있음 | 같은 앱으로 공개 데모 레포 | 스냅샷 | | D | 준비됨 (#18): 로그인, `/api/repos`, 요청자 토큰으로 분석(#65), `/api/code`. App에 레포를 설치하지 않았으면 목록이 비고 첫 화면에서 데모 레포로 시작 |
+| 분석 | 분석이 끝나지 않음, 실패 | 미리 분석해 둔 시연용 레포를 다시 고름 (`(레포, SHA, 요청자)` 기록 재사용, 바로 끝남) | 미리 분석해 둔 두 번째 레포 | | A | 준비됨 (#12): 같은 레포·커밋·요청자의 끝난 분석을 다시 씀. 분석 요청 API(`POST /api/analyses`)와 레포 선택 화면 연결됨. 배포 DB에는 데모 스냅샷을 넣지 않기로 함 (#19, #109) |
+| GitHub App·비공개 레포 | 로그인 실패, 레포 목록 비어 있음 | 다시 로그인, App에 시연용 레포가 설치돼 있는지 확인 | 같은 앱을 설치한 공개 레포 | | D | 준비됨 (#18): 로그인, `/api/repos`, 요청자 토큰으로 분석(#65), `/api/code`. App에 레포를 설치하지 않았으면 목록이 빔. 배포에서는 데모 레포로 시작할 수 없음 (스냅샷 없음, 버튼은 #104에서 감춤) |
 | 코드 뷰어 | 코드가 안 뜸 | 경로·함수명·줄 범위만 표시, 음성 계속 | | | C | 미구현 (T8) |
 | 현장 네트워크 | 전체 응답 없음 | 모바일 핫스팟 | | 녹화 영상 | 전원 | 핫스팟 기기 확인 필요 |
 
@@ -73,12 +73,13 @@ uv run python scripts/demo_check.py --real-llm    # 실제 LLM으로 완주 (비
 - [ ] Railway 환경 변수: `LAB_ENABLED=false`, `BRAIN_FORCE_PREPARED=false`, `LLM_PROVIDER`와 모델 이름 변수 비움 (기본값 Gemini)
 - [ ] Railway 시작 명령이 `uvicorn --factory gitinsight_worker.server:app_factory`인지 확인 (`gitinsight_api.main:app_factory`이면 분석 요청이 503)
 - [ ] `GEMINI_API_KEY`를 Railway(판단·분석·리포트)와 Vercel(음성 토큰)에 등록, 결제 한도 확인 (예산 상한 $100)
-- [ ] 데모 레포 분석 스냅샷을 운영 DB에 넣고(`seed_demo_analysis.py --user-id <데모 계정 id> --fixture gitinsight_agent_live --analysis-id demo-gitinsight-agent`), `demo_check.py --from-db --user-id <데모 계정 id>`로 확인 (A)
-  - `--analysis-id demo-gitinsight-agent`는 웹 첫 화면의 "데모 레포로 바로 시작"(`web/lib/demo.ts`)과 같은 id입니다. 빼면 이 버튼이 404입니다
-  - `--user-id`는 데모에 로그인할 계정의 GitHub 숫자 id입니다 (`gh api users/<login> -q .id`). 로그인 이름이 아닙니다
-  - 서버는 `DATABASE_URL`이 있으면 DB의 분석만 쓰고 요청한 본인에게만 열어 줍니다. `--user-id`가 다르면 세션 시작이 404입니다 (#52)
-  - `demo_check.py --from-db`도 서버와 같은 소유자 확인을 거칩니다. 스냅샷을 넣은 `--user-id`와 다르면 실패로 끝납니다
-  - `gitinsight_agent_live`는 레포 주인(D)이 요청했다고 보고 실제 워커로 만든 결과라 기여 라벨이 모두 본인 기여입니다. 다른 계정으로 시연하면 `eval_stage2.py --requester-email ... --save-json`으로 다시 만듭니다
+- [ ] 시연에 쓸 레포를 **시연 계정으로 로그인해서** 배포 주소에서 미리 한 번 분석해 둠. 두 번째 레포도 하나 더 분석해 둠 (A)
+  - 서버는 같은 레포·커밋·요청자의 끝난 분석을 다시 씁니다. 시연 때 같은 레포를 고르면 바로 끝납니다
+  - 분석은 요청한 본인에게만 열립니다 (#52). 다른 계정으로 분석해 두면 시연 계정에서는 새로 분석합니다
+  - 미리 분석한 뒤에는 그 레포에 새 커밋을 올리지 않습니다. 커밋이 바뀌면 새로 분석합니다
+  - 지금은 Python 코드가 있는 레포만 분석합니다 (#72)
+  - 배포 DB에는 데모 분석 스냅샷을 넣지 않습니다 (#19, #109). 그래서 배포에서는 첫 화면의 "데모 레포로 바로 시작"을 쓸 수 없습니다 (#104)
+  - 스냅샷 도구(`seed_demo_analysis.py`, `demo_check.py --from-db`)는 남아 있습니다. 로컬 DB에서 데모 레포로 확인할 때 씁니다. `--user-id`는 로그인할 계정의 GitHub 숫자 id이고(`gh api users/<login> -q .id`), `--analysis-id demo-gitinsight-agent`를 줘야 첫 화면의 데모 시작과 이어집니다
 - [ ] 녹화 영상을 발표 노트북에 내려받아 둠 (C)
 - [ ] 모바일 핫스팟 연결 확인
 
