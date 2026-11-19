@@ -94,6 +94,7 @@ export const ACTION_LABEL: Record<Action, string> = {
   REPEAT: "질문을 다시 말함",
   CLARIFY: "질문 뜻을 설명",
   WRAP_UP: "면접 마무리",
+  MISSTATE: "일부러 틀린 말로 확인",
 };
 
 /** 답변을 어떻게 받아들였는지 */

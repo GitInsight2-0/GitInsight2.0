@@ -22,6 +22,8 @@ class Action(StrEnum):
     REPEAT = "REPEAT"
     CLARIFY = "CLARIFY"
     WRAP_UP = "WRAP_UP"
+    # 면접관이 일부러 틀린 말을 하고 면접자가 짚는지 봅니다 (#133).
+    MISSTATE = "MISSTATE"
 
 
 class InterviewMode(StrEnum):

@@ -9,7 +9,8 @@
         "NEXT_TOPIC",
         "REPEAT",
         "CLARIFY",
-        "WRAP_UP"
+        "WRAP_UP",
+        "MISSTATE"
       ],
       "title": "Action",
       "type": "string"
@@ -243,6 +244,16 @@
       ],
       "title": "BrainReply",
       "type": "object"
+    },
+    "CatchStatus": {
+      "description": "면접관이 일부러 한 틀린 말을 면접자가 짚었는지입니다 (#133). 점수에는 쓰지 않습니다.",
+      "enum": [
+        "caught",
+        "partial",
+        "missed"
+      ],
+      "title": "CatchStatus",
+      "type": "string"
     },
     "CodeLink": {
       "additionalProperties": false,
@@ -788,6 +799,126 @@
       "title": "MetricName",
       "type": "string"
     },
+    "Misstatement": {
+      "additionalProperties": false,
+      "description": "면접관이 일부러 하는 틀린 말입니다 (#133).\n\n2단계 분석에서 만들고 서버가 검증합니다. 면접 중에 지어내지 않습니다.",
+      "properties": {
+        "correction": {
+          "maxLength": 150,
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/MisstatementKind"
+        },
+        "point_id": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "statement": {
+          "maxLength": 150,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "statement",
+        "correction",
+        "point_id"
+      ],
+      "title": "Misstatement",
+      "type": "object"
+    },
+    "MisstatementJudgment": {
+      "additionalProperties": false,
+      "description": "틀린 말에 대한 답변 판단입니다. 정정할지와 다음 행동은 서버 규칙이 정합니다.",
+      "properties": {
+        "evidence_quote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intent": {
+          "$ref": "#/$defs/Intent"
+        },
+        "status": {
+          "$ref": "#/$defs/CatchStatus"
+        }
+      },
+      "required": [
+        "intent",
+        "status",
+        "evidence_quote"
+      ],
+      "title": "MisstatementJudgment",
+      "type": "object"
+    },
+    "MisstatementKind": {
+      "description": "틀린 말을 만든 방식입니다.",
+      "enum": [
+        "absent_call",
+        "inverted_point"
+      ],
+      "title": "MisstatementKind",
+      "type": "string"
+    },
+    "MisstatementResult": {
+      "additionalProperties": false,
+      "description": "면접관이 일부러 한 틀린 말과 그 결과입니다 (#133). 역량 점수에는 쓰지 않습니다.",
+      "properties": {
+        "correction": {
+          "type": "string"
+        },
+        "quote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "statement": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/CatchStatus"
+        },
+        "topic_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic_id",
+        "turn_id",
+        "statement",
+        "correction",
+        "status",
+        "quote"
+      ],
+      "title": "MisstatementResult",
+      "type": "object"
+    },
     "PointCoverage": {
       "additionalProperties": false,
       "properties": {
@@ -926,6 +1057,17 @@
         "kind": {
           "$ref": "#/$defs/ReportKind"
         },
+        "misstatement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MisstatementResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "next_topics": {
           "items": {
             "type": "string"
@@ -969,7 +1111,8 @@
         "improvements",
         "next_topics",
         "turns",
-        "code_map"
+        "code_map",
+        "misstatement"
       ],
       "title": "Report",
       "type": "object"
@@ -1193,6 +1336,17 @@
           "minLength": 1,
           "type": "string"
         },
+        "misstatement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Misstatement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "prepared_followups": {
           "items": {
             "$ref": "#/$defs/PreparedFollowup"
@@ -1244,7 +1398,8 @@
         "expected_points",
         "prepared_followups",
         "hint",
-        "commits"
+        "commits",
+        "misstatement"
       ],
       "title": "Topic",
       "type": "object"

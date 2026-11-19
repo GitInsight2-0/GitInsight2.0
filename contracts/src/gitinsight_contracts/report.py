@@ -10,7 +10,7 @@ from pydantic import Field
 from gitinsight_contracts.base import Contract
 from gitinsight_contracts.common import SymbolRef
 from gitinsight_contracts.interview import Action
-from gitinsight_contracts.llm import Competency, Intent
+from gitinsight_contracts.llm import CatchStatus, Competency, Intent
 
 Level = Annotated[int, Field(ge=1, le=4)]
 
@@ -106,6 +106,20 @@ class CodeMap(Contract):
     stuck_count: Annotated[int, Field(ge=0)]
 
 
+class MisstatementResult(Contract):
+    """면접관이 일부러 한 틀린 말과 그 결과입니다 (#133). 역량 점수에는 쓰지 않습니다."""
+
+    topic_id: str
+    # 면접자가 틀린 말에 답한 턴입니다.
+    turn_id: UUID
+    statement: str
+    # 면접자가 틀린 내용을 맞는 것으로 기억하지 않게 늘 보여 줍니다.
+    correction: str
+    status: CatchStatus
+    # 판단의 근거가 된 답변 인용문입니다. 자막과 대조해 통과한 것만 남깁니다.
+    quote: str | None
+
+
 class Report(Contract):
     report_id: UUID
     session_id: UUID
@@ -118,6 +132,8 @@ class Report(Contract):
     turns: list[TurnRow]
     # 이 필드가 생기기 전에 저장한 리포트에는 없어서 null입니다.
     code_map: CodeMap | None = None
+    # 면접 한 번에 최대 한 번입니다. 나오지 않은 면접과 이 필드가 생기기 전의 리포트는 null입니다.
+    misstatement: MisstatementResult | None = None
 
 
 class CompetencyLevel(Contract):
