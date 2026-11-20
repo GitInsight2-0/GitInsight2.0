@@ -100,6 +100,7 @@
 - **예외: 0006(분석기 버전, #171) 이전 서버로 롤백할 때는 DB도 0005로 되돌립니다.**
   0006은 분석 재사용 키(`uq_analyses_reusable_key`)에 `analyzer_version`을 더합니다. 이전 서버는 예전 키로 `INSERT … ON CONFLICT`를 하므로 맞는 인덱스가 없어 분석 요청이 실패합니다.
   되돌리기: 백업을 만든 뒤 `uv run alembic -c api/alembic.ini downgrade 0005`. 키마다 가장 최근 기록만 남기고 나머지 재사용 기록은 failed(`AnalyzerVersionDowngraded`)로 닫습니다.
+  닫힌 기록의 분석으로 하던 면접 이어 가기와 "부족했던 질문만 다시 면접 보기"는 분석 결과를 읽지 못해 "분석 결과를 찾을 수 없습니다"가 됩니다. 리포트 열기는 `reports` 테이블을 읽어서 그대로 됩니다.
   꼭 되돌려야 하면 Railway Public URL로 `uv run alembic -c api/alembic.ini downgrade -1`을 직접 실행하고, 그 전에 Railway Postgres의 Backups에서 백업을 만듭니다.
 - 환경 변수만 잘못 넣었으면 롤백 대신 변수를 고치고 재배포합니다 (약 1~2분).
 
