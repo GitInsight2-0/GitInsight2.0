@@ -472,6 +472,17 @@ export interface ProgressEntry {
   session_id: string;
 }
 /**
+ * 면접관이 지원자의 공개 레포를 분석할 때 보내는 요청입니다 (POST /api/analyses/public, #173).
+ *
+ * repo_url은 `https://github.com/owner/name`이나 `owner/name`입니다. 서버가 레포 이름만 읽고 공개 레포인지 확인합니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "PublicAnalysisCreate".
+ */
+export interface PublicAnalysisCreate {
+  repo_url: string;
+}
+/**
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema
  * via the `definition` "Repo".
  */

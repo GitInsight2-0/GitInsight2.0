@@ -118,6 +118,14 @@ export default function HomeScreen() {
             </>
           )}
         </section>
+
+        {/* 면접관 입구 (#173). 지원자의 공개 레포로 질문지를 만듭니다 */}
+        <p className={styles.small}>
+          면접관이신가요?{" "}
+          <a className={styles.textLink} href="/prep">
+            지원자의 공개 레포로 면접 질문지 만들기
+          </a>
+        </p>
       </main>
     </div>
   );

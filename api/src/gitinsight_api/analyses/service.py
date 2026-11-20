@@ -11,6 +11,7 @@ from typing import Protocol
 from pydantic import SecretStr
 
 from gitinsight_api.analyses.store import AnalysisKey, AnalysisRecord, AnalysisStore
+from gitinsight_contracts.analysis import AnalysisResult
 from gitinsight_contracts.api import AnalysisCreated, AnalysisState, AnalysisStatus
 
 logger = logging.getLogger(__name__)
@@ -98,3 +99,10 @@ class AnalysisService:
         if record is None or record.key.user_id != user_id:
             return None
         return record.state
+
+    async def result(self, analysis_id: str, user_id: str) -> AnalysisResult | None:
+        """요청자 본인의 완료된 분석 결과입니다 (#173). 없거나, 다른 사람의 분석이거나, 끝나지 않았으면 None입니다."""
+        record = await self._store.get_record(analysis_id)
+        if record is None or record.key.user_id != user_id:
+            return None
+        return await self._store.get(analysis_id)

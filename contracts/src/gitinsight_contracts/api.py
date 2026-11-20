@@ -26,6 +26,15 @@ class AnalysisCreate(Contract):
     repo_id: int
 
 
+class PublicAnalysisCreate(Contract):
+    """면접관이 지원자의 공개 레포를 분석할 때 보내는 요청입니다 (POST /api/analyses/public, #173).
+
+    repo_url은 `https://github.com/owner/name`이나 `owner/name`입니다. 서버가 레포 이름만 읽고 공개 레포인지 확인합니다.
+    """
+
+    repo_url: Annotated[str, Field(min_length=1, max_length=300)]
+
+
 class AnalysisStatus(StrEnum):
     QUEUED = "queued"
     STAGE1 = "stage1"
