@@ -12,6 +12,8 @@ build/
 node_modules/
 .next/
 next-env.d.ts
+# 시선 분석 wasm은 빌드할 때 패키지에서 복사합니다 (web/scripts/copy-mediapipe-wasm.mjs)
+web/public/mediapipe/wasm/
 *.tsbuildinfo
 
 # 로컬 데이터 (지표 JSONL 등)

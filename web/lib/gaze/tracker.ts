@@ -2,17 +2,19 @@
  * 웹캠 시선 측정 (#177).
  * 카메라 영상은 이 브라우저 안에서만 처리하고, 프레임도 랜드마크도 서버로 보내거나 저장하지 않습니다.
  * 서버에는 면접을 끝낼 때 요약 숫자(계약 GazeSummary)만 보냅니다.
- * 얼굴 랜드마크는 MediaPipe FaceLandmarker로 뽑습니다. 프로그램(wasm)과 모델 파일만 내려받고, 영상은 올리지 않습니다.
+ * 얼굴 랜드마크는 MediaPipe FaceLandmarker로 뽑습니다. 프로그램(wasm)과 모델 파일은 우리 웹에서 받고, 영상은 올리지 않습니다.
  */
 import type { GazeSummary } from "@gitinsight/contracts";
 import type { FaceLandmarker } from "@mediapipe/tasks-vision";
 import { type GazeFeatures, type GazeZone, baselineOf, classify, featuresOf } from "./classify";
 
-/** package.json의 @mediapipe/tasks-vision 버전과 같아야 합니다 */
-const TASKS_VISION_VERSION = "1.2.0";
-const WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VISION_VERSION}/wasm`;
-const MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+/**
+ * 프로그램(wasm)과 모델은 우리 웹이 같은 출처에서 내려 줍니다 (#181). 시연장에서 외부 CDN이 막혀도 시작할 수 있게 합니다.
+ * - wasm: dev·build 전에 설치된 패키지에서 web/public/mediapipe/wasm으로 복사 (web/scripts/copy-mediapipe-wasm.mjs)
+ * - 모델: web/public/mediapipe/face_landmarker.task (MediaPipe face_landmarker float16 v1, Apache-2.0, 저장소에 넣음)
+ */
+const WASM_URL = "/mediapipe/wasm";
+const MODEL_URL = "/mediapipe/face_landmarker.task";
 
 /** 초당 측정 횟수. 면접 화면이 버벅이지 않게 낮게 둡니다 */
 const SAMPLE_MS = 100;
