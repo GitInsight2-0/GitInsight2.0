@@ -414,6 +414,18 @@ def test_common_folder_name_is_not_package_start() -> None:
     assert not is_inactive_path("dev/example/shop/OrderService.java")
 
 
+def test_package_start_in_nested_or_nonstandard_layouts() -> None:
+    # 언어별로 나눈 레포는 맨 앞 java/가 아니라 도메인이 바로 뒤에 오는 java/부터 패키지입니다 (#196 리뷰).
+    assert not is_inactive_path("java/shop/src/main/java/com/example/shop/OrderService.java")
+    assert is_inactive_path("java/shop/src/main/java/com/example/shop/legacy/Old.java")
+    # 패키지 이름에 든 java는 패키지 시작이 아닙니다.
+    assert not is_inactive_path("src/main/java/com/example/java/Foo.java")
+    # java/ 없이 src/main/ 아래 바로 패키지가 있어도 도메인 폴더부터 봅니다.
+    assert not is_inactive_path("src/main/com/example/shop/OrderService.java")
+    # 도메인 없이 지은 패키지는 java/ 다음부터 봅니다(예전과 같음).
+    assert not is_inactive_path("src/main/java/example/shop/demo/OrderService.java")
+
+
 def test_final_local_with_computation_counts_as_logic() -> None:
     fields = [
         "private final UserRepository repo;",

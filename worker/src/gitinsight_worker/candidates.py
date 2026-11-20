@@ -97,17 +97,24 @@ _JAVA_AMBIGUOUS_DOMAINS = frozenset({"dev", "me", "co", "app"})
 def _java_package_start(dirs: list[str]) -> int:
     """Java 파일 경로의 폴더 중 패키지가 시작하는 위치입니다. 모르면 -1입니다.
 
-    `java/` 폴더가 있으면 그 다음부터입니다(Maven·Gradle 구조).
-    없으면 마지막 `src/` 바로 다음 폴더가 도메인일 때 거기부터입니다(IntelliJ 기본 구조).
-    `src/`도 없으면 확실한 도메인 폴더를 먼저, 그다음 흔한 폴더 이름과 겹치는 도메인 폴더를 찾습니다 (#194).
+    1. 바로 다음 폴더가 도메인인 `java/`·`src/` 중 마지막 것의 다음부터입니다.
+       Maven·Gradle(`src/main/java/com/...`), IntelliJ 기본 구조(`src/com/...`), 언어별로 나눈 레포(`java/shop/src/main/java/com/...`)가 여기에 듭니다.
+       다음 폴더가 도메인인 것만 보므로 패키지 이름에 든 `java`(`com/example/java/`)는 시작으로 잡지 않습니다.
+    2. 없으면 마지막 `java/` 다음부터입니다. 도메인 없이 지은 패키지(`src/main/java/shop/`)입니다.
+    3. 그래도 없으면 확실한 도메인 폴더를 먼저, 그다음 흔한 폴더 이름과 겹치는 도메인 폴더를 찾습니다.
+       `src/main/com/...`처럼 `java/` 없이 한 단계 더 들어간 구조가 여기에 듭니다 (#194, #196 리뷰).
     """
     lowered = [d.lower() for d in dirs]
+    all_domains = _JAVA_TOP_DOMAINS | _JAVA_AMBIGUOUS_DOMAINS
+    roots = [
+        i + 1
+        for i, d in enumerate(lowered[:-1])
+        if d in ("java", "src") and lowered[i + 1] in all_domains
+    ]
+    if roots:
+        return roots[-1]
     if "java" in lowered:
-        return lowered.index("java") + 1
-    if "src" in lowered:
-        start = len(lowered) - lowered[::-1].index("src")
-        domains = _JAVA_TOP_DOMAINS | _JAVA_AMBIGUOUS_DOMAINS
-        return start if start < len(lowered) and lowered[start] in domains else -1
+        return len(lowered) - lowered[::-1].index("java")
     for domains in (_JAVA_TOP_DOMAINS, _JAVA_AMBIGUOUS_DOMAINS):
         start = next((i for i, d in enumerate(lowered) if d in domains), -1)
         if start >= 0:
