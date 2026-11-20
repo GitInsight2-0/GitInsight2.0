@@ -5,6 +5,7 @@ import type {
   CodeMap,
   CompetencyScore,
   ExplainStatus,
+  GazeSummary,
   MisstatementResult,
   ProgressEntry,
   Report,
@@ -225,6 +226,12 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
             hint={report.misstatement.status ? CATCH_STATUS_LABEL[report.misstatement.status] : "판단 없음"}
           >
             <MisstatementSection result={report.misstatement} turnNumber={turnNumber} />
+          </Fold>
+        )}
+
+        {report.gaze && (
+          <Fold title="시선 (참고)" hint={`눈맞춤 ${percent(report.gaze.camera_ratio)}`}>
+            <GazeSection gaze={report.gaze} />
           </Fold>
         )}
 
@@ -548,6 +555,56 @@ function MisstatementSection({
           </p>
         )}
       </div>
+    </section>
+  );
+}
+
+function percent(ratio: number): string {
+  return `${Math.round(ratio * 100)}%`;
+}
+
+const GAZE_PARTS: { key: keyof GazeSummary; label: string; className: string }[] = [
+  { key: "camera_ratio", label: "카메라(면접관)", className: "gazeCamera" },
+  { key: "screen_ratio", label: "화면(코드, 자막)", className: "gazeScreen" },
+  { key: "away_ratio", label: "화면 밖", className: "gazeAway" },
+  { key: "no_face_ratio", label: "얼굴 안 잡힘", className: "gazeNone" },
+];
+
+/**
+ * 면접자 시선 요약 (#177). 브라우저가 웹캠으로 어림잡은 값을 그대로 보여 주고, 좋다 나쁘다는 판정하지 않습니다.
+ * 역량 수준에는 반영하지 않습니다.
+ */
+function GazeSection({ gaze }: { gaze: GazeSummary }) {
+  const minutes = Math.max(1, Math.round(gaze.measured_seconds / 60));
+  return (
+    <section aria-labelledby="gaze" className={styles.section}>
+      <h2 id="gaze">시선</h2>
+      <p className={styles.muted}>
+        면접 중 웹캠으로 약 {minutes}분 동안 잰 시선이에요. 브라우저가 어림잡은 값이라 정확하지 않을 수 있고, 역량 수준에는
+        반영하지 않아요.
+      </p>
+      <div className={styles.card}>
+        <div className={styles.gazeBar} aria-hidden="true">
+          {GAZE_PARTS.map((p) => (
+            <span key={p.key} className={styles[p.className]} style={{ width: percent(gaze[p.key] as number) }} />
+          ))}
+        </div>
+        <ul className={styles.gazeLegend}>
+          {GAZE_PARTS.map((p) => (
+            <li key={p.key}>
+              <span className={`${styles.gazeSwatch} ${styles[p.className]}`} aria-hidden="true" />
+              {p.label} <b>{percent(gaze[p.key] as number)}</b>
+            </li>
+          ))}
+        </ul>
+        <p className={styles.muted}>
+          화면 밖으로 2초 넘게 시선을 돌린 횟수: <b>{gaze.away_count}번</b>
+        </p>
+      </div>
+      <p className={styles.muted}>
+        코드 면접이라 화면을 보는 시간이 긴 건 자연스러워요. 실제 화상 면접에서는 질문을 듣거나 답을 시작할 때 카메라를 보면 면접관과
+        눈을 맞추는 것처럼 보여요.
+      </p>
     </section>
   );
 }

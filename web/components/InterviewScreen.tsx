@@ -1,6 +1,6 @@
 "use client";
 
-import type { Action, BrainReply, LineSpan, SymbolRef, TurnRequest } from "@gitinsight/contracts";
+import type { Action, BrainReply, GazeSummary, LineSpan, SymbolRef, TurnRequest } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import CodeViewer from "@/components/CodeViewer";
 import { interviewHref } from "@/lib/analyses";
@@ -17,6 +17,7 @@ import {
 import { DEFAULT_VAD } from "@/lib/voice/config";
 import { explainError, isLoginError } from "@/lib/voice/errors";
 import { connectGemini } from "@/lib/voice/gemini";
+import { CALIBRATION_MS, GazeError, GazeTracker } from "@/lib/gaze/tracker";
 import { type AudioLevels, type SessionUi, type VoiceSession, startVoiceSession } from "@/lib/voice/session";
 import { USER_SILENCE_MS } from "@/lib/voice/meter";
 import styles from "./interview.module.css";
@@ -49,6 +50,8 @@ function said(r: BrainReply): HistoryItem {
 
 type Mode = "text" | "voice";
 type VoiceState = "idle" | "connecting" | "live";
+/** 시선 분석 준비 단계. on이면 카메라가 켜져 있고 세션이 생기면 잽니다 */
+type GazeStage = "off" | "preparing" | "calibrating" | "on";
 /** 아래 막대와 말풍선이 보여 줄 상태 */
 type Stage = "connecting" | "listening" | "muted" | "review" | "thinking" | "speaking" | "text" | "done";
 
@@ -189,6 +192,14 @@ export default function InterviewScreen({
 
   /** 다시 보기 면접을 열었는데 다시 물을 질문이 없음 (서버 409, #118) */
   const [nothingToReview, setNothingToReview] = useState(false);
+  /** 시선 분석 (#177). 면접자가 켰을 때만 카메라를 씁니다 */
+  const [gazeWanted, setGazeWanted] = useState(false);
+  const [gazeStage, setGazeStage] = useState<GazeStage>("off");
+  const [gazeError, setGazeError] = useState<string | null>(null);
+  const gaze = useRef<GazeTracker | null>(null);
+  /** 끝낼 때 한 번 만든 요약. 리포트 요청을 다시 보내도 같은 값을 보냅니다 */
+  const gazeSummary = useRef<GazeSummary | null>(null);
+
   /** 대화 말풍선 목록. 새 말풍선이 생기면 맨 아래로 내립니다 */
   const threadRef = useRef<HTMLDivElement | null>(null);
 
@@ -214,9 +225,15 @@ export default function InterviewScreen({
       voiceAbort.current?.abort();
       reportAbort.current?.abort();
       clearThinkingTimer();
+      gaze.current?.close();
     },
     [],
   );
+
+  // 세션이 생기면 시선 측정을 시작합니다. 보정은 시작 버튼을 누를 때 이미 끝났습니다.
+  useEffect(() => {
+    if (sessionId) gaze.current?.start();
+  }, [sessionId]);
 
   // 면접이 끝나면(서버 done, 음성 종료, 409, 끝내기) 리포트를 요청합니다.
   // 음성으로 끝나면 AI가 마지막 인사를 하는 동안 리포트가 같이 만들어집니다.
@@ -239,8 +256,14 @@ export default function InterviewScreen({
     const ac = new AbortController();
     reportAbort.current = ac;
     setReport({ kind: "making" });
+    // 면접이 끝나면 카메라를 끄고 시선 요약을 한 번만 만듭니다.
+    if (gaze.current) {
+      gazeSummary.current = gaze.current.finish();
+      gaze.current = null;
+      setGazeStage("off");
+    }
     try {
-      const ended = await endSession(id, ac.signal);
+      const ended = await endSession(id, ac.signal, gazeSummary.current);
       setReport({ kind: "ready", reportId: ended.report_id });
     } catch (e) {
       if (ac.signal.aborted) return;
@@ -279,6 +302,51 @@ export default function InterviewScreen({
   }
 
   // ── 텍스트 ──
+
+  /**
+   * 시선 분석을 켰으면 카메라를 열고 3초 동안 카메라를 보게 해 기준을 잡습니다.
+   * 실패하면 면접을 시작하지 않고 이유를 보여 줍니다. 체크를 끄면 시선 분석 없이 시작할 수 있습니다.
+   */
+  async function prepareGaze(): Promise<boolean> {
+    if (!gazeWanted || gaze.current) return true;
+    setGazeError(null);
+    setGazeStage("preparing");
+    let tracker: GazeTracker;
+    try {
+      tracker = await GazeTracker.open();
+    } catch (e) {
+      setGazeStage("off");
+      setGazeError(e instanceof GazeError ? e.message : "카메라를 켜지 못했어요.");
+      return false;
+    }
+    gaze.current = tracker;
+    setGazeStage("calibrating");
+    const ok = await tracker.calibrate();
+    if (!ok) {
+      tracker.close();
+      gaze.current = null;
+      setGazeStage("off");
+      setGazeError("얼굴이 잘 보이지 않아요. 밝은 곳에서 얼굴이 화면 가운데 오게 한 뒤 다시 눌러 주세요.");
+      return false;
+    }
+    setGazeStage("on");
+    return true;
+  }
+
+  async function begin(kind: Mode) {
+    if (busy || gazeStage === "preparing" || gazeStage === "calibrating") return;
+    if (!(await prepareGaze())) return;
+    if (kind === "voice") await startVoice();
+    else await startText();
+  }
+
+  /** 면접 도중 시선 분석을 끕니다. 그때까지 잰 값도 버리고 리포트에 시선 칸을 넣지 않습니다 */
+  function stopGaze() {
+    gaze.current?.close();
+    gaze.current = null;
+    setGazeStage("off");
+    setNotice("시선 분석을 껐어요. 이번 리포트에는 시선 결과가 나오지 않아요.");
+  }
 
   async function startText() {
     setBusy(true);
@@ -659,11 +727,31 @@ export default function InterviewScreen({
                     ? "지난 면접에서 막혔거나 힌트를 받고 답한 질문만 다시 묻습니다. 음성으로 답하거나 텍스트로 답할 수 있고, 도중에 바꿀 수 있습니다."
                     : "레포 분석 결과를 바탕으로 질문합니다. 음성으로 답하거나 텍스트로 답할 수 있고, 도중에 바꿀 수 있습니다."}
                 </p>
+                <GazeOption
+                  wanted={gazeWanted}
+                  onChange={(v) => {
+                    setGazeWanted(v);
+                    setGazeError(null);
+                  }}
+                  stage={gazeStage}
+                  stream={gaze.current?.stream ?? null}
+                  error={gazeError}
+                />
                 <div className={styles.introActions}>
-                  <button type="button" className={styles.primary} onClick={() => void startVoice()} disabled={busy}>
+                  <button
+                    type="button"
+                    className={styles.primary}
+                    onClick={() => void begin("voice")}
+                    disabled={busy || gazeStage === "preparing" || gazeStage === "calibrating"}
+                  >
                     음성으로 시작
                   </button>
-                  <button type="button" className={styles.secondary} onClick={() => void startText()} disabled={busy}>
+                  <button
+                    type="button"
+                    className={styles.secondary}
+                    onClick={() => void begin("text")}
+                    disabled={busy || gazeStage === "preparing" || gazeStage === "calibrating"}
+                  >
                     텍스트로 시작
                   </button>
                 </div>
@@ -749,6 +837,15 @@ export default function InterviewScreen({
         {reply && !done && (
           <span className={styles.time}>
             남은 시간 <b>{remainingLabel(reply.remaining_sec)}</b>
+          </span>
+        )}
+        {gazeStage === "on" && !done && (
+          <span className={styles.gazeChip}>
+            <span className={styles.gazeDot} aria-hidden="true" />
+            <span className={styles.gazeChipText}>시선 측정 중</span>
+            <button type="button" onClick={stopGaze} aria-label="시선 분석 끄기">
+              끄기
+            </button>
           </span>
         )}
         {reply && !done && (
@@ -994,6 +1091,69 @@ export default function InterviewScreen({
 }
 
 /** 첫 화면(로그인 버튼이 있는 곳)으로 가는 링크 */
+/**
+ * 시작 화면의 시선 분석 선택 (#177). 기본은 꺼짐입니다.
+ * 보정하는 동안에만 내 얼굴을 작게 보여 줍니다.
+ */
+function GazeOption({
+  wanted,
+  onChange,
+  stage,
+  stream,
+  error,
+}: {
+  wanted: boolean;
+  onChange: (v: boolean) => void;
+  stage: GazeStage;
+  stream: MediaStream | null;
+  error: string | null;
+}) {
+  const busy = stage === "preparing" || stage === "calibrating";
+  return (
+    <div className={styles.gazeOption}>
+      <label className={styles.gazeToggle}>
+        <input type="checkbox" checked={wanted} onChange={(e) => onChange(e.target.checked)} disabled={busy} />
+        <span>
+          <b>시선 분석 켜기 (선택)</b>
+          <span className={styles.gazeHelp}>
+            웹캠으로 면접관(카메라)을 얼마나 바라봤는지 재서 리포트에 참고로 보여 드려요. 영상은 이 브라우저 안에서만 처리하고
+            서버로 보내거나 저장하지 않아요. 서버에는 비율 같은 요약 숫자만 가고, 역량 수준에는 반영하지 않아요.
+          </span>
+        </span>
+      </label>
+      {busy && (
+        <div className={styles.gazeCalib} role="status" aria-live="polite">
+          {stream && <CameraPreview stream={stream} />}
+          <p>
+            {stage === "preparing"
+              ? "카메라와 시선 분석 도구를 준비하고 있어요…"
+              : `카메라 렌즈를 ${CALIBRATION_MS / 1000}초 동안 바라봐 주세요.`}
+          </p>
+        </div>
+      )}
+      {error && (
+        <p role="alert" className={styles.gazeError}>
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function CameraPreview({ stream }: { stream: MediaStream }) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    const video = ref.current;
+    if (!video) return;
+    video.srcObject = stream;
+    void video.play().catch(() => undefined);
+    return () => {
+      video.srcObject = null;
+    };
+  }, [stream]);
+  return <video ref={ref} className={styles.gazePreview} muted playsInline aria-label="내 카메라 화면" />;
+}
+
 function LoginLink() {
   return (
     <a className={styles.textLink} href="/">

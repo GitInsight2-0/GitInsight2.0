@@ -387,6 +387,25 @@ export interface Followup {
   symbol_id: string | null;
 }
 /**
+ * 면접자 시선 요약입니다 (#177). 면접자가 켰을 때만 브라우저가 웹캠으로 재서 보냅니다.
+ *
+ * 카메라 영상은 브라우저 밖으로 나가지 않고, 서버에는 이 숫자만 옵니다.
+ * 면접관 얼굴이 화면에 없으므로 카메라를 본 시간을 눈맞춤으로 칩니다.
+ * 브라우저가 계산한 값이라 서버는 범위만 검사합니다. 그래서 역량 점수, 코드 지도, 성장 비교에는 쓰지 않습니다.
+ * 네 비율은 얼굴을 잰 시간을 나눈 것이라 합이 1입니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "GazeSummary".
+ */
+export interface GazeSummary {
+  away_count: number;
+  away_ratio: number;
+  camera_ratio: number;
+  measured_seconds: number;
+  no_face_ratio: number;
+  screen_ratio: number;
+}
+/**
  * JD가 있을 때 주제 순서를 바꾸는 LLM 출력입니다. 허용된 topic_id만 씁니다.
  *
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema
@@ -488,6 +507,7 @@ export interface Repo {
 export interface Report {
   code_map: CodeMap | null;
   competencies: CompetencyScore[];
+  gaze: GazeSummary | null;
   improvements: string[];
   kind: ReportKind;
   misstatement: MisstatementResult | null;
@@ -565,6 +585,15 @@ export interface SessionCreate {
 export interface SessionCreated {
   first: BrainReply;
   session_id: string;
+}
+/**
+ * POST /api/sessions/{id}/end 요청 본문입니다. 본문 없이 보내도 됩니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "SessionEnd".
+ */
+export interface SessionEnd {
+  gaze?: GazeSummary | null;
 }
 /**
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema

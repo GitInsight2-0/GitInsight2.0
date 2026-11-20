@@ -604,6 +604,52 @@
       "title": "Followup",
       "type": "object"
     },
+    "GazeSummary": {
+      "additionalProperties": false,
+      "description": "면접자 시선 요약입니다 (#177). 면접자가 켰을 때만 브라우저가 웹캠으로 재서 보냅니다.\n\n카메라 영상은 브라우저 밖으로 나가지 않고, 서버에는 이 숫자만 옵니다.\n면접관 얼굴이 화면에 없으므로 카메라를 본 시간을 눈맞춤으로 칩니다.\n브라우저가 계산한 값이라 서버는 범위만 검사합니다. 그래서 역량 점수, 코드 지도, 성장 비교에는 쓰지 않습니다.\n네 비율은 얼굴을 잰 시간을 나눈 것이라 합이 1입니다.",
+      "properties": {
+        "away_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "away_ratio": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "camera_ratio": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "measured_seconds": {
+          "exclusiveMinimum": 0,
+          "maximum": 14400,
+          "type": "number"
+        },
+        "no_face_ratio": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "screen_ratio": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "measured_seconds",
+        "camera_ratio",
+        "screen_ratio",
+        "away_ratio",
+        "no_face_ratio",
+        "away_count"
+      ],
+      "title": "GazeSummary",
+      "type": "object"
+    },
     "Intent": {
       "enum": [
         "ANSWER",
@@ -1118,6 +1164,17 @@
           },
           "type": "array"
         },
+        "gaze": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GazeSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "improvements": {
           "items": {
             "type": "string"
@@ -1182,7 +1239,8 @@
         "next_topics",
         "turns",
         "code_map",
-        "misstatement"
+        "misstatement",
+        "gaze"
       ],
       "title": "Report",
       "type": "object"
@@ -1297,6 +1355,25 @@
         "first"
       ],
       "title": "SessionCreated",
+      "type": "object"
+    },
+    "SessionEnd": {
+      "additionalProperties": false,
+      "description": "POST /api/sessions/{id}/end 요청 본문입니다. 본문 없이 보내도 됩니다.",
+      "properties": {
+        "gaze": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GazeSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "SessionEnd",
       "type": "object"
     },
     "SessionEnded": {

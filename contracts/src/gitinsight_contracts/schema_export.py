@@ -20,6 +20,7 @@ JsonSchemaMode = Literal["validation", "serialization"]
 REQUEST_MODELS: list[type[BaseModel]] = [
     interview.SessionCreate,
     interview.TurnRequest,
+    interview.SessionEnd,
     api.AnalysisCreate,
     metrics.MetricEvent,
 ]

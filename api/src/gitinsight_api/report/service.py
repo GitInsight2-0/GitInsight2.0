@@ -17,6 +17,7 @@ from gitinsight_api.brain.protocol import AnalysisNotFoundError
 from gitinsight_api.brain.repository import SessionRepository
 from gitinsight_api.report.builder import ReportBuilder
 from gitinsight_api.report.code_map import ReportHistory
+from gitinsight_contracts.interview import GazeSummary
 from gitinsight_contracts.report import CompetencyLevel, ProgressEntry, Report
 
 # 이전 면접 비교에 돌려주는 최대 면접 수입니다. 가장 최근 것부터 이만큼만 봅니다.
@@ -95,8 +96,11 @@ class ReportService:
         self._builder = builder
         self._locks: dict[UUID, asyncio.Lock] = {}
 
-    async def end_session(self, session_id: UUID) -> Report:
-        """세션을 닫고 리포트를 만듭니다. 이미 리포트가 있으면 그대로 돌려줍니다."""
+    async def end_session(self, session_id: UUID, gaze: GazeSummary | None = None) -> Report:
+        """세션을 닫고 리포트를 만듭니다. 이미 리포트가 있으면 그대로 돌려줍니다.
+
+        gaze는 브라우저가 잰 시선 요약입니다 (#177). 리포트에 그대로 담기만 하고 점수에는 쓰지 않습니다.
+        """
         lock = self._locks.setdefault(session_id, asyncio.Lock())
         async with lock:
             existing = await self._store.get_by_session(session_id)
@@ -117,6 +121,8 @@ class ReportService:
                 state.owner_id, analysis.repo_full_name
             )
             report = await self._builder.build(analysis, state, turns, previous)
+            if gaze is not None:
+                report = report.model_copy(update={"gaze": gaze})
             try:
                 await self._store.save(report, state.owner_id)
             except ReportAlreadyExistsError:
