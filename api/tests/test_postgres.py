@@ -162,6 +162,26 @@ async def test_demo_snapshot_is_idempotent_and_reused(pg_engine: AsyncEngine) ->
     assert (reused.analysis_id, created) == (sample.analysis_id, False)
 
 
+async def test_snapshot_is_reused_only_by_its_analyzer_version(pg_engine: AsyncEngine) -> None:
+    # seed_demo_analysis.py는 지금 버전으로 스냅샷을 넣습니다 (#171).
+    sample = load_analysis()
+    store = PostgresAnalysisStore(pg_engine)
+    current = AnalysisKey(sample.repo_full_name, sample.commit_sha, "demo", analyzer_version="1")
+
+    await store.save_snapshot(sample, "demo", analyzer_version="1")
+    reused, created = await store.get_or_create(current)
+
+    assert (reused.analysis_id, created) == (sample.analysis_id, False)
+    assert reused.key.analyzer_version == "1"
+    # 버전이 오르면 같은 레포·커밋이어도 스냅샷 대신 새로 분석합니다.
+    newer, created_newer = await store.get_or_create(
+        AnalysisKey(sample.repo_full_name, sample.commit_sha, "demo", analyzer_version="2")
+    )
+    assert created_newer and newer.analysis_id != sample.analysis_id
+    # 스냅샷 기록은 닫히지 않고 그대로 읽힙니다.
+    assert await store.get(sample.analysis_id) == sample
+
+
 async def test_session_starts_from_seeded_snapshot_for_its_owner_only(
     client_for: ClientFactory, test_database_url: str, pg_engine: AsyncEngine, tmp_path: Path
 ) -> None:

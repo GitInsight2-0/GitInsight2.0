@@ -81,14 +81,21 @@ def test_launcher_reports_analyzer_version() -> None:
 
 
 async def test_request_runs_analysis_and_result_starts_interview(
-    origin: tuple[Path, str], tmp_path: Path
+    origin: tuple[Path, str], tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     store = InMemoryAnalysisStore()
     launcher = launcher_for(store, origin[0], ok_llm(), tmp_path / "work")
     service = AnalysisService(store, launcher)
 
-    created = await service.request(REPO, origin[1], "u1")
-    await launcher.join()
+    with caplog.at_level("INFO"):
+        created = await service.request(REPO, origin[1], "u1")
+        await launcher.join()
+
+    # 어떤 분석기 버전으로 분석했는지 로그에 남고, 레포 이름은 남지 않습니다 (#171).
+    assert f"analysis_started analysis_id={created.analysis_id} version={ANALYZER_VERSION}" in (
+        caplog.text
+    )
+    assert REPO not in caplog.text
 
     record = await store.get_record(created.analysis_id)
     assert record is not None and record.state.status is AnalysisStatus.DONE

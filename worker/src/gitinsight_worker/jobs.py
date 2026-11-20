@@ -174,6 +174,12 @@ class InProcessLauncher:
         self, record: AnalysisRecord, clone: Cloner, requester: Requester | None
     ) -> bool:
         async with self._slots:
+            # 배포 뒤 새 버전으로 분석하는지 로그에서 볼 수 있게 남깁니다 (#171). 레포 이름은 남기지 않습니다.
+            logger.info(
+                "analysis_started analysis_id=%s version=%s",
+                record.analysis_id,
+                record.key.analyzer_version,
+            )
             return await execute(
                 self._store,
                 record,
