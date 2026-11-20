@@ -156,11 +156,35 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
   return (
     <>
       <section className={styles.head}>
-        <h1>면접 리포트</h1>
-        <p className={styles.muted}>
-          답변 {report.turns.length}개, 주제 {report.topics.length}개를 바탕으로 만들었어요. 수준은 답변 내용만으로 매기고, 수준마다
-          근거가 된 내 답변을 함께 보여 드려요.
-        </p>
+        <div className={styles.headText}>
+          {codeMap && <p className={styles.repoChip}>{codeMap.repo_full_name}</p>}
+          <h1>면접 리포트</h1>
+          <p className={styles.muted}>
+            답변 {report.turns.length}개, 주제 {report.topics.length}개를 바탕으로 만들었어요. 수준은 답변 내용만으로 매기고,
+            수준마다 근거가 된 내 답변을 함께 보여 드려요.
+          </p>
+        </div>
+        {/* 리포트에 적힌 값을 세기만 합니다 (#197) */}
+        <dl className={styles.stats}>
+          {scored.length > 0 && (
+            <div className={styles.stat}>
+              <dt>평가한 역량</dt>
+              <dd>
+                {scored.length}
+                <span> / {COMPETENCY_ORDER.length}</span>
+              </dd>
+            </div>
+          )}
+          {codeMap && codeMap.key_function_count > 0 && (
+            <div className={styles.stat}>
+              <dt>설명한 핵심 함수</dt>
+              <dd>
+                {codeMap.explained_count + codeMap.after_hint_count}
+                <span> / {codeMap.key_function_count}</span>
+              </dd>
+            </div>
+          )}
+        </dl>
       </section>
 
       {report.kind === "turn_table" && (
@@ -273,6 +297,16 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
   );
 }
 
+/** 역량 카드 아이콘 (#197). 꾸밈이라 화면 읽기 프로그램에는 감춥니다 */
+const COMPETENCY_ICON: Record<CompetencyScore["name"], string> = {
+  code_understanding: "M8 6l-6 6 6 6M16 6l6 6-6 6",
+  design_judgment: "M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z",
+  problem_solving: "M12 2l9 5v10l-9 5-9-5V7zM12 8v5M12 16h.01",
+  scalability_operations: "M3 17l6-6 4 4 8-8M15 7h6v6",
+  communication: "M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z",
+  role_decision: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
+};
+
 function CompetencyCard({
   score,
   turnNumber,
@@ -287,11 +321,16 @@ function CompetencyCard({
   compared: boolean;
 }) {
   return (
-    <li className={styles.card}>
+    <li className={`${styles.card} ${styles.compCard}`} data-competency={score.name}>
       <div className={styles.cardHead}>
-        <h3>{COMPETENCY_LABEL[score.name]}</h3>
+        <span className={styles.compIcon} aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d={COMPETENCY_ICON[score.name]} />
+          </svg>
+        </span>
         <LevelMeter level={score.level} />
       </div>
+      <h3>{COMPETENCY_LABEL[score.name]}</h3>
       {compared && <Change now={score.level} before={previousLevel} />}
       {/* 근거가 없으면 빈 칸이 펼쳐지지 않게 접기를 두지 않습니다 (#155 리뷰) */}
       {score.evidence.length > 0 && (
