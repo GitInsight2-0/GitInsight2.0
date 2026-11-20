@@ -13,8 +13,11 @@ LLMProvider = Literal["openai", "gemini"]
 
 # 제공사별 기본 모델입니다. 기본 제공사는 Gemini입니다 (2026-11-17 결정, #63).
 # Gemini 판단 모델은 지연 측정(docs/evals/latency.md, 2026-11-17)에서 가장 빨랐던 3.6 Flash를 씁니다.
-# 분석·리포트는 2단계 평가(docs/evals/stage2-*.md)를 해 온 3.8 Flash를 그대로 씁니다.
-# openai는 키가 생기면 LLM_PROVIDER=openai만으로 쓸 수 있게 남겨 둡니다. 지금은 키가 없고 측정한 적도 없습니다.
+# 리포트는 2단계 평가(docs/evals/stage2-*.md)를 해 온 3.8 Flash를 그대로 씁니다.
+# 분석(출제, 검토, 면접 계획)만 OpenAI gpt-6.2-sol을 씁니다 (#201 모델 비교, #202).
+# 3.8 Flash보다 출제 사실 오류가 적고 검토 지연이 짧았습니다. 그래서 기본 구성에서도 OPENAI_API_KEY가 필요합니다.
+# 모델 이름 앞부분(gemini/, openai/)으로 LiteLLM이 제공사를 고르므로 역할마다 제공사가 달라도 됩니다.
+# openai 묶음은 LLM_PROVIDER=openai로 세 역할을 모두 OpenAI로 돌릴 때 씁니다. 판단·리포트 모델은 측정한 적이 없습니다.
 DEFAULT_PROVIDER = "gemini"
 PROVIDER_MODELS: dict[str, dict[str, str]] = {
     "openai": {
@@ -24,7 +27,7 @@ PROVIDER_MODELS: dict[str, dict[str, str]] = {
     },
     "gemini": {
         "llm_judge_model": "gemini/gemini-3.6-flash",
-        "llm_analysis_model": "gemini/gemini-3.8-flash",
+        "llm_analysis_model": "openai/gpt-6.2-sol",
         "llm_report_model": "gemini/gemini-3.8-flash",
     },
 }
@@ -60,8 +63,9 @@ class Settings(BaseSettings):
     # 면접 재료로 쓸 샘플 분석 파일 이름입니다 (fixtures/analysis/<이름>.json).
     fixture_analysis: str = "gitinsight_agent"
 
-    # 판단·분석·리포트 LLM 제공사입니다. 이 값 하나로 기본 모델을 모두 바꿉니다.
-    # 제공사 API 키는 LiteLLM 규칙대로 GEMINI_API_KEY(openai면 OPENAI_API_KEY) 환경 변수로 받습니다.
+    # 판단·분석·리포트 LLM 기본 모델 묶음입니다. 이 값 하나로 기본 모델을 모두 바꿉니다.
+    # 제공사 API 키는 LiteLLM 규칙대로 GEMINI_API_KEY, OPENAI_API_KEY 환경 변수로 받습니다.
+    # OpenAI 호환 라우터(BizRouter 등)를 쓰려면 OPENAI_API_BASE에 주소를 넣고 모델 이름을 라우터 규칙에 맞춥니다.
     llm_provider: LLMProvider = DEFAULT_PROVIDER
     # LiteLLM 모델 이름입니다. 비워 두면 llm_provider의 기본값(PROVIDER_MODELS)을 씁니다.
     llm_judge_model: str = PROVIDER_MODELS[DEFAULT_PROVIDER]["llm_judge_model"]
@@ -76,7 +80,7 @@ class Settings(BaseSettings):
     llm_judge_reasoning_effort: str | None = "low"
     # 분석(2단계 주제 생성) 모델의 reasoning_effort입니다. 비우면 모델 기본값을 씁니다.
     # 기본값 low 근거: Gemini 3.8 Flash에서 호출당 44~57초가 7~9초로 줄고 품질 차이는 없었습니다
-    # (docs/evals/stage2-2026-11-12.md, PR #36).
+    # (docs/evals/stage2-2026-11-12.md, PR #36). gpt-6.2-sol 비교(#201)도 low로 쟀습니다.
     llm_analysis_reasoning_effort: str | None = "low"
     # 리포트 모델의 reasoning_effort입니다. 비우면 모델 기본값을 씁니다.
     # 기본값 low 근거: Gemini 3.8 Flash 리포트 생성이 23~28초에서 12초 안팎으로 줄었고,

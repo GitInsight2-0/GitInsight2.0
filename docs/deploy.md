@@ -50,7 +50,10 @@
 |---|---|---|
 | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` | Railway 참조 변수. 없으면 측정 이벤트가 컨테이너 디스크에 쌓였다 재배포 때 사라지고, 분석 요청은 503 |
 | `LAB_ENABLED` | `false` | 기본값과 같지만 명시합니다 |
-| `GEMINI_API_KEY` | 결제 등록 키 | 판단·분석·리포트. 무료 등급 키는 429·503으로 거의 실패 (#69) |
+| `GEMINI_API_KEY` | 결제 등록 키 | 판단·리포트. 무료 등급 키는 429·503으로 거의 실패 (#69) |
+| `OPENAI_API_KEY` | BizRouter 키 | 분석(출제, 검토, 면접 계획, #202). 분석 중 사용자 레포 코드가 BizRouter를 거쳐 OpenAI로 감 |
+| `OPENAI_API_BASE` | `https://api.bizrouter.ai/v1` | `openai/`로 시작하는 모델 호출을 BizRouter로 보냄. 판단·리포트(`gemini/`)는 영향 없음 |
+| `LLM_ANALYSIS_MODEL` | `openai/openai/gpt-6.2-sol` | BizRouter의 모델 이름(`openai/gpt-6.2-sol`)에 LiteLLM 접두사 `openai/`를 붙인 값. OpenAI에 직접 붙이면 넣지 않음(코드 기본값 `openai/gpt-6.2-sol`) |
 | `GITHUB_CLIENT_ID` | GitHub App Client ID | B에게 직접 받음 |
 | `GITHUB_CLIENT_SECRET` | GitHub App Client secret | B에게 직접 받음 |
 | `SESSION_SECRET` | 배포 전용 무작위 값 | `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`. 로컬 값과 따로 만들고 공유하지 않음. 바꾸면 모두 로그아웃됨 |
@@ -60,7 +63,7 @@
 
 - `PORT`: Railway가 넣습니다
 - `LLM_PROVIDER`, `LLM_JUDGE_MODEL`, `LLM_JUDGE_REASONING_EFFORT`, `JUDGE_TIMEOUT_S`: 비워 두면 새 기본값(Gemini)을 씁니다 (#69)
-- `OPENAI_API_KEY`, `CORS_ORIGINS`: 쓰지 않습니다
+- `CORS_ORIGINS`: 쓰지 않습니다
 - `COOKIE_SECURE`: 기본값(켬)을 씁니다. 배포 주소가 https라 끌 이유가 없습니다
 
 ### Vercel 웹

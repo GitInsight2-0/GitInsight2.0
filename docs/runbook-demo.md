@@ -26,16 +26,20 @@
 
 환경 변수는 Railway API 서비스의 Variables에서 바꾸고 재배포합니다. 재배포는 약 1~2분 걸리므로, 기다리는 동안 텍스트 모드로 이어 갑니다.
 
-### A. 판단·리포트 LLM 모델 바꾸기
+### A. 판단·분석·리포트 LLM 모델 바꾸기
 
-판단·분석·리포트 LLM은 Gemini만 씁니다 (`LLM_PROVIDER` 기본값 `gemini`, #63). 다른 제공사로 넘기는 대비책은 없습니다.
-기본 모델은 판단 `gemini/gemini-3.6-flash`(추론량 `low`, 제한 4초), 분석·리포트 `gemini/gemini-3.8-flash`입니다.
-한 모델이 과부하(503)나 한도 초과(429)로 막히면 같은 키로 다른 Gemini 모델을 씁니다.
+판단·리포트 LLM은 Gemini를 씁니다 (`LLM_PROVIDER` 기본값 `gemini`, #63).
+분석(출제, 검토, 면접 계획)은 BizRouter를 거쳐 OpenAI `gpt-6.2-sol`을 씁니다 (#202).
+기본 모델은 판단 `gemini/gemini-3.6-flash`(추론량 `low`, 제한 4초), 리포트 `gemini/gemini-3.8-flash`, 분석 `openai/openai/gpt-6.2-sol`(BizRouter 이름)입니다.
+한 모델이 과부하(503)나 한도 초과(429)로 막히면 다른 모델로 바꿉니다. 분석이 막히면 Gemini 키로 넘깁니다.
 
 ```text
 LLM_JUDGE_MODEL=gemini/gemini-3.8-flash     # 판단 모델이 막혔을 때
 LLM_REPORT_MODEL=gemini/gemini-3.6-flash    # 리포트 모델이 막혔을 때
+LLM_ANALYSIS_MODEL=gemini/gemini-3.8-flash  # BizRouter나 OpenAI가 막혔을 때 (면접 계획도 같이 바뀜)
 ```
+
+- 분석 모델을 Gemini로 넘겨도 이미 끝난 분석은 그대로 다시 씁니다. 새로 요청한 분석만 Gemini로 만듭니다.
 
 - 되돌릴 때는 변수를 비웁니다. 비우면 기본 모델을 씁니다.
 - 바꾸기 전에 로컬에서 확인합니다: `$env:LLM_JUDGE_MODEL="gemini/gemini-3.8-flash"; uv run python scripts/demo_check.py --real-llm`
@@ -70,9 +74,10 @@ uv run python scripts/demo_check.py --real-llm    # 실제 LLM으로 완주 (비
 세 명령 모두 마지막 줄까지 `[통과]`여야 합니다. `--real-llm`에서 대체 사유가 `timeout`으로 많이 나오면 `JUDGE_TIMEOUT_S`나 `LLM_JUDGE_REASONING_EFFORT`를 조정합니다.
 리포트가 판단 표(`turn_table`)로 자주 나오면 리포트 생성이 제한 30초(`REPORT_TIMEOUT_S`)를 넘는 것입니다. 리포트 모델의 추론량은 `LLM_REPORT_REASONING_EFFORT`(기본 `low`, 12초 안팎)로 바꿉니다. 비우면 모델 기본값(23~28초)을 씁니다.
 
-- [ ] Railway 환경 변수: `LAB_ENABLED=false`, `BRAIN_FORCE_PREPARED=false`, `LLM_PROVIDER`와 모델 이름 변수 비움 (기본값 Gemini)
+- [ ] Railway 환경 변수: `LAB_ENABLED=false`, `BRAIN_FORCE_PREPARED=false`, `LLM_PROVIDER`·`LLM_JUDGE_MODEL`·`LLM_REPORT_MODEL` 비움, `LLM_ANALYSIS_MODEL`·`OPENAI_API_KEY`·`OPENAI_API_BASE`는 BizRouter 값 (`docs/deploy.md`)
 - [ ] Railway 시작 명령이 `uvicorn --factory gitinsight_worker.server:app_factory`인지 확인 (`gitinsight_api.main:app_factory`이면 분석 요청이 503)
-- [ ] `GEMINI_API_KEY`를 Railway(판단·분석·리포트)와 Vercel(음성 토큰)에 등록, 결제 한도 확인 (예산 상한 $100)
+- [ ] `GEMINI_API_KEY`를 Railway(판단·리포트)와 Vercel(음성 토큰)에 등록, 결제 한도 확인 (예산 상한 $100)
+- [ ] BizRouter 키(`OPENAI_API_KEY`)를 Railway(분석)에 등록, 잔액 확인
 - [ ] 시연에 쓸 레포를 **시연 계정으로 로그인해서** 배포 주소에서 미리 한 번 분석해 둠. 두 번째 레포도 하나 더 분석해 둠 (A)
   - 서버는 같은 레포·커밋·요청자의 끝난 분석을 다시 씁니다. 시연 때 같은 레포를 고르면 바로 끝납니다
   - 분석은 요청한 본인에게만 열립니다 (#52). 다른 계정으로 분석해 두면 시연 계정에서는 새로 분석합니다
