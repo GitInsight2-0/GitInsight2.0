@@ -131,10 +131,27 @@ class GazeSummary(Contract):
         return self
 
 
+class GazeAnswer(Contract):
+    """답변 하나 동안 화면 밖을 본 비율입니다 (#180).
+
+    질문이 화면에 나온 뒤부터 그 답변을 보낼 때까지 잰 값입니다.
+    브라우저가 면접 내내 들고 있다가 끝낼 때 한 번에 보내므로, 도중에 시선 분석을 끄면 서버로 오지 않습니다.
+    """
+
+    turn_id: UUID
+    away_ratio: Ratio
+
+
+# 끝낼 때 받는 답변별 시선 요약의 최대 개수입니다. 면접 한 번의 답변 수보다 넉넉합니다.
+GAZE_ANSWERS_MAX = 200
+
+
 class SessionEnd(Contract):
     """POST /api/sessions/{id}/end 요청 본문입니다. 본문 없이 보내도 됩니다."""
 
     gaze: GazeSummary | None = None
+    # 답변별 화면 밖 비율입니다 (#180). gaze가 있을 때만 리포트에서 가장 많이 벗어난 답변을 짚는 데 씁니다.
+    gaze_answers: list[GazeAnswer] = Field(default_factory=list, max_length=GAZE_ANSWERS_MAX)
 
 
 class SessionEnded(Contract):

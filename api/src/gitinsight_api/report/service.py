@@ -7,6 +7,7 @@
 """
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -17,8 +18,8 @@ from gitinsight_api.brain.protocol import AnalysisNotFoundError
 from gitinsight_api.brain.repository import SessionRepository
 from gitinsight_api.report.builder import ReportBuilder
 from gitinsight_api.report.code_map import ReportHistory
-from gitinsight_contracts.interview import GazeSummary
-from gitinsight_contracts.report import CompetencyLevel, ProgressEntry, Report
+from gitinsight_contracts.interview import GazeAnswer, GazeSummary
+from gitinsight_contracts.report import CompetencyLevel, GazePeak, ProgressEntry, Report
 
 # 이전 면접 비교에 돌려주는 최대 면접 수입니다. 가장 최근 것부터 이만큼만 봅니다.
 PROGRESS_LIMIT = 20
@@ -96,10 +97,16 @@ class ReportService:
         self._builder = builder
         self._locks: dict[UUID, asyncio.Lock] = {}
 
-    async def end_session(self, session_id: UUID, gaze: GazeSummary | None = None) -> Report:
+    async def end_session(
+        self,
+        session_id: UUID,
+        gaze: GazeSummary | None = None,
+        gaze_answers: Sequence[GazeAnswer] = (),
+    ) -> Report:
         """세션을 닫고 리포트를 만듭니다. 이미 리포트가 있으면 그대로 돌려줍니다.
 
         gaze는 브라우저가 잰 시선 요약입니다 (#177). 리포트에 그대로 담기만 하고 점수에는 쓰지 않습니다.
+        gaze_answers는 답변별 화면 밖 비율입니다 (#180). gaze가 있을 때만 가장 많이 벗어난 답변을 짚고, 저장하지는 않습니다.
         """
         lock = self._locks.setdefault(session_id, asyncio.Lock())
         async with lock:
@@ -122,7 +129,9 @@ class ReportService:
             )
             report = await self._builder.build(analysis, state, turns, previous)
             if gaze is not None:
-                report = report.model_copy(update={"gaze": gaze})
+                report = report.model_copy(
+                    update={"gaze": gaze, "gaze_peak": gaze_peak(gaze_answers, report)}
+                )
             try:
                 await self._store.save(report, state.owner_id)
             except ReportAlreadyExistsError:
@@ -154,3 +163,22 @@ class ReportService:
             for item in saved
             if item.report.competencies
         ]
+
+
+def gaze_peak(answers: Sequence[GazeAnswer], report: Report) -> GazePeak | None:
+    """화면 밖 비율이 가장 큰 답변입니다 (#180). 같으면 먼저 한 답변이고, 화면 밖을 본 답변이 없으면 None입니다.
+
+    리포트 답변 기록(`Report.turns`)에 있는 턴만 고릅니다.
+    다른 세션의 턴이나 기록에 나오지 않는 턴(틀린 말에 한 답변 등)을 짚으면 리포트에서 이어 볼 답변이 없기 때문입니다.
+    같은 turn_id가 여러 번 오면 처음 값을 씁니다.
+    LLM 없이 브라우저가 보낸 숫자만 비교합니다. 점수와 성장 비교에는 쓰지 않습니다.
+    """
+    ratios: dict[UUID, float] = {}
+    for answer in answers:
+        ratios.setdefault(answer.turn_id, answer.away_ratio)
+    best: GazePeak | None = None
+    for row in report.turns:
+        ratio = ratios.get(row.turn_id, 0.0)
+        if ratio > 0 and (best is None or ratio > best.away_ratio):
+            best = GazePeak(turn_id=row.turn_id, away_ratio=ratio)
+    return best

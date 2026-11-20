@@ -106,6 +106,8 @@ export interface SessionOptions {
    * 음성 연결을 닫아도 서버 세션은 끝내지 않습니다.
    */
   existing?: { sessionId: string; current: BrainReply };
+  /** 답변 턴을 보내기 직전에 그 turn_id로 부릅니다. 답변별 시선을 적는 데 씁니다 (#180) */
+  onAnswer?: (turnId: string) => void;
 }
 
 export interface VoiceSession {
@@ -510,6 +512,7 @@ export async function startVoiceSession(
         speech_started_at: m.lastUserStart,
         speech_ended_at: m.lastUserEnd,
       };
+      opts.onAnswer?.(turnId);
       inFlight = turn;
       const sentAt = performance.now();
       try {
