@@ -21,6 +21,7 @@ REQUEST_MODELS: list[type[BaseModel]] = [
     interview.SessionCreate,
     interview.TurnRequest,
     api.AnalysisCreate,
+    api.PublicAnalysisCreate,
     metrics.MetricEvent,
 ]
 

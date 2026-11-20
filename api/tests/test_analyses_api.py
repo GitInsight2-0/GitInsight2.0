@@ -279,3 +279,182 @@ async def test_launcher_recovers_on_startup_and_closes_on_shutdown(harness: Harn
         assert harness.launcher.events == ["recover"]
 
     assert harness.launcher.events == ["recover", "aclose"]
+
+
+# ---- 면접관이 지원자의 공개 레포를 분석 (#173) ----
+
+PUBLIC_NAME = "candidate/portfolio-api"
+
+
+class PublicGitHub(FakeGitHub):
+    """GET /repos/{owner}/{name}을 더 흉내 냅니다.
+
+    installed=False면 App이 설치되지 않은 레포라 사용자 토큰으로는 404이고, 토큰 없이 물어야 보입니다.
+    """
+
+    def __init__(self, name: str = PUBLIC_NAME, sha: str = SHA) -> None:
+        super().__init__()
+        self.name = name
+        self.sha = sha
+        self.private = False
+        self.installed = False
+        self.exists = True
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.raw_path.decode()
+        if not path.startswith(f"/repos/{self.name}"):
+            return super().handler(request)
+        self.requests.append(request)
+        auth = request.headers.get("Authorization")
+        if auth is not None and auth != f"Bearer {TOKEN}":
+            return httpx.Response(401, json={"message": "Bad credentials"})
+        visible = self.exists and (
+            (auth is not None and self.installed) or (auth is None and not self.private)
+        )
+        if not visible:
+            return httpx.Response(404, json={"message": "Not Found"})
+        if path == f"/repos/{self.name}":
+            return httpx.Response(
+                200,
+                json={
+                    "full_name": self.name,
+                    "default_branch": self.default_branch,
+                    "private": self.private,
+                },
+            )
+        if path.startswith(f"/repos/{self.name}/commits/"):
+            return httpx.Response(200, text=self.sha)
+        return httpx.Response(404, json={"message": "Not Found"})
+
+
+@pytest.fixture
+def public(tmp_path: Path) -> Harness:
+    harness = Harness(tmp_path)
+    harness.github = PublicGitHub()
+    harness.app = harness.build(lambda _store: harness.launcher)
+    return harness
+
+
+@pytest.mark.parametrize(
+    "repo_url",
+    [
+        f"https://github.com/{PUBLIC_NAME}",
+        f"https://github.com/{PUBLIC_NAME}.git",
+        f"https://www.github.com/{PUBLIC_NAME}/tree/main/src?tab=readme#top",
+        f"github.com/{PUBLIC_NAME}/",
+        f"  {PUBLIC_NAME}  ",
+    ],
+)
+async def test_public_repo_url_is_analyzed_without_token_or_requester(
+    public: Harness, repo_url: str
+) -> None:
+    async with public.client(public.cookie()) as client:
+        response = await client.post("/api/analyses/public", json={"repo_url": repo_url})
+
+    assert response.status_code == 202, response.text
+    [(record, context)] = public.launcher.launched
+    assert (record.key.repo_full_name, record.key.commit_sha, record.key.user_id) == (
+        PUBLIC_NAME,
+        SHA,
+        USER_ID,
+    )
+    # 공개 레포는 토큰 없이 받고, 요청자가 지원자가 아니라 기여 라벨을 맞추지 않습니다.
+    assert (context.github_token, context.login) == (None, None)
+    # App이 설치되지 않아 사용자 토큰으로 404였고, 토큰 없이 다시 물었습니다.
+    lookups = [
+        r for r in public.github.requests if r.url.raw_path.decode() == f"/repos/{PUBLIC_NAME}"
+    ]
+    assert [r.headers.get("Authorization") for r in lookups] == [f"Bearer {TOKEN}", None]
+
+
+async def test_public_repo_with_app_installed_uses_user_token(public: Harness) -> None:
+    assert isinstance(public.github, PublicGitHub)
+    public.github.installed = True
+    async with public.client(public.cookie()) as client:
+        response = await client.post("/api/analyses/public", json={"repo_url": PUBLIC_NAME})
+
+    assert response.status_code == 202
+    assert all(r.headers.get("Authorization") == f"Bearer {TOKEN}" for r in public.github.requests)
+    [(_, context)] = public.launcher.launched
+    assert context.github_token is None
+
+
+@pytest.mark.parametrize(
+    "repo_url",
+    [
+        "https://gitlab.com/candidate/portfolio-api",
+        "https://github.com/candidate",
+        "candidate",
+        "a/b/c",
+        "../etc/passwd",
+        "https://github.com/candidate/..",
+        "https://github.com/-rf/x y",
+    ],
+)
+async def test_bad_repo_url_is_422_without_calling_github(public: Harness, repo_url: str) -> None:
+    async with public.client(public.cookie()) as client:
+        response = await client.post("/api/analyses/public", json={"repo_url": repo_url})
+
+    assert response.status_code == 422, response.text
+    assert public.github.requests == []
+    assert public.launcher.launched == []
+
+
+async def test_private_repo_is_refused(public: Harness) -> None:
+    # 면접관이 그 비공개 레포를 읽을 수 있어도(App 설치) 공개 레포가 아니면 분석하지 않습니다.
+    assert isinstance(public.github, PublicGitHub)
+    public.github.private = True
+    public.github.installed = True
+    async with public.client(public.cookie()) as client:
+        response = await client.post("/api/analyses/public", json={"repo_url": PUBLIC_NAME})
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "공개 레포만 분석할 수 있습니다"}
+    assert public.launcher.launched == []
+
+
+async def test_private_repo_without_access_looks_missing(public: Harness) -> None:
+    assert isinstance(public.github, PublicGitHub)
+    public.github.private = True
+    async with public.client(public.cookie()) as client:
+        response = await client.post("/api/analyses/public", json={"repo_url": PUBLIC_NAME})
+
+    assert response.status_code == 404
+    assert public.launcher.launched == []
+
+
+async def test_public_analysis_requires_login(public: Harness) -> None:
+    async with public.client() as client:
+        response = await client.post("/api/analyses/public", json={"repo_url": PUBLIC_NAME})
+
+    assert response.status_code == 401
+    assert public.github.requests == []
+
+
+async def test_result_is_only_for_requester_and_only_when_done(public: Harness) -> None:
+    # 저장소는 결과의 레포·커밋이 기록과 같아야 받으므로, 샘플 분석의 레포·커밋을 공개 레포로 둡니다.
+    sample = load_analysis()
+    public.github = PublicGitHub(sample.repo_full_name, sample.commit_sha)
+    public.app = public.build(lambda _store: public.launcher)
+    async with public.client(public.cookie()) as client:
+        created = (
+            await client.post("/api/analyses/public", json={"repo_url": sample.repo_full_name})
+        ).json()
+        analysis_id = created["analysis_id"]
+        before = await client.get(f"/api/analyses/{analysis_id}/result")
+        result = sample.model_copy(update={"analysis_id": analysis_id})
+        await public.store.save_result(analysis_id, result)
+        mine = await client.get(f"/api/analyses/{analysis_id}/result")
+        missing = await client.get("/api/analyses/no-such/result")
+    async with public.client(public.cookie(user_id="9999", login="other")) as client:
+        theirs = await client.get(f"/api/analyses/{analysis_id}/result")
+    async with public.client() as client:
+        anonymous = await client.get(f"/api/analyses/{analysis_id}/result")
+
+    assert before.status_code == 404
+    assert mine.status_code == 200
+    assert mine.json()["analysis_id"] == analysis_id
+    assert mine.json()["topics"] == result.model_dump(mode="json")["topics"]
+    assert (missing.status_code, theirs.status_code) == (404, 404)
+    assert before.json() == theirs.json() == missing.json()
+    assert anonymous.status_code == 401

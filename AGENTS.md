@@ -26,7 +26,7 @@ README.md의 "전체 구조"를 따릅니다.
 | `contracts/schema/contracts.json`, `contracts/ts/index.d.ts` | 계약에서 자동 생성한 JSON Schema와 TS 타입. 직접 고치지 않습니다 | 자동 생성 |
 | `api/src/gitinsight_api/` | FastAPI 서버. `brain/`(면접 두뇌), `llm/`(LLMClient), `routes/` | B, D |
 | `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출(Python, TypeScript, JavaScript), git blame 기여 라벨과 최근 커밋, 이름 기준 레포 안 참조 수(Python만)), 2단계(규칙으로 주제 후보 선택, 참조 수를 서버 사실로, 주제 코드가 쓰는 다른 파일 정의 요약(`definitions`, Python만)을 신뢰하지 않는 입력으로 넣어 LLM으로 주제 재료 생성과 서버 검증, 면접관이 일부러 하는 틀린 말의 방식과 부른다고 말할 함수를 규칙으로 고르기(`misstatement`)), 전체 흐름 `pipeline.run_analysis`, 분석 기록 저장소와 연결해 실행하는 `jobs`(같은 프로세스 Launcher), 분석까지 여는 서버 진입점 `server` | A |
-| `web/` | Next.js 웹. 첫 화면(`/`, GitHub 로그인과 면접 시작), 실제 모드 면접 화면(`/interview/[analysisId]`, 음성·텍스트, 도중 전환, 음성 끊김 시 텍스트 자동 전환, 끝내기와 리포트 요청), 리포트 화면(`/reports/[reportId]`, 역량별 수준과 근거 인용문, 코드 지도, 주제별 내용, 답변 기록, 이전 면접과 비교), 음성 토큰 라우트(`/voice-token`, 실험 모드가 아니면 로그인 필요), 실험 화면(`/lab/voice`, `/lab/interview`)이 있습니다 | C |
+| `web/` | Next.js 웹. 첫 화면(`/`, GitHub 로그인과 면접 시작), 실제 모드 면접 화면(`/interview/[analysisId]`, 음성·텍스트, 도중 전환, 음성 끊김 시 텍스트 자동 전환, 끝내기와 리포트 요청), 면접관 질문지(`/prep`, `/prep/[analysisId]`, #173), 리포트 화면(`/reports/[reportId]`, 역량별 수준과 근거 인용문, 코드 지도, 주제별 내용, 답변 기록, 이전 면접과 비교), 음성 토큰 라우트(`/voice-token`, 실험 모드가 아니면 로그인 필요), 실험 화면(`/lab/voice`, `/lab/interview`)이 있습니다 | C |
 | `fixtures/analysis/` | 데모 레포 분석 결과 샘플(`gitinsight_agent`, 손으로 만듦)과 실제 워커로 만든 데모 스냅샷(`gitinsight_agent_live`) | B |
 | `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |
 | `scripts/` | 계약 생성, 샘플 데이터 도구, 데모 스냅샷 넣기, 수동 LLM 평가 스크립트 | |
@@ -107,6 +107,8 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 이때 `POST /api/sessions`는 분석을 요청한 본인만 쓸 수 있고, 다른 사람의 분석과 없는 분석은 같은 404입니다. 샘플 분석도 `scripts/seed_demo_analysis.py`로 넣은 계정만 씁니다.
 분석 결과를 읽다가 DB에 연결하지 못하면 503을 돌려줍니다.
 분석 요청은 `POST /api/analyses`(본문 `repo_id`), 진행 상태는 `GET /api/analyses/{id}`입니다(`routes/analyses.py`). 상태는 요청한 본인만 보고, 다른 사람의 분석은 404입니다.
+면접관 질문지(#173): `POST /api/analyses/public`(본문 `repo_url`, 계약 `PublicAnalysisCreate`)은 지원자의 **공개** 레포만 분석합니다. 주소에서 owner/name만 읽고 GitHub API로 공개 레포인지 확인하며(`github_repos.resolve_public_repo`, App이 없어 사용자 토큰으로 안 보이면 토큰 없이 다시 묻습니다), 비공개면 422입니다. 레포는 토큰 없이 받고 요청자 정보를 넘기지 않아 기여 라벨은 모두 "확인 불가"입니다.
+`GET /api/analyses/{id}/result`는 요청한 본인의 완료된 분석 결과(`AnalysisResult`)이고, 다른 사람·미완료·없는 분석은 같은 404입니다. 웹은 `/prep`(주소 입력과 분석 진행)과 `/prep/[analysisId]`(질문지, 인쇄)입니다.
 서버는 로그인 쿠키의 GitHub 사용자 토큰으로 레포 이름과 기본 브랜치의 최신 커밋을 확인하고(`github_repos.py`), 같은 토큰으로 레포를 내려받습니다. 토큰은 분석 작업의 메모리에만 있고, git에는 환경 변수로만 넘깁니다.
 분석 실행기는 워커 패키지에 있어서 `gitinsight_worker.server:app_factory`로 띄울 때만 붙습니다. `DATABASE_URL`이 없거나 실험 모드이거나 `gitinsight_api.main:app_factory`로 띄우면 분석 요청 API는 503입니다.
 같은 조건에서 면접 세션과 턴 기록도 메모리 대신 `interview_sessions`, `interview_turns` 테이블에 둡니다(`brain/postgres.py`의 `PostgresSessionRepository`). 서버를 다시 시작해도 면접이 이어집니다.
