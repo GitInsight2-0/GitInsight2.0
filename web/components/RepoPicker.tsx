@@ -307,9 +307,12 @@ export default function RepoPicker() {
             </p>
           )}
         </fieldset>
-        {/* 코드가 외부 AI로 간다는 것을 분석을 시작하기 전에 알립니다 (#175). 학습 여부는 약관 확인 뒤 따로 정합니다 */}
+        {/*
+          코드가 외부 AI로 간다는 것을 분석을 시작하기 전에 알립니다 (#175). 학습 여부는 약관 확인 뒤 따로 정합니다.
+          분석 LLM은 BizRouter를 거친 OpenAI입니다 (#203). 분석 모델(LLM_ANALYSIS_MODEL)을 바꾸면 이 문구도 같이 고칩니다 (#204).
+        */}
         <p className={styles.small}>
-          분석할 때 코드 일부가 Google Gemini로 보내져 처리돼요. 분석이 끝난 원본 코드는 저장하지 않아요.
+          분석할 때 코드 일부가 OpenAI(BizRouter 경유)로 보내져 처리돼요. 분석이 끝난 원본 코드는 저장하지 않아요.
         </p>
         <button type="button" className={styles.primary} disabled={!pick} onClick={() => pick && void analyze(pick)}>
           분석하고 면접 시작
