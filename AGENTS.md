@@ -25,7 +25,7 @@ README.md의 "전체 구조"를 따릅니다.
 | `contracts/src/gitinsight_contracts/` | 모듈 간 계약(Pydantic 모델) | B (변경 시 2명 승인) |
 | `contracts/schema/contracts.json`, `contracts/ts/index.d.ts` | 계약에서 자동 생성한 JSON Schema와 TS 타입. 직접 고치지 않습니다 | 자동 생성 |
 | `api/src/gitinsight_api/` | FastAPI 서버. `brain/`(면접 두뇌), `llm/`(LLMClient), `routes/` | B, D |
-| `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출(Python, TypeScript, JavaScript), git blame 기여 라벨과 최근 커밋, 이름 기준 레포 안 참조 수(Python만)), 2단계(규칙으로 주제 후보 선택, 참조 수를 서버 사실로, 주제 코드가 쓰는 다른 파일 정의 요약(`definitions`, Python만)을 신뢰하지 않는 입력으로 넣어 LLM으로 주제 재료 생성과 서버 검증, 면접관이 일부러 하는 틀린 말의 방식과 부른다고 말할 함수를 규칙으로 고르기(`misstatement`)), 전체 흐름 `pipeline.run_analysis`, 분석 기록 저장소와 연결해 실행하는 `jobs`(같은 프로세스 Launcher), 분석까지 여는 서버 진입점 `server` | A |
+| `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출(Python, TypeScript, JavaScript, Java), git blame 기여 라벨과 최근 커밋, 이름 기준 레포 안 참조 수(Python만)), 2단계(규칙으로 주제 후보 선택, 참조 수를 서버 사실로, 주제 코드가 쓰는 다른 파일 정의 요약(`definitions`, Python만)을 신뢰하지 않는 입력으로 넣어 LLM으로 주제 재료 생성과 서버 검증, 면접관이 일부러 하는 틀린 말의 방식과 부른다고 말할 함수를 규칙으로 고르기(`misstatement`)), 전체 흐름 `pipeline.run_analysis`, 분석 기록 저장소와 연결해 실행하는 `jobs`(같은 프로세스 Launcher), 분석까지 여는 서버 진입점 `server` | A |
 | `web/` | Next.js 웹. 첫 화면(`/`, GitHub 로그인과 면접 시작), 실제 모드 면접 화면(`/interview/[analysisId]`, 음성·텍스트, 도중 전환, 음성 끊김 시 텍스트 자동 전환, 선택형 웹캠 시선 분석, 끝내기와 리포트 요청), 리포트 화면(`/reports/[reportId]`, 역량별 수준과 근거 인용문, 코드 지도, 주제별 내용, 시선(참고), 답변 기록, 이전 면접과 비교), 음성 토큰 라우트(`/voice-token`, 실험 모드가 아니면 로그인 필요), 실험 화면(`/lab/voice`, `/lab/interview`)이 있습니다 | C |
 | `fixtures/analysis/` | 데모 레포 분석 결과 샘플(`gitinsight_agent`, 손으로 만듦)과 실제 워커로 만든 데모 스냅샷(`gitinsight_agent_live`) | B |
 | `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |

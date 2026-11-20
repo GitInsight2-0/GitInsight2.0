@@ -14,4 +14,5 @@
 "0"은 버전이 생기기 전의 기록이 쓰는 값이라 쓰지 않습니다.
 """
 
-ANALYZER_VERSION = "1"
+# 2: Java 지원 (#182)
+ANALYZER_VERSION = "2"
