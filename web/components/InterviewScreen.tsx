@@ -279,7 +279,9 @@ export default function InterviewScreen({
     if (gaze.current) {
       const summary = gaze.current.finish();
       // 전체 요약이 없으면(너무 짧게 잼) 답변별 시선도 보내지 않습니다. 서버도 전체 요약이 있을 때만 씁니다.
-      gazeEnd.current = summary ? { gaze: summary, gaze_answers: gaze.current.answerRatios() } : {};
+      const answers = gaze.current.answerRatios();
+      // 답변별 값이 없으면 필드를 넣지 않습니다. 빈 목록도 답변별 시선을 모르는 서버에서는 422입니다.
+      gazeEnd.current = summary ? { gaze: summary, ...(answers.length ? { gaze_answers: answers } : {}) } : {};
       gaze.current = null;
       setGazeStage("off");
     }

@@ -157,7 +157,7 @@ export async function endSession(
       if (outer?.aborted) throw e;
       // 답변별 시선(#180)을 모르는 서버는 422로 거부합니다. 웹이 서버보다 먼저 배포된 동안입니다.
       // 리포트를 잃지 않게 답변별 시선만 빼고 바로 다시 보냅니다. 전체 요약은 #179부터 받습니다.
-      if (e instanceof ApiError && e.status === 422 && sent.gaze_answers?.length) {
+      if (e instanceof ApiError && e.status === 422 && sent.gaze_answers !== undefined) {
         sent = sent.gaze ? { gaze: sent.gaze } : {};
         attempt--;
         continue;
