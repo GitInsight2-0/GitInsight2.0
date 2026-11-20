@@ -76,7 +76,8 @@ def test_provider_switch_changes_all_default_models(monkeypatch: pytest.MonkeyPa
 
     assert s.llm_provider == "gemini"
     assert s.llm_judge_model == "gemini/gemini-3.6-flash"
-    assert s.llm_analysis_model == "gemini/gemini-3.8-flash"
+    # 분석(출제, 검토, 면접 계획)만 OpenAI 모델을 씁니다 (#202).
+    assert s.llm_analysis_model == "openai/gpt-6.2-sol"
     assert s.llm_report_model == "gemini/gemini-3.8-flash"
 
 

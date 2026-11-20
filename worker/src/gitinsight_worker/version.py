@@ -17,4 +17,5 @@
 # 2: Java 지원 (#182)
 # 3: Java 패키지 시작 판정과 final 지역 변수 판정 (#194)
 # 4: 질문 재료 검토 LLM과 근거 대조 (#199)
-ANALYZER_VERSION = "4"
+# 5: 출제·검토 모델을 gpt-6.2-sol로 변경 (#202)
+ANALYZER_VERSION = "5"
