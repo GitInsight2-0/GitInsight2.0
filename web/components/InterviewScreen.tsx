@@ -1046,7 +1046,10 @@ function EndScreen({
             <div className={styles.endRow}>
               <span className={styles.spinner} aria-hidden="true" />
               <b>리포트를 만들고 있어요</b>
-              <span className={styles.elapsed}>{elapsed}초</span>
+              {/* 1초마다 바뀌는 숫자라 화면 낭독기가 매번 읽지 않게 감춥니다 (#166) */}
+              <span className={styles.elapsed} aria-hidden="true">
+                {elapsed}초
+              </span>
             </div>
             <div className={styles.endTrack} aria-hidden="true">
               <span />
