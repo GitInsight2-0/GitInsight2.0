@@ -284,10 +284,11 @@ def _java_imports(text: str) -> list[_Import]:
     found: list[_Import] = []
     for m in _JAVA_IMPORT.finditer(text):
         parts = tuple(m.group("name").split("."))
-        if m.group("star"):
+        if m.group("static"):
+            # `import static a.b.Util.*;`의 `*`는 멤버 전체라, 별표가 있으면 마지막 조각이 클래스입니다 (#186 리뷰).
+            found.append(_Import(parts if m.group("star") else parts[:-1], exact=False))
+        elif m.group("star"):
             found.append(_Import(parts, exact=False, package=True))
-        elif m.group("static"):
-            found.append(_Import(parts[:-1], exact=False))
         else:
             found.append(_Import(parts, exact=False))
     return found

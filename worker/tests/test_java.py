@@ -318,3 +318,112 @@ def test_target_folder_is_skipped_only_next_to_pom(tmp_path: Path) -> None:
     assert not any(p.startswith("target/") for p in paths)
     assert "tools/src/target/aim.py" in paths
     assert "src/main/java/com/example/demo/Service.java" in paths
+
+
+# ---- #186 리뷰 (D) ----
+
+
+def test_control_flow_and_computed_locals_count_as_logic() -> None:
+    discount = textwrap.dedent(
+        """\
+        public int discount(Order order) {
+            int total = order.price * order.qty;
+            if (total > 100000) {
+                total = total - 5000;
+            }
+            if (order.vip) {
+                total = total * 9 / 10;
+            }
+            return total;
+        }
+        """
+    )
+
+    # 계산이 있는 지역 변수, if 두 줄, 대입 두 줄을 셉니다. 머리줄과 `return total;`, 닫는 괄호는 빼고 셉니다.
+    assert java_logic_line_count(discount) == 5
+    assert has_enough_logic(discount, "Order.java")
+
+
+def test_field_and_statement_lines_are_told_apart() -> None:
+    fields = [
+        "private final UserRepository repo;",
+        "private int count = 0;",
+        "String name;",
+        "int retries = 3;",
+        "List<Order> orders = new ArrayList<>();",
+    ]
+    logic = [
+        "int total = price * qty;",
+        "String s = a + b;",
+        "return result;",
+        "throw ex;",
+        "if (user == null) {",
+        "while (it.hasNext()) {",
+        "switch (type) {",
+        "} catch (IOException e) {",
+    ]
+
+    assert java_logic_line_count("\n".join(fields)) == 0
+    assert (
+        java_logic_line_count("\n".join(logic)) == len(logic) - 1
+    )  # return result;는 getter 본문과 같아 뺍니다
+
+
+def test_anonymous_class_in_field_initializer_is_not_exported() -> None:
+    source = textwrap.dedent(
+        """\
+        public class Outer {
+            private final Runnable task = new Runnable() {
+                public void run() { System.out.println("x"); }
+            };
+
+            public void run() {
+                go();
+            }
+        }
+        """
+    )
+
+    found = by_id(source, "Outer.java")
+
+    # 진짜 Outer.run(6~8줄)이 남고, 필드 초기화 안 익명 클래스의 run은 내보내지 않습니다.
+    assert found["Outer.run"] == (SymbolKind.METHOD, 6, 8)
+
+
+def test_package_prefix_without_java_folder() -> None:
+    # IntelliJ 기본 구조(src/com/example/...)에 프론트 폴더가 같이 있어도 패키지의 example은 예제가 아닙니다.
+    paths = ["src/com/example/shop/OrderService.java", "web/src/order.ts"]
+
+    assert not is_inactive_path(paths[0], shared_dirs(paths))
+    assert is_inactive_path("src/com/acme/shop/legacy/Old.java", shared_dirs(paths))
+
+
+def test_static_star_import_matches_the_class(tmp_path: Path) -> None:
+    base = "src/main/java/com/example/demo"
+    caller = _java_class(
+        "Report", "render", extra="import static com.example.demo.util.MathUtil.*;\n\n"
+    )
+    util = _java_class("MathUtil", "roundHalf").replace(
+        "    }\n}\n",
+        "    }\n\n    public static int clampValue() {\n"
+        + LOGIC
+        + "        return v2;\n    }\n}\n",
+    )
+    write_repo(
+        tmp_path,
+        {
+            f"{base}/report/Report.java": caller,
+            f"{base}/util/MathUtil.java": util,
+            f"{base}/other/Longer.java": _java_class("Longer", "muchLongerMethod").replace(
+                "        return v0;", "        int x = 1;\n        int y = 2;\n        return v0;"
+            ),
+        },
+    )
+    stage1 = analyze_tree(tmp_path, SHA)
+    target = next(s for s in stage1.symbols if s.symbol_id.endswith("Report.render"))
+
+    plan = MisstatementPlanner(tmp_path, stage1.symbols, stage1.references).plan(target)
+
+    # MathUtil을 static import로 가져와서, 더 긴 다른 폴더의 메서드보다 MathUtil 메서드가 먼저입니다.
+    assert plan.absent_symbol is not None
+    assert "MathUtil.java::MathUtil." in plan.absent_symbol.symbol_id

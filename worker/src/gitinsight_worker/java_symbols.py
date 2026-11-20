@@ -40,6 +40,7 @@ METHOD_DECLARATIONS = frozenset({"method_declaration", "constructor_declaration"
 TYPE_BODIES = frozenset(
     {"class_body", "interface_body", "enum_body", "enum_body_declarations", "annotation_type_body"}
 )
+_DECLARATIONS = TYPE_DECLARATIONS | METHOD_DECLARATIONS
 _ANNOTATIONS = frozenset({"annotation", "marker_annotation"})
 _COMMENTS = frozenset({"line_comment", "block_comment"})
 
@@ -97,7 +98,11 @@ def _walk(root: Node) -> Iterator[tuple[Node, tuple[str, ...], bool]]:
             if body is None:
                 continue
             if node.type in TYPE_DECLARATIONS:
-                children = [(m, path, exportable) for m in _members(body)]
+                # 타입 본문에서 선언이 아닌 것(필드 초기화 식, static 블록, 몸체 있는 enum 상수) 안의 정의는
+                # 익명 클래스의 메서드라 내보내지 않습니다. 내보내면 진짜 메서드와 id가 겹쳐 진짜가 버려집니다 (#186 리뷰).
+                children = [
+                    (m, path, exportable and m.type in _DECLARATIONS) for m in _members(body)
+                ]
             else:
                 # 메서드 안의 정의(지역 클래스, 익명 클래스의 메서드)는 내보내지 않습니다.
                 children = [(c, path, False) for c in body.children]
