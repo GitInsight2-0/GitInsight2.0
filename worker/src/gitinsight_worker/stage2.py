@@ -809,10 +809,11 @@ async def _review_material(
         return None
     outcome = judge_review(result.value, source, len(material.expected_points))
     logger.info(
-        "topic_review passed=%s fix=%d no_quote=%d bad_quote=%d unverifiable=%d drop=%s",
+        "topic_review passed=%s fix=%d no_quote=%d short_quote=%d bad_quote=%d unverifiable=%d drop=%s",
         outcome.passed,
         len(outcome.reviewer_problems),
         outcome.no_quote,
+        outcome.short_quote,
         outcome.bad_quote,
         outcome.unverifiable,
         outcome.drop,

@@ -128,7 +128,7 @@ def review_lines(recorder: ReviewRecorder | None, log: ReviewLog) -> list[str]:
         "## 검토 (#199)",
         "",
         f"- 검토 호출: {len(recorder.reviews)}회, 고칠 것 {len(fixes)}건, 확인할 수 없음 {len(unverifiable)}건, 주제 빼기 {len(drops)}건",
-        f"- 서버 근거 대조에서 걸린 요점: 근거를 내지 않음 {logged('no_quote')}건, 낸 근거가 자료에 없음 {logged('bad_quote')}건",
+        f"- 서버 근거 대조에서 걸린 요점: 근거를 내지 않음 {logged('no_quote')}건, 근거가 짧음 {logged('short_quote')}건, 낸 근거가 자료에 없음 {logged('bad_quote')}건",
         f"- 다시 만들어도 남아 버린 후보: {sum(m.startswith('topic_rejected') for m in log.messages)}개"
         + (f" (주제가 없어 그중 {fallback}개를 대신 씀)" if fallback else ""),
         "",

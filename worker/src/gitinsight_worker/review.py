@@ -3,6 +3,7 @@
 - 검토 LLM은 항목마다 통과 / 고칠 것 / 확인할 수 없음을 내고, 재료를 직접 고치지 않습니다. 쓰는 쪽은 출제 하나입니다.
 - 요점마다 근거가 되는 자료의 문장을 그대로 옮기게 하고, 서버가 그 문장이 실제로 준 자료(코드, 정의 요약, 서버 사실)에 있는지 글자로 대조합니다.
   근거를 대지 못한 요점은 검토 LLM이 통과라고 해도 고칠 것으로 봅니다. 코드에 없는 이유를 덧붙이는 오류를 모델과 상관없이 거르기 위해서입니다.
+  여러 줄 근거는 통째로 없어도 줄마다 자료에 있으면 인정합니다(#206). 떨어진 줄을 이어 붙인 인용이 잦았기 때문입니다.
 - 확인할 수 없음(주어진 자료 밖의 코드가 필요함)은 고칠 것으로 보지 않고 세기만 합니다.
   이 수가 많으면 검토가 스스로 다른 코드를 찾아보게 하는 다음 단계를 검토합니다.
 - 일부러 하는 틀린 말(misstatement)은 일부러 틀린 문장이라 검토에 보여 주지 않습니다.
@@ -126,10 +127,12 @@ class ReviewOutcome:
     reviewer_problems: list[str]
     unverifiable: int
     drop: bool
-    # server_problems의 내역입니다. 근거를 내지 않은 요점과, 낸 근거가 자료에 없던 요점입니다(#200 리뷰).
-    # 뒤쪽이 많으면 검토 LLM이 근거를 잘못 옮겨 맞는 요점을 고치게 하는 것일 수 있습니다.
+    # server_problems의 내역입니다. 근거를 내지 않은 요점, 낸 근거가 모두 MIN_QUOTE_CHARS보다 짧았던 요점,
+    # 낸 근거가 자료에 없던 요점입니다(#200 리뷰, #206).
+    # 마지막이 많으면 검토 LLM이 근거를 잘못 옮겨 맞는 요점을 고치게 하는 것일 수 있습니다.
     no_quote: int = 0
     bad_quote: int = 0
+    short_quote: int = 0
 
     @property
     def passed(self) -> bool:
@@ -138,6 +141,25 @@ class ReviewOutcome:
 
 def _normalize(text: str) -> str:
     return " ".join(text.split())
+
+
+def quote_in_source(quote: str, corpus: str) -> bool:
+    """근거 문장이 대조 자료(정규화한 corpus)에 글자 그대로 있는지입니다.
+
+    통째로 있으면 인정합니다. 아니면 줄마다 대조합니다(#206).
+    검토 LLM은 떨어진 줄을 한 인용으로 이어 붙이곤 합니다. #206 진단에서 떨어진 근거 14건이 모두 이 경우였고, 줄마다는 코드에 그대로 있었습니다.
+    줄마다 글자 그대로여야 하므로, 코드에 없는 이유를 덧붙인 문장은 여전히 걸러집니다.
+    `}`처럼 짧은 줄은 어디에나 맞아서, 줄 중 하나는 MIN_QUOTE_CHARS 이상이어야 합니다.
+    """
+    whole = _normalize(quote)
+    if len(whole) >= MIN_QUOTE_CHARS and whole in corpus:
+        return True
+    lines = [line for line in (_normalize(raw) for raw in quote.splitlines()) if line]
+    return (
+        len(lines) > 1
+        and all(line in corpus for line in lines)
+        and any(len(line) >= MIN_QUOTE_CHARS for line in lines)
+    )
 
 
 def material_for_review(material: BaseModel) -> str:
@@ -200,7 +222,7 @@ def judge_review(review: TopicReview, source: ReviewSource, point_count: int) ->
     - unverifiable로 표시된 요점은 근거를 요구하지 않고 세기만 합니다.
       그래서 검토 LLM이 unverifiable을 내면 근거 대조를 건너뛰는 길이 됩니다. 평가에서는 0건이었습니다.
       이 수가 늘면 unverifiable 요점도 근거를 요구하거나, 검토가 다른 코드를 찾아보게 하는 쪽을 검토합니다(#200 리뷰).
-    - 나머지 요점은 자료에 실제로 있는 근거 문장이 하나 이상 있어야 합니다.
+    - 나머지 요점은 자료에 실제로 있는 근거 문장이 하나 이상 있어야 합니다(quote_in_source).
     """
     corpus = source.corpus()
     reviewer: list[str] = []
@@ -221,12 +243,12 @@ def judge_review(review: TopicReview, source: ReviewSource, point_count: int) ->
             reviewer.append(f"{field}: {item.reason.strip()[:MAX_REASON_CHARS]}")
 
     supported: set[int] = set()
-    quoted: set[int] = set()
+    quotes: dict[int, list[str]] = {}
     for evidence in review.evidence:
         quote = _normalize(evidence.quote)
         if quote:
-            quoted.add(evidence.point)
-        if len(quote) >= MIN_QUOTE_CHARS and quote in corpus:
+            quotes.setdefault(evidence.point, []).append(quote)
+        if quote_in_source(evidence.quote, corpus):
             supported.add(evidence.point)
     unsupported = [
         i for i in range(1, point_count + 1) if i not in supported and i not in unverifiable_points
@@ -235,14 +257,16 @@ def judge_review(review: TopicReview, source: ReviewSource, point_count: int) ->
         f"expected_points[{i}]: 주제 코드나 서버가 알려 준 사실로 확인되지 않음. 코드에서 직접 확인되는 내용만 쓰세요"
         for i in unsupported
     ]
-    bad_quote = sum(i in quoted for i in unsupported)
+    quoted = [i for i in unsupported if i in quotes]
+    short_quote = sum(all(len(q) < MIN_QUOTE_CHARS for q in quotes[i]) for i in quoted)
     return ReviewOutcome(
         server_problems=server,
         reviewer_problems=reviewer[:MAX_FEEDBACK_ITEMS],
         unverifiable=unverifiable,
         drop=review.drop,
-        no_quote=len(unsupported) - bad_quote,
-        bad_quote=bad_quote,
+        no_quote=len(unsupported) - len(quoted),
+        bad_quote=len(quoted) - short_quote,
+        short_quote=short_quote,
     )
 
 
