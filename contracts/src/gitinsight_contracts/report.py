@@ -9,7 +9,7 @@ from pydantic import Field
 
 from gitinsight_contracts.base import Contract
 from gitinsight_contracts.common import SymbolRef
-from gitinsight_contracts.interview import Action
+from gitinsight_contracts.interview import Action, GazeSummary
 from gitinsight_contracts.llm import CatchStatus, Competency, Intent
 
 Level = Annotated[int, Field(ge=1, le=4)]
@@ -135,6 +135,8 @@ class Report(Contract):
     code_map: CodeMap | None = None
     # 면접 한 번에 최대 한 번입니다. 나오지 않은 면접과 이 필드가 생기기 전의 리포트는 null입니다.
     misstatement: MisstatementResult | None = None
+    # 면접자가 시선 분석을 켠 면접에만 있습니다 (#177). 참고 정보이고 점수에는 쓰지 않습니다.
+    gaze: GazeSummary | None = None
 
 
 class CompetencyLevel(Contract):

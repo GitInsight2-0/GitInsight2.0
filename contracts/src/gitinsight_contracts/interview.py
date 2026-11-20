@@ -96,6 +96,47 @@ class TurnRequest(Contract):
     source: TurnSource
 
 
+Ratio = Annotated[float, Field(ge=0, le=1)]
+# 네 비율의 합이 1에서 이만큼까지 벗어나도 받습니다. 브라우저의 소수점 반올림 때문입니다.
+GAZE_RATIO_TOLERANCE = 0.01
+
+
+class GazeSummary(Contract):
+    """면접자 시선 요약입니다 (#177). 면접자가 켰을 때만 브라우저가 웹캠으로 재서 보냅니다.
+
+    카메라 영상은 브라우저 밖으로 나가지 않고, 서버에는 이 숫자만 옵니다.
+    면접관 얼굴이 화면에 없으므로 카메라를 본 시간을 눈맞춤으로 칩니다.
+    브라우저가 계산한 값이라 서버는 범위만 검사합니다. 그래서 역량 점수, 코드 지도, 성장 비교에는 쓰지 않습니다.
+    네 비율은 시선을 잰 시간을 나눈 것이라 합이 1입니다.
+    """
+
+    # 시선을 잰 시간(초)입니다. 면접 한 번은 4시간을 넘지 않습니다.
+    measured_seconds: Annotated[float, Field(gt=0, le=4 * 3600)]
+    # 카메라(면접관)를 본 비율입니다.
+    camera_ratio: Ratio
+    # 화면(코드, 자막)을 본 비율입니다. 코드 면접이라 자연스럽게 높습니다.
+    screen_ratio: Ratio
+    # 화면 밖을 본 비율입니다.
+    away_ratio: Ratio
+    # 얼굴이 잡히지 않은 비율입니다.
+    no_face_ratio: Ratio
+    # 화면 밖으로 2초 넘게 시선을 돌린 횟수입니다.
+    away_count: Annotated[int, Field(ge=0, le=10_000)]
+
+    @model_validator(mode="after")
+    def _ratios_add_up(self) -> Self:
+        total = self.camera_ratio + self.screen_ratio + self.away_ratio + self.no_face_ratio
+        if abs(total - 1) > GAZE_RATIO_TOLERANCE:
+            raise ValueError("시선 비율의 합은 1이어야 합니다")
+        return self
+
+
+class SessionEnd(Contract):
+    """POST /api/sessions/{id}/end 요청 본문입니다. 본문 없이 보내도 됩니다."""
+
+    gaze: GazeSummary | None = None
+
+
 class SessionEnded(Contract):
     report_id: UUID
 
