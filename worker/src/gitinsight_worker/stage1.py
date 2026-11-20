@@ -58,11 +58,19 @@ IGNORED_DIRS = frozenset(
         "build",
         ".tox",
         ".next",
-        # Java 빌드 결과와 빌드 도구 캐시입니다 (#182).
-        "target",
+        # Gradle 캐시입니다 (#182). 소스 폴더 이름으로는 쓰이지 않습니다.
         ".gradle",
     }
 )
+# Maven 빌드 결과 폴더입니다 (#182). `target`은 소스 폴더 이름으로도 쓰일 수 있어서(`src/target/`)
+# 같은 폴더에 `pom.xml`이 있을 때만 건너뜁니다.
+MAVEN_OUTPUT_DIR = "target"
+MAVEN_POM = "pom.xml"
+
+
+def _skipped_dir(name: str, files: list[str]) -> bool:
+    return name in IGNORED_DIRS or (name == MAVEN_OUTPUT_DIR and MAVEN_POM in files)
+
 
 # 언어별 심볼 추출기입니다. 여기 없는 언어는 파일 수만 셉니다.
 _EXTRACTORS: dict[str, Callable[[bytes, str, str], ExtractedFile]] = {
@@ -110,7 +118,7 @@ def iter_repo_files(root: Path) -> list[str]:
     """분석 대상 파일의 상대 경로(슬래시 구분)를 정렬해서 돌려줍니다. 심볼릭 링크는 따라가지 않습니다."""
     found: list[str] = []
     for current, dirs, files in os.walk(root, followlinks=False):
-        dirs[:] = sorted(d for d in dirs if d not in IGNORED_DIRS)
+        dirs[:] = sorted(d for d in dirs if not _skipped_dir(d, files))
         for name in files:
             full = Path(current) / name
             # 레포 밖의 파일을 읽지 않도록 링크는 건너뜁니다.

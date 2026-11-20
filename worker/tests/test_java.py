@@ -299,3 +299,22 @@ def test_focus_candidates_for_java_method_and_class() -> None:
     assert [
         (f.start_line, f.end_line) for f in focus_candidates(method_src.encode(), svc)
     ] == blocks
+
+
+def test_target_folder_is_skipped_only_next_to_pom(tmp_path: Path) -> None:
+    # Maven 빌드 결과(pom.xml 옆의 target)는 건너뛰고, 소스 폴더 이름이 target이면 그대로 봅니다.
+    write_repo(
+        tmp_path,
+        {
+            "pom.xml": "<project/>\n",
+            "target/classes/Generated.java": _java_class("Generated", "built"),
+            "src/main/java/com/example/demo/Service.java": _java_class("Service", "run"),
+            "tools/src/target/aim.py": "def aim_at():\n" + "    x = 1\n" * 8 + "    return x\n",
+        },
+    )
+
+    paths = {s.path for s in analyze_tree(tmp_path, SHA).symbols}
+
+    assert not any(p.startswith("target/") for p in paths)
+    assert "tools/src/target/aim.py" in paths
+    assert "src/main/java/com/example/demo/Service.java" in paths
