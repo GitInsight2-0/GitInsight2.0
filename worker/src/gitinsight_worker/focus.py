@@ -10,6 +10,7 @@
   여러 줄에 걸친 콜백 호출(`useEffect(() => {...})`)은 각각 하나의 블록입니다.
   그 사이의 짧은 문장들(변수 대입, 호출, return 등)은 이어진 만큼 하나의 블록으로 묶습니다.
 - 클래스: 메서드(함수를 담은 필드 포함) 하나가 블록 하나입니다.
+- Java(#182)도 같습니다. 메서드는 if, for, try, switch, 여러 줄 람다·익명 클래스가 블록이고, 클래스는 메서드와 생성자가 블록입니다.
 - 너무 짧은 블록(MIN_BLOCK_LINES 미만)은 바로 앞 블록과 합칩니다. 맨 앞이면 다음 블록과 합칩니다.
 - 블록이 MAX_CANDIDATES를 넘으면 이웃끼리 합친 길이가 가장 짧은 둘부터 합칩니다.
 - 블록 하나가 주제 심볼 거의 전체(WHOLE_RATIO 이상)를 차지하면(큰 try, 함수를 감싼 중첩 함수 등) 그 안으로 들어가
@@ -27,7 +28,14 @@ from dataclasses import dataclass
 from tree_sitter import Node
 
 from gitinsight_contracts.common import SymbolKind, SymbolRef
-from gitinsight_worker.languages import PYTHON, language_of
+from gitinsight_worker.java_symbols import (
+    METHOD_DECLARATIONS,
+    TYPE_BODIES,
+    TYPE_DECLARATIONS,
+    parse_java,
+)
+from gitinsight_worker.java_symbols import start_line as java_start_line
+from gitinsight_worker.languages import JAVA, PYTHON, language_of
 from gitinsight_worker.script_symbols import parse_script
 from gitinsight_worker.symbols import line_range, parse_python
 
@@ -74,7 +82,24 @@ _SCRIPT_COMPOUND = frozenset(
 _SCRIPT_FUNCTION_VALUES = frozenset({"arrow_function", "function_expression", "generator_function"})
 _COMMENTS = frozenset({"comment", "line_comment", "block_comment"})
 # 문장을 담는 본문 노드입니다. 큰 블록 안으로 들어갈 때 이 안의 문장을 다시 나눕니다.
-_CONTAINERS = frozenset({"block", "statement_block"})
+_CONTAINERS = frozenset({"block", "statement_block", "constructor_body"})
+# Java에서 혼자 블록이 되는 문장입니다 (#182). 람다와 익명 클래스를 담은 문장은 _java_compound가 따로 봅니다.
+_JAVA_COMPOUND = frozenset(
+    {
+        "if_statement",
+        "for_statement",
+        "enhanced_for_statement",
+        "while_statement",
+        "do_statement",
+        "try_statement",
+        "try_with_resources_statement",
+        "switch_expression",
+        "synchronized_statement",
+        "class_declaration",
+        "record_declaration",
+    }
+)
+_JAVA_BLOCK_VALUES = frozenset({"lambda_expression", "class_body"})
 # 큰 블록 안으로 들어가는 깊이 상한입니다.
 MAX_DEPTH = 3
 
@@ -153,6 +178,49 @@ def _is_docstring(node: Node) -> bool:
 
 def _python_compound(node: Node) -> bool:
     return node.type in _PY_COMPOUND
+
+
+def _java_compound(node: Node) -> bool:
+    if node.type in _JAVA_COMPOUND:
+        return True
+    if node.type in ("expression_statement", "local_variable_declaration", "return_statement"):
+        # 여러 줄에 걸친 람다나 익명 클래스: list.forEach(x -> {...}), new Runnable() {...}
+        start, end = line_range(node)
+        return end > start and any(c.type in _JAVA_BLOCK_VALUES for c in _walk(node))
+    return False
+
+
+def _java_node(root: Node, symbol: SymbolRef) -> Node | None:
+    """주제 심볼의 타입·메서드 선언입니다. 시작 줄은 어노테이션을 뺀 줄로 맞춥니다."""
+    for node in _walk(root):
+        if (node.type in TYPE_DECLARATIONS or node.type in METHOD_DECLARATIONS) and (
+            java_start_line(node),
+            line_range(node)[1],
+        ) == (symbol.start_line, symbol.end_line):
+            return node
+    return None
+
+
+def _java_blocks(node: Node) -> list[_Block]:
+    body = node.child_by_field_name("body")
+    if body is None:
+        return []
+    if body.type in TYPE_BODIES:
+        methods: list[_Block] = []
+        members = [
+            m
+            for child in body.children
+            for m in (child.children if child.type == "enum_body_declarations" else [child])
+        ]
+        for member in members:
+            if member.type in METHOD_DECLARATIONS and member.child_by_field_name("body"):
+                methods.append(
+                    _Block(
+                        java_start_line(member), line_range(member)[1], compound=True, node=member
+                    )
+                )
+        return methods
+    return _statement_blocks(list(body.named_children), _java_compound)
 
 
 def _script_compound(node: Node) -> bool:
@@ -286,10 +354,15 @@ def focus_candidates(source: bytes, symbol: SymbolRef) -> list[FocusCandidate]:
     total = symbol.end_line - symbol.start_line + 1
     if total < MIN_SYMBOL_LINES:
         return []
-    if language_of(symbol.path) == PYTHON:
+    language = language_of(symbol.path)
+    if language == PYTHON:
         node = _python_node(parse_python(source).root_node, symbol)
         blocks = _python_blocks(node) if node is not None else []
         compound_of = _python_compound
+    elif language == JAVA:
+        node = _java_node(parse_java(source).root_node, symbol)
+        blocks = _java_blocks(node) if node is not None else []
+        compound_of = _java_compound
     else:
         body = _script_body(parse_script(source, symbol.path).root_node, symbol)
         blocks = _script_blocks(body) if body is not None else []

@@ -93,7 +93,7 @@ flowchart LR
 - 이력서 PDF 분석
 - 코드 리뷰와 개선 과제 추천
 - 아바타
-- Python, TS/JS 외 언어의 상세 분석
+- Python, TS/JS, Java 외 언어의 상세 분석 (Java는 #182에서 추가)
 
 **일정이 밀리면 줄일 순서**
 1. Java·Go 분석

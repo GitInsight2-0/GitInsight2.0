@@ -52,8 +52,13 @@ from pathlib import Path, PurePosixPath
 
 from gitinsight_contracts.analysis import MisstatementKind
 from gitinsight_contracts.common import SymbolKind, SymbolRef
-from gitinsight_worker.candidates import is_inactive_path, is_markup_path, is_test_path
-from gitinsight_worker.languages import PYTHON, language_of
+from gitinsight_worker.candidates import (
+    is_inactive_path,
+    is_markup_path,
+    is_test_path,
+    shared_dirs,
+)
+from gitinsight_worker.languages import JAVA, PYTHON, language_of
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +74,11 @@ _SCRIPT_SIDE_EFFECT = re.compile(r"^\s*import\s*[\"']([^\"']+)[\"']", re.M)
 _PY_FROM = re.compile(r"^\s*from\s+(\.*[\w.]*)\s+import\s+(\([^)]*\)|[^\n]*)", re.M)
 _PY_IMPORT = re.compile(r"^\s*import\s+([^\n]+)", re.M)
 _NAME = re.compile(r"[A-Za-z_]\w*")
+_JAVA_IMPORT = re.compile(
+    r"^\s*import\s+(?P<static>static\s+)?(?P<name>[\w.]+?)(?P<star>\.\*)?\s*;", re.M
+)
+# getter·setter 이름입니다: getName, setName, isActive
+_JAVA_ACCESSOR_NAME = re.compile(r"^(?:get|set|is)[A-Z]")
 # 경로 앞의 별칭(`@/`, `~/`)입니다. 어느 폴더인지 몰라 경로 끝 맞추기로 찾습니다.
 _ALIAS_PREFIX = re.compile(r"^[@~]/")
 
@@ -76,6 +86,7 @@ _ALIAS_PREFIX = re.compile(r"^[@~]/")
 class _Family(StrEnum):
     PYTHON = "python"
     SCRIPT = "script"
+    JAVA = "java"
 
 
 @dataclass(frozen=True)
@@ -87,7 +98,13 @@ class MisstatementPlan:
 
 
 def _family(path: str) -> _Family:
-    return _Family.PYTHON if language_of(path) == PYTHON else _Family.SCRIPT
+    """같은 묶음의 함수끼리만 고릅니다. Java 주제에 TypeScript 함수가 골라지지 않게 합니다 (#182)."""
+    language = language_of(path)
+    if language == PYTHON:
+        return _Family.PYTHON
+    if language == JAVA:
+        return _Family.JAVA
+    return _Family.SCRIPT
 
 
 def _is_top_level(symbol: SymbolRef) -> bool:
@@ -114,21 +131,43 @@ def _is_component(symbol: SymbolRef) -> bool:
     return is_markup_path(symbol.path) and symbol.name[:1].isupper()
 
 
+def _is_java_method(symbol: SymbolRef) -> bool:
+    """최상위 클래스의 메서드(`클래스.메서드`)이고, 생성자와 getter·setter가 아닌지입니다.
+
+    Java에는 최상위 함수가 없어서 다른 클래스의 메서드를 고릅니다.
+    생성자는 이름이 클래스 이름이라 "호출하죠?"가 어색하고, getter·setter는 하는 일이 없어 그럴듯하지 않습니다.
+    """
+    qualified = symbol.symbol_id.split("::", 1)[1].split(".")
+    return (
+        symbol.kind is SymbolKind.METHOD
+        and len(qualified) == 2
+        and symbol.name != qualified[0]
+        and _JAVA_ACCESSOR_NAME.match(symbol.name) is None
+    )
+
+
 def absent_choices(symbols: Iterable[SymbolRef]) -> list[SymbolRef]:
     """부른다고 말할 수 있는 레포 함수입니다. 주제와 상관없는 조건만 봅니다."""
     symbols = list(symbols)
-    # 같은 이름의 최상위 정의가 둘 이상이면(다른 파일, 테스트 포함) 어느 것인지 몰라 뺍니다.
+    shared = shared_dirs(s.path for s in symbols)
+    # 같은 이름의 정의가 둘 이상이면(다른 파일, 테스트 포함) 어느 것인지 몰라 뺍니다.
+    # Java는 메서드 이름끼리 셉니다. 여러 클래스에 같은 이름(save, findById 등)이 흔하기 때문입니다.
     names = Counter(s.name for s in symbols if _is_top_level(s))
+    java_names = Counter(s.name for s in symbols if _family(s.path) is _Family.JAVA)
+
+    def callable_here(s: SymbolRef) -> bool:
+        if _family(s.path) is _Family.JAVA:
+            return _is_java_method(s) and java_names[s.name] == 1
+        return s.kind is SymbolKind.FUNCTION and _is_top_level(s) and names[s.name] == 1
+
     return [
         s
         for s in symbols
-        if s.kind is SymbolKind.FUNCTION
-        and _is_top_level(s)
-        and names[s.name] == 1
+        if callable_here(s)
         and len(s.name) >= MIN_NAME_LENGTH
         and not s.name.startswith("_")
         and not is_test_path(s.path)
-        and not is_inactive_path(s.path)
+        and not is_inactive_path(s.path, shared)
         and not _is_component(s)
     ]
 
@@ -150,9 +189,14 @@ class _Import:
     parts: tuple[str, ...]
     exact: bool
 
+    # Java `import a.b.*;`처럼 패키지 전체를 가져오면 그 패키지(폴더)의 모든 파일입니다.
+    package: bool = False
+
     def matches(self, module: tuple[str, ...]) -> bool:
         if not self.parts:
             return False
+        if self.package:
+            return module[:-1][-len(self.parts) :] == self.parts
         if self.exact:
             return module == self.parts
         return module[-len(self.parts) :] == self.parts
@@ -231,10 +275,31 @@ def _python_imports(text: str, base: tuple[str, ...]) -> list[_Import]:
     return found
 
 
+def _java_imports(text: str) -> list[_Import]:
+    """`import a.b.Service;`는 `.../a/b/Service.java`, `import a.b.*;`는 `.../a/b/` 폴더의 파일입니다.
+
+    `import static a.b.Util.helper;`는 마지막 조각(멤버)을 빼고 클래스로 봅니다.
+    같은 패키지의 클래스는 import 없이 쓰므로 "같은 폴더" 순위로 잡힙니다.
+    """
+    found: list[_Import] = []
+    for m in _JAVA_IMPORT.finditer(text):
+        parts = tuple(m.group("name").split("."))
+        if m.group("star"):
+            found.append(_Import(parts, exact=False, package=True))
+        elif m.group("static"):
+            found.append(_Import(parts[:-1], exact=False))
+        else:
+            found.append(_Import(parts, exact=False))
+    return found
+
+
 def _imports(target: SymbolRef, text: str) -> list[_Import]:
     base = PurePosixPath(target.path).parent.parts
-    if _family(target.path) is _Family.PYTHON:
+    family = _family(target.path)
+    if family is _Family.PYTHON:
         return _python_imports(text, base)
+    if family is _Family.JAVA:
+        return _java_imports(text)
     return _script_imports(text, base)
 
 

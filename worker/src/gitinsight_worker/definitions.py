@@ -19,7 +19,7 @@ from pathlib import Path
 from tree_sitter import Node
 
 from gitinsight_contracts.common import SymbolKind, SymbolRef
-from gitinsight_worker.candidates import is_inactive_path, is_test_path
+from gitinsight_worker.candidates import is_inactive_path, is_test_path, shared_dirs
 from gitinsight_worker.languages import PYTHON, language_of
 from gitinsight_worker.symbols import identifier_lines, parse_python
 
@@ -40,6 +40,7 @@ _CLOSE_PAREN = re.compile(r",?\s+\)|,\)")
 def top_level_index(symbols: list[SymbolRef]) -> dict[str, list[SymbolRef]]:
     """이름별 Python 최상위 함수·클래스입니다. 테스트와 지금 쓰지 않는 경로(legacy 등)는 뺍니다."""
     index: dict[str, list[SymbolRef]] = {}
+    shared = shared_dirs(s.path for s in symbols)
     for symbol in symbols:
         top_level = "." not in symbol.symbol_id.split("::", 1)[1]
         if (
@@ -47,7 +48,7 @@ def top_level_index(symbols: list[SymbolRef]) -> dict[str, list[SymbolRef]]:
             and language_of(symbol.path) == PYTHON
             and symbol.kind in (SymbolKind.FUNCTION, SymbolKind.CLASS)
             and not is_test_path(symbol.path)
-            and not is_inactive_path(symbol.path)
+            and not is_inactive_path(symbol.path, shared)
         ):
             index.setdefault(symbol.name, []).append(symbol)
     return index

@@ -9,6 +9,7 @@ from gitinsight_contracts.analysis import LanguageStat
 PYTHON = "Python"
 JAVASCRIPT = "JavaScript"
 TYPESCRIPT = "TypeScript"
+JAVA = "Java"
 
 LANGUAGE_BY_SUFFIX: dict[str, str] = {
     ".py": PYTHON,
@@ -20,7 +21,7 @@ LANGUAGE_BY_SUFFIX: dict[str, str] = {
     ".tsx": TYPESCRIPT,
     ".mts": TYPESCRIPT,
     ".cts": TYPESCRIPT,
-    ".java": "Java",
+    ".java": JAVA,
     ".go": "Go",
     ".sh": "Shell",
     ".md": "Markdown",

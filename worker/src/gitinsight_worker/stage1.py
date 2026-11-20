@@ -32,7 +32,9 @@ from gitinsight_worker.contribution import (
     blame_file,
     summarize,
 )
+from gitinsight_worker.java_symbols import extract_java
 from gitinsight_worker.languages import (
+    JAVA,
     JAVASCRIPT,
     PYTHON,
     TYPESCRIPT,
@@ -46,7 +48,20 @@ logger = logging.getLogger(__name__)
 
 # 의존성과 빌드 결과는 레포 작성자의 코드가 아니므로 건너뜁니다.
 IGNORED_DIRS = frozenset(
-    {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".tox", ".next"}
+    {
+        ".git",
+        "node_modules",
+        ".venv",
+        "venv",
+        "__pycache__",
+        "dist",
+        "build",
+        ".tox",
+        ".next",
+        # Java 빌드 결과와 빌드 도구 캐시입니다 (#182).
+        "target",
+        ".gradle",
+    }
 )
 
 # 언어별 심볼 추출기입니다. 여기 없는 언어는 파일 수만 셉니다.
@@ -54,6 +69,7 @@ _EXTRACTORS: dict[str, Callable[[bytes, str, str], ExtractedFile]] = {
     PYTHON: extract_python,
     JAVASCRIPT: extract_script,
     TYPESCRIPT: extract_script,
+    JAVA: extract_java,
 }
 # 압축한 배포용 파일은 사람이 쓴 코드가 아니라 심볼을 뽑지 않습니다.
 _MINIFIED_SUFFIXES = (".min.js", ".min.mjs", ".min.cjs")
@@ -78,7 +94,7 @@ class Stage1Result:
 
 
 class NoSupportedCodeError(Exception):
-    """레포에 지원하는 언어(Python, TypeScript, JavaScript)의 함수·클래스가 없습니다 (#70, #72).
+    """레포에 지원하는 언어(Python, TypeScript, JavaScript, Java)의 함수·클래스가 없습니다 (#70, #72, #182).
 
     분석 기록의 error에는 이 예외 종류 이름이 저장되고, 웹은 이 이름으로 "지원하지 않는 언어" 안내를 보여 줍니다.
     """

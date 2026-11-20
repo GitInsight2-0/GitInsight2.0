@@ -53,7 +53,7 @@ export const STATUS_TEXT: Record<AnalysisStatus, string> = {
 };
 
 /** 지원하는 언어 안내. 워커는 Python(#9)과 TypeScript·JavaScript(#72) 심볼을 뽑습니다 */
-export const SUPPORTED_LANGUAGE_NOTE = "Python, TypeScript, JavaScript 코드가 있는 레포를 분석할 수 있어요.";
+export const SUPPORTED_LANGUAGE_NOTE = "Python, TypeScript, JavaScript, Java 코드가 있는 레포를 분석할 수 있어요.";
 
 /**
  * 지원하는 언어의 코드가 없어 분석하지 못했을 때 AnalysisState.error에 오는 예외 이름 (#70, #71).
