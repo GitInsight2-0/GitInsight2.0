@@ -184,7 +184,7 @@ export default function InterviewScreen({
   const thinkingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** 실패한 턴. 같은 내용을 다시 보낼 때만 같은 turn_id를 씁니다 (고친 답변이 중복으로 버려지지 않게). */
-  const pendingTurn = useRef<{ id: string; transcript: string } | null>(null);
+  const pendingTurn = useRef<{ id: string; transcript: string; gaze: GazeSummary | null } | null>(null);
   /** state인 busy는 연달아 누른 Enter에서 아직 false로 보일 수 있어, 보내는 중인지는 ref로 막습니다. */
   const sending = useRef(false);
   // 음성 진행기 콜백은 화면 state의 옛 값을 볼 수 있어, 최신 세션과 발화는 ref로도 들고 있습니다.
@@ -222,6 +222,8 @@ export default function InterviewScreen({
    */
   const [deadline, setDeadline] = useState<number | null>(null);
   const showReply = (r: BrainReply, sentAt?: number) => {
+    // 새 질문이 나오면 시선의 답변 구간을 새로 셉니다 (#180). 같은 발화를 다시 보여 줄 때는 이어 셉니다.
+    if (r !== replyRef.current) gaze.current?.beginAnswer();
     replyRef.current = r;
     setReply(r);
     if (sentAt === undefined) return;
@@ -410,8 +412,11 @@ export default function InterviewScreen({
     // 실패 뒤 같은 답변을 그대로 다시 보내면 같은 turn_id를 써서 서버가 한 번만 반영하게 합니다.
     // 답변을 고쳤으면 새 턴이므로 새 turn_id를 씁니다.
     const pending = pendingTurn.current;
-    const turnId = pending && pending.transcript === transcript ? pending.id : crypto.randomUUID();
-    pendingTurn.current = { id: turnId, transcript };
+    const retry = pending && pending.transcript === transcript ? pending : null;
+    const turnId = retry ? retry.id : crypto.randomUUID();
+    // 같은 turn_id로 다시 보낼 때는 처음 보낸 시선 요약을 그대로 씁니다. 서버는 처음 요청만 반영합니다.
+    const turnGaze = retry ? retry.gaze : (gaze.current?.answerSummary() ?? null);
+    pendingTurn.current = { id: turnId, transcript, gaze: turnGaze };
     // 같은 turn_id로 다시 보내는 시도도 처음 보낸 시각을 씁니다. 서버가 처리한 시각은 늘 그 뒤라 시계가 늘어나지 않습니다.
     const sentAt = performance.now();
     try {
@@ -421,6 +426,7 @@ export default function InterviewScreen({
         source: "text",
         speech_started_at: null,
         speech_ended_at: null,
+        gaze: turnGaze,
       });
       pendingTurn.current = null;
       push({ who: "me", text: transcript });
@@ -456,7 +462,7 @@ export default function InterviewScreen({
     sending.current = true;
     setBusy(true);
     setError(null);
-    pendingTurn.current = { id: turn.turn_id, transcript: turn.transcript };
+    pendingTurn.current = { id: turn.turn_id, transcript: turn.transcript, gaze: turn.gaze ?? null };
     const sentAt = performance.now();
     try {
       const next = await postTurn(id, turn);
@@ -639,6 +645,7 @@ export default function InterviewScreen({
         filler: false,
         signal: ac.signal,
         existing,
+        gaze: () => gaze.current?.answerSummary() ?? null,
       });
     } catch (e) {
       // 진행기가 이미 ended로 텍스트 모드 전환을 처리했습니다. 세션을 못 만든 경우만 여기서 알립니다.

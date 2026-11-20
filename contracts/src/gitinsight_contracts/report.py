@@ -121,6 +121,14 @@ class MisstatementResult(Contract):
     quote: str | None
 
 
+class GazePeak(Contract):
+    """시선이 화면 밖으로 가장 많이 벗어난 답변입니다 (#180). 참고 정보이고 점수에는 쓰지 않습니다."""
+
+    turn_id: UUID
+    # 그 답변 동안 화면 밖을 본 비율입니다.
+    away_ratio: Annotated[float, Field(gt=0, le=1)]
+
+
 class Report(Contract):
     report_id: UUID
     session_id: UUID
@@ -137,6 +145,8 @@ class Report(Contract):
     misstatement: MisstatementResult | None = None
     # 면접자가 시선 분석을 켠 면접에만 있습니다 (#177). 참고 정보이고 점수에는 쓰지 않습니다.
     gaze: GazeSummary | None = None
+    # 답변별 시선 요약 중 화면 밖 비율이 가장 큰 답변입니다 (#180). gaze가 있고, 화면 밖을 본 답변이 있을 때만 있습니다.
+    gaze_peak: GazePeak | None = None
 
 
 class CompetencyLevel(Contract):

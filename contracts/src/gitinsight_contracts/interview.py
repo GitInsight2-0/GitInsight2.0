@@ -82,20 +82,6 @@ class TurnSource(StrEnum):
     TEXT = "text"
 
 
-class TurnRequest(Contract):
-    """POST /api/sessions/{id}/turns 요청입니다.
-
-    turn_id는 클라이언트가 만든 UUID이고, 같은 값이 다시 오면 처음 결과를 그대로 돌려줍니다.
-    시각은 클라이언트 epoch 밀리초이며 지연 측정에만 씁니다.
-    """
-
-    turn_id: UUID
-    transcript: Annotated[str, Field(max_length=4000)]
-    speech_started_at: Annotated[int, Field(ge=0)] | None = None
-    speech_ended_at: Annotated[int, Field(ge=0)] | None = None
-    source: TurnSource
-
-
 Ratio = Annotated[float, Field(ge=0, le=1)]
 # 네 비율의 합이 1에서 이만큼까지 벗어나도 받습니다. 브라우저의 소수점 반올림 때문입니다.
 GAZE_RATIO_TOLERANCE = 0.01
@@ -129,6 +115,23 @@ class GazeSummary(Contract):
         if abs(total - 1) > GAZE_RATIO_TOLERANCE:
             raise ValueError("시선 비율의 합은 1이어야 합니다")
         return self
+
+
+class TurnRequest(Contract):
+    """POST /api/sessions/{id}/turns 요청입니다.
+
+    turn_id는 클라이언트가 만든 UUID이고, 같은 값이 다시 오면 처음 결과를 그대로 돌려줍니다.
+    시각은 클라이언트 epoch 밀리초이며 지연 측정에만 씁니다.
+    """
+
+    turn_id: UUID
+    transcript: Annotated[str, Field(max_length=4000)]
+    speech_started_at: Annotated[int, Field(ge=0)] | None = None
+    speech_ended_at: Annotated[int, Field(ge=0)] | None = None
+    source: TurnSource
+    # 이 답변 동안의 시선 요약입니다 (#180). 질문이 화면에 나온 뒤부터 답변을 보낼 때까지 잰 값이고,
+    # 시선 분석을 켠 면접에서 그 구간을 충분히 잰 답변에만 있습니다. 리포트의 참고 정보에만 씁니다.
+    gaze: GazeSummary | None = None
 
 
 class SessionEnd(Contract):

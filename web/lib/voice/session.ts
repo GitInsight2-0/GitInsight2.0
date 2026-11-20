@@ -13,7 +13,7 @@
  * 끝나는 길은 하나(shutdown)입니다: 사용자 종료, 제공사 연결 끊김, 면접 종료(done), 409, 페이지 이탈.
  * 여러 번 불러도 한 번만 정리합니다.
  */
-import type { BrainReply, MetricEvent, MetricName, TurnRequest } from "@gitinsight/contracts";
+import type { BrainReply, GazeSummary, MetricEvent, MetricName, TurnRequest } from "@gitinsight/contracts";
 import { ApiError, TRANSCRIPT_MAX, createSession, fetchVoiceToken, isAbort, postMetric, postTurn } from "./api";
 import { DELEGATION_TOOL, SAY_MARKER, type VadSettings, sayMessage } from "./config";
 import { Meter, epochMs } from "./meter";
@@ -106,6 +106,8 @@ export interface SessionOptions {
    * 음성 연결을 닫아도 서버 세션은 끝내지 않습니다.
    */
   existing?: { sessionId: string; current: BrainReply };
+  /** 지금 답변 구간의 시선 요약 (#180). 시선 분석을 켜지 않았거나 너무 짧게 쟀으면 null입니다 */
+  gaze?: () => GazeSummary | null;
 }
 
 export interface VoiceSession {
@@ -509,6 +511,7 @@ export async function startVoiceSession(
         source: "voice",
         speech_started_at: m.lastUserStart,
         speech_ended_at: m.lastUserEnd,
+        gaze: opts.gaze?.() ?? null,
       };
       inFlight = turn;
       const sentAt = performance.now();

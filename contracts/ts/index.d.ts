@@ -387,6 +387,16 @@ export interface Followup {
   symbol_id: string | null;
 }
 /**
+ * 시선이 화면 밖으로 가장 많이 벗어난 답변입니다 (#180). 참고 정보이고 점수에는 쓰지 않습니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "GazePeak".
+ */
+export interface GazePeak {
+  away_ratio: number;
+  turn_id: string;
+}
+/**
  * 면접자 시선 요약입니다 (#177). 면접자가 켰을 때만 브라우저가 웹캠으로 재서 보냅니다.
  *
  * 카메라 영상은 브라우저 밖으로 나가지 않고, 서버에는 이 숫자만 옵니다.
@@ -508,6 +518,7 @@ export interface Report {
   code_map: CodeMap | null;
   competencies: CompetencyScore[];
   gaze: GazeSummary | null;
+  gaze_peak: GazePeak | null;
   improvements: string[];
   kind: ReportKind;
   misstatement: MisstatementResult | null;
@@ -612,6 +623,7 @@ export interface SessionEnded {
  * via the `definition` "TurnRequest".
  */
 export interface TurnRequest {
+  gaze?: GazeSummary | null;
   source: TurnSource;
   speech_ended_at?: number | null;
   speech_started_at?: number | null;

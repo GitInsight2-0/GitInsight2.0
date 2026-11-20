@@ -2,6 +2,7 @@
  * 웹캠 시선 측정 (#177).
  * 카메라 영상은 이 브라우저 안에서만 처리하고, 프레임도 랜드마크도 서버로 보내거나 저장하지 않습니다.
  * 서버에는 면접을 끝낼 때 요약 숫자(계약 GazeSummary)만 보냅니다.
+ * 답변마다 그 답변 구간의 요약도 턴 요청에 실어 보냅니다 (#180). 이것도 숫자뿐입니다.
  * 얼굴 랜드마크는 MediaPipe FaceLandmarker로 뽑습니다. 프로그램(wasm)과 모델 파일은 우리 웹에서 받고, 영상은 올리지 않습니다.
  */
 import type { GazeSummary } from "@gitinsight/contracts";
@@ -28,6 +29,8 @@ const CALIBRATION_MIN_FACE = 0.6;
 const AWAY_EVENT_S = 2;
 /** 이보다 짧게 쟀으면 요약을 보내지 않습니다 */
 const MIN_MEASURED_S = 10;
+/** 답변 하나를 이보다 짧게 쟀으면 그 답변의 요약을 보내지 않습니다. 비율이 의미 없습니다 (#180) */
+const MIN_ANSWER_S = 3;
 
 export class GazeError extends Error {}
 
@@ -49,10 +52,10 @@ export class GazeTally {
     }
   }
 
-  summary(): GazeSummary | null {
+  summary(minSeconds = MIN_MEASURED_S): GazeSummary | null {
     const s = this.seconds;
     const total = s.camera + s.screen + s.away + s.none;
-    if (total < MIN_MEASURED_S) return null;
+    if (total < minSeconds) return null;
     const ratio = (v: number) => Math.round((v / total) * 1000) / 1000;
     return {
       measured_seconds: Math.round(total * 10) / 10,
@@ -96,6 +99,8 @@ export class GazeTracker {
   private readonly landmarker: FaceLandmarker;
   private baseline: GazeFeatures | null = null;
   private tally = new GazeTally();
+  /** 지금 답변 구간의 시선. 질문이 화면에 나올 때마다 새로 셉니다 (#180) */
+  private answer = new GazeTally();
   private timer: ReturnType<typeof setInterval> | null = null;
   private last: number | null = null;
   private closed = false;
@@ -173,9 +178,30 @@ export class GazeTracker {
       const now = performance.now();
       const zone = classify(this.features(), baseline);
       this.zone = zone;
-      if (this.last !== null) this.tally.add(zone, Math.min((now - this.last) / 1000, MAX_STEP_S));
+      if (this.last !== null) {
+        const dt = Math.min((now - this.last) / 1000, MAX_STEP_S);
+        this.tally.add(zone, dt);
+        this.answer.add(zone, dt);
+      }
       this.last = now;
     }, SAMPLE_MS);
+  }
+
+  /**
+   * 새 답변 구간을 시작합니다 (#180). 질문이 화면에 나올 때 부릅니다.
+   * 면접관이 질문을 말하는 시간과 생각하는 시간도 답변 구간에 넣습니다. 그동안의 시선도 면접 태도이기 때문입니다.
+   */
+  beginAnswer() {
+    this.answer = new GazeTally();
+  }
+
+  /**
+   * 지금 답변 구간의 요약입니다 (#180). 구간은 그대로 두므로, 보내기에 실패해 다시 보내도 같은 구간을 셉니다.
+   * 카메라를 껐거나 너무 짧게 쟀으면 null입니다.
+   */
+  answerSummary(): GazeSummary | null {
+    if (this.closed) return null;
+    return this.answer.summary(MIN_ANSWER_S);
   }
 
   /** 측정을 멈추고 카메라를 끈 뒤 요약을 돌려줍니다. 너무 짧게 쟀으면 null입니다 */
