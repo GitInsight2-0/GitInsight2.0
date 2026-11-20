@@ -17,6 +17,7 @@ import {
 import { DEFAULT_VAD } from "@/lib/voice/config";
 import { explainError, isLoginError } from "@/lib/voice/errors";
 import { connectGemini } from "@/lib/voice/gemini";
+import type { GazeZone } from "@/lib/gaze/classify";
 import { CALIBRATION_MS, GazeError, GazeTracker } from "@/lib/gaze/tracker";
 import { type AudioLevels, type SessionUi, type VoiceSession, startVoiceSession } from "@/lib/voice/session";
 import { USER_SILENCE_MS } from "@/lib/voice/meter";
@@ -338,13 +339,21 @@ export default function InterviewScreen({
     if (!(await prepareGaze())) return;
     if (kind === "voice") await startVoice();
     else await startText();
+    // 시작에 실패해 시작 화면에 남았으면(로그인 만료, 다시 볼 질문 없음, 음성 연결 실패) 카메라를 끕니다.
+    // 시작 화면에는 "끄기" 칩이 없어서 켜 두면 끌 방법이 없습니다. 다시 누르면 보정부터 다시 합니다.
+    if (!sessionRef.current && !voice.current) closeGaze();
+  }
+
+  /** 카메라를 끄고 그때까지 잰 값을 버립니다 */
+  function closeGaze() {
+    gaze.current?.close();
+    gaze.current = null;
+    setGazeStage("off");
   }
 
   /** 면접 도중 시선 분석을 끕니다. 그때까지 잰 값도 버리고 리포트에 시선 칸을 넣지 않습니다 */
   function stopGaze() {
-    gaze.current?.close();
-    gaze.current = null;
-    setGazeStage("off");
+    closeGaze();
     setNotice("시선 분석을 껐어요. 이번 리포트에는 시선 결과가 나오지 않아요.");
   }
 
@@ -732,6 +741,8 @@ export default function InterviewScreen({
                   onChange={(v) => {
                     setGazeWanted(v);
                     setGazeError(null);
+                    // 체크를 풀면 열어 둔 카메라도 닫아, 다시 시작했을 때 꺼 둔 측정이 이어지지 않게 합니다.
+                    if (!v) closeGaze();
                   }}
                   stage={gazeStage}
                   stream={gaze.current?.stream ?? null}
@@ -839,15 +850,7 @@ export default function InterviewScreen({
             남은 시간 <b>{remainingLabel(reply.remaining_sec)}</b>
           </span>
         )}
-        {gazeStage === "on" && !done && (
-          <span className={styles.gazeChip}>
-            <span className={styles.gazeDot} aria-hidden="true" />
-            <span className={styles.gazeChipText}>시선 측정 중</span>
-            <button type="button" onClick={stopGaze} aria-label="시선 분석 끄기">
-              끄기
-            </button>
-          </span>
-        )}
+        {gazeStage === "on" && !done && gaze.current && <GazeChip tracker={gaze.current} onStop={stopGaze} />}
         {reply && !done && (
           <button type="button" className={styles.end} onClick={() => setConfirmEnd(true)} disabled={busy || confirmEnd}>
             끝내기
@@ -1090,7 +1093,6 @@ export default function InterviewScreen({
   );
 }
 
-/** 첫 화면(로그인 버튼이 있는 곳)으로 가는 링크 */
 /**
  * 시작 화면의 시선 분석 선택 (#177). 기본은 꺼짐입니다.
  * 보정하는 동안에만 내 얼굴을 작게 보여 줍니다.
@@ -1119,6 +1121,9 @@ function GazeOption({
             웹캠으로 면접관(카메라)을 얼마나 바라봤는지 재서 리포트에 참고로 보여 드려요. 영상은 이 브라우저 안에서만 처리하고
             서버로 보내거나 저장하지 않아요. 서버에는 비율 같은 요약 숫자만 가고, 역량 수준에는 반영하지 않아요.
           </span>
+          <span className={styles.gazeHelp}>
+            화상 면접 연습이라면 음성으로 답할 때 쓰세요. 텍스트로 답하면 키보드를 보는 시간이 화면 밖으로 잡힐 수 있어요.
+          </span>
         </span>
       </label>
       {busy && (
@@ -1140,6 +1145,43 @@ function GazeOption({
   );
 }
 
+const ZONE_LABEL: Record<GazeZone, string> = {
+  camera: "카메라",
+  screen: "화면",
+  away: "화면 밖",
+  none: "얼굴 없음",
+};
+
+/**
+ * 면접 중 "시선 측정 중 · 끄기" 표시.
+ * 주소에 ?gaze_debug=1을 붙이면 지금 장면을 어디로 나눴는지도 보여 줘서, 실제 웹캠으로 판정 기준을 맞춰 볼 수 있습니다.
+ */
+function GazeChip({ tracker, onStop }: { tracker: GazeTracker; onStop: () => void }) {
+  const [debug] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).get("gaze_debug") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [zone, setZone] = useState<GazeZone | null>(null);
+  useEffect(() => {
+    if (!debug) return;
+    const t = setInterval(() => setZone(tracker.zone), 250);
+    return () => clearInterval(t);
+  }, [debug, tracker]);
+  return (
+    <span className={styles.gazeChip}>
+      <span className={styles.gazeDot} aria-hidden="true" />
+      <span className={styles.gazeChipText}>시선 측정 중</span>
+      {debug && <b>{zone ? ZONE_LABEL[zone] : "…"}</b>}
+      <button type="button" onClick={onStop} aria-label="시선 분석 끄기">
+        끄기
+      </button>
+    </span>
+  );
+}
+
 function CameraPreview({ stream }: { stream: MediaStream }) {
   const ref = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
@@ -1154,6 +1196,7 @@ function CameraPreview({ stream }: { stream: MediaStream }) {
   return <video ref={ref} className={styles.gazePreview} muted playsInline aria-label="내 카메라 화면" />;
 }
 
+/** 첫 화면(로그인 버튼이 있는 곳)으로 가는 링크 */
 function LoginLink() {
   return (
     <a className={styles.textLink} href="/">

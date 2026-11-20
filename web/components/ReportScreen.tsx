@@ -575,13 +575,15 @@ const GAZE_PARTS: { key: keyof GazeSummary; label: string; className: string }[]
  * 역량 수준에는 반영하지 않습니다.
  */
 function GazeSection({ gaze }: { gaze: GazeSummary }) {
-  const minutes = Math.max(1, Math.round(gaze.measured_seconds / 60));
+  // 1분 미만은 초로 보여 줍니다. 20초를 "약 1분"이라고 하지 않게 합니다.
+  const duration =
+    gaze.measured_seconds < 60 ? `${Math.round(gaze.measured_seconds)}초` : `${Math.round(gaze.measured_seconds / 60)}분`;
   return (
     <section aria-labelledby="gaze" className={styles.section}>
       <h2 id="gaze">시선</h2>
       <p className={styles.muted}>
-        면접 중 웹캠으로 약 {minutes}분 동안 잰 시선이에요. 브라우저가 어림잡은 값이라 정확하지 않을 수 있고, 역량 수준에는
-        반영하지 않아요.
+        면접 중 웹캠으로 약 {duration} 동안 잰 시선이에요. 브라우저가 어림잡은 값이라 정확하지 않을 수 있어요. 특히
+        카메라는 화면 바로 위에 있어서 카메라와 화면 위쪽을 본 시간이 서로 섞여 잡힐 수 있어요. 역량 수준에는 반영하지 않아요.
       </p>
       <div className={styles.card}>
         <div className={styles.gazeBar} aria-hidden="true">

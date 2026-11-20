@@ -97,6 +97,8 @@ export class GazeTracker {
   private timer: ReturnType<typeof setInterval> | null = null;
   private last: number | null = null;
   private closed = false;
+  /** 마지막으로 나눈 장면. 실제 웹캠으로 판정 기준을 맞춰 볼 때 화면에 띄웁니다 */
+  zone: GazeZone | null = null;
 
   private constructor(stream: MediaStream, video: HTMLVideoElement, landmarker: FaceLandmarker) {
     this.stream = stream;
@@ -125,7 +127,7 @@ export class GazeTracker {
       return new GazeTracker(stream, video, landmarker);
     } catch {
       stream.getTracks().forEach((t) => t.stop());
-      throw new GazeError("시선 분석 도구를 불러오지 못했어요. 네트워크를 확인해 주세요.");
+      throw new GazeError("시선 분석 도구를 불러오지 못했어요. 네트워크를 확인하거나, 체크를 끄고 시선 분석 없이 시작해 주세요.");
     }
   }
 
@@ -168,6 +170,7 @@ export class GazeTracker {
       }
       const now = performance.now();
       const zone = classify(this.features(), baseline);
+      this.zone = zone;
       if (this.last !== null) this.tally.add(zone, Math.min((now - this.last) / 1000, MAX_STEP_S));
       this.last = now;
     }, SAMPLE_MS);
