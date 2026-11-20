@@ -208,9 +208,12 @@ export default function InterviewScreen({
   const isNothingToReview = (e: unknown) => reviewOnly && e instanceof ApiError && e.status === 409;
 
   const push = (item: HistoryItem) => setHistory((h) => [...h, item]);
+  /** 남은 시간이 0이 되는 시각(performance.now 기준). 응답이 올 때마다 서버 값으로 다시 맞춥니다 (#190) */
+  const [deadline, setDeadline] = useState<number | null>(null);
   const showReply = (r: BrainReply) => {
     replyRef.current = r;
     setReply(r);
+    setDeadline(performance.now() + r.remaining_sec * 1000);
   };
   /** 서버가 done 발화를 보내지 않았는데 면접을 끝낼 때 (끝내기, 이미 끝난 세션 409) */
   const closeLocally = () => {
@@ -847,11 +850,7 @@ export default function InterviewScreen({
         </a>
         {reply && !closedLocally && !done && <span className={styles.chip}>{ACTION_LABEL[reply.action]}</span>}
         <span className={styles.spacer} />
-        {reply && !done && (
-          <span className={styles.time}>
-            남은 시간 <b>{remainingLabel(reply.remaining_sec)}</b>
-          </span>
-        )}
+        {reply && !done && deadline !== null && <RemainingClock deadline={deadline} />}
         {gazeStage === "on" && !done && gaze.current && <GazeChip tracker={gaze.current} onStop={stopGaze} />}
         {reply && !done && (
           <button type="button" className={styles.end} onClick={() => setConfirmEnd(true)} disabled={busy || confirmEnd}>
@@ -1318,6 +1317,39 @@ function remainingLabel(sec: number): string {
   if (sec <= 0) return "없음";
   if (sec < 60) return "1분 미만";
   return `약 ${Math.ceil(sec / 60)}분`;
+}
+
+/** 이보다 적게 남으면 색을 바꿉니다 */
+const LOW_REMAINING_SEC = 60;
+
+/**
+ * 남은 시간 시계 (#190). 서버가 준 남은 초로 잡은 끝 시각까지 1초마다 줄여 `09:42`처럼 보여 줍니다.
+ * 서버도 실제 흐른 시간으로 남은 시간을 세므로, 다음 응답에서 다시 맞춰도 거의 튀지 않습니다.
+ * 0이 되면 멈춥니다. 면접을 끝내는 판단은 지금처럼 서버가 다음 턴에서 합니다.
+ * 화면 낭독기는 숫자를 1초마다 읽지 않고, 분 단위 설명(aria-label)만 읽습니다.
+ */
+function RemainingClock({ deadline }: { deadline: number }) {
+  const [now, setNow] = useState(() => performance.now());
+  useEffect(() => {
+    setNow(performance.now());
+    // 1초보다 짧게 확인해야 초가 건너뛰지 않습니다.
+    const t = setInterval(() => setNow(performance.now()), 250);
+    return () => clearInterval(t);
+  }, [deadline]);
+  const sec = Math.max(0, Math.ceil((deadline - now) / 1000));
+  const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+  const ss = String(sec % 60).padStart(2, "0");
+  return (
+    <span
+      className={`${styles.time} ${sec < LOW_REMAINING_SEC ? styles.timeLow : ""}`}
+      role="timer"
+      aria-label={`남은 시간 ${remainingLabel(sec)}`}
+    >
+      <span aria-hidden="true">
+        남은 시간 <b>{`${mm}:${ss}`}</b>
+      </span>
+    </span>
+  );
 }
 
 function MicOffIcon() {
