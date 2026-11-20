@@ -1,5 +1,15 @@
 /** FastAPI 면접 API 호출. 경로와 형식은 contracts의 계약을 따릅니다. */
-import type { BrainReply, MetricEvent, SessionCreate, SessionCreated, SessionEnded, TurnRequest, VoiceToken } from "@gitinsight/contracts";
+import type {
+  BrainReply,
+  GazeSummary,
+  MetricEvent,
+  SessionCreate,
+  SessionCreated,
+  SessionEnd,
+  SessionEnded,
+  TurnRequest,
+  VoiceToken,
+} from "@gitinsight/contracts";
 import type { VadSettings } from "./config";
 
 export class ApiError extends Error {
@@ -133,11 +143,17 @@ const END_RETRY_DELAY_MS = 2000;
  * 리포트를 만들지 않는 서버(isReportUnavailable)면 다시 보내지 않습니다. 바깥 신호로 멈추면 다시 보내지 않습니다.
  * DB 연결 실패나 분석 결과 읽기 실패로 난 503은 잠깐의 장애일 수 있어 다른 5xx처럼 다시 보냅니다.
  */
-export async function endSession(sessionId: string, outer?: AbortSignal): Promise<SessionEnded> {
+export async function endSession(
+  sessionId: string,
+  outer?: AbortSignal,
+  gaze: GazeSummary | null = null,
+): Promise<SessionEnded> {
+  // 시선 요약(#177)은 면접자가 시선 분석을 켰을 때만 보냅니다. 서버는 처음 만든 리포트에만 담습니다.
+  const body: SessionEnd = gaze ? { gaze } : {};
   for (let attempt = 1; ; attempt++) {
     const s = linkedSignal(outer, END_TIMEOUT_MS);
     try {
-      return await postJson<SessionEnded>(`/api/sessions/${sessionId}/end`, {}, s.signal);
+      return await postJson<SessionEnded>(`/api/sessions/${sessionId}/end`, body, s.signal);
     } catch (e) {
       if (outer?.aborted) throw e;
       const retryable = !(e instanceof ApiError) || (e.status >= 500 && !isReportUnavailable(e));
