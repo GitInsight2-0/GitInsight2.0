@@ -18,7 +18,8 @@ REPO, SHA = SAMPLE.repo_full_name, SAMPLE.commit_sha
 
 
 class RecordingLauncher:
-    def __init__(self, error: Exception | None = None) -> None:
+    def __init__(self, error: Exception | None = None, analyzer_version: str = "1") -> None:
+        self.analyzer_version = analyzer_version
         self.launched: list[AnalysisRecord] = []
         self.contexts: list[LaunchContext] = []
         self.error = error
@@ -88,6 +89,24 @@ async def test_done_result_is_returned_as_cached(store: InMemoryAnalysisStore) -
         True,
     )
     assert len(launcher.launched) == 1
+
+
+async def test_new_analyzer_version_analyzes_same_commit_again(
+    store: InMemoryAnalysisStore,
+) -> None:
+    # 배포로 워커 버전이 오르면 같은 레포·커밋도 저장된 결과 대신 새로 분석합니다 (#171).
+    old_launcher = RecordingLauncher(analyzer_version="1")
+    first = await AnalysisService(store, old_launcher).request(REPO, SHA, "u1")
+    await store.save_result(
+        first.analysis_id, SAMPLE.model_copy(update={"analysis_id": first.analysis_id})
+    )
+    new_launcher = RecordingLauncher(analyzer_version="2")
+
+    again = await AnalysisService(store, new_launcher).request(REPO, SHA, "u1")
+
+    assert again.analysis_id != first.analysis_id
+    assert (again.status, again.cached) == (AnalysisStatus.QUEUED, False)
+    assert [r.key.analyzer_version for r in new_launcher.launched] == ["2"]
 
 
 async def test_launch_failure_marks_failed_so_retry_can_start(

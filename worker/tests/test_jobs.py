@@ -12,7 +12,12 @@ from gitinsight_api.analyses.service import (
     AnalysisService,
     LaunchContext,
 )
-from gitinsight_api.analyses.store import AnalysisKey, AnalysisRecord, InMemoryAnalysisStore
+from gitinsight_api.analyses.store import (
+    UNVERSIONED,
+    AnalysisKey,
+    AnalysisRecord,
+    InMemoryAnalysisStore,
+)
 from gitinsight_api.brain.repository import InMemorySessionRepository
 from gitinsight_api.brain.service import InterviewBrain
 from gitinsight_api.llm import LLMTimeoutError
@@ -30,6 +35,7 @@ from gitinsight_worker.jobs import (
     github_cloner,
     requester_from_login,
 )
+from gitinsight_worker.version import ANALYZER_VERSION
 
 from worker_test_support import make_origin, material
 
@@ -65,15 +71,31 @@ def launcher_for(
     )
 
 
+def test_launcher_reports_analyzer_version() -> None:
+    # 서비스가 이 값을 캐시 키에 넣어, 버전이 오르면 같은 커밋도 다시 분석합니다 (#171).
+    launcher = InProcessLauncher(InMemoryAnalysisStore(), FakeLLM())
+
+    assert launcher.analyzer_version == ANALYZER_VERSION
+    # "0"은 버전이 생기기 전 기록의 값이라, 지금 워커가 그 결과를 다시 쓰지 않습니다.
+    assert ANALYZER_VERSION != UNVERSIONED
+
+
 async def test_request_runs_analysis_and_result_starts_interview(
-    origin: tuple[Path, str], tmp_path: Path
+    origin: tuple[Path, str], tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     store = InMemoryAnalysisStore()
     launcher = launcher_for(store, origin[0], ok_llm(), tmp_path / "work")
     service = AnalysisService(store, launcher)
 
-    created = await service.request(REPO, origin[1], "u1")
-    await launcher.join()
+    with caplog.at_level("INFO"):
+        created = await service.request(REPO, origin[1], "u1")
+        await launcher.join()
+
+    # 어떤 분석기 버전으로 분석했는지 로그에 남고, 레포 이름은 남지 않습니다 (#171).
+    assert f"analysis_started analysis_id={created.analysis_id} version={ANALYZER_VERSION}" in (
+        caplog.text
+    )
+    assert REPO not in caplog.text
 
     record = await store.get_record(created.analysis_id)
     assert record is not None and record.state.status is AnalysisStatus.DONE

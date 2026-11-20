@@ -104,6 +104,25 @@ async def test_other_user_gets_own_record(store: AnalysisStore) -> None:
     assert theirs.analysis_id != mine.analysis_id
 
 
+async def test_other_analyzer_version_gets_new_record(store: AnalysisStore) -> None:
+    # 워커가 바뀌어 분석기 버전이 오르면 같은 레포·커밋·요청자도 다시 분석합니다 (#171).
+    old, _ = await store.get_or_create(KEY)
+    await store.save_result(old.analysis_id, result_for(old.analysis_id))
+
+    new, created = await store.get_or_create(
+        AnalysisKey(KEY.repo_full_name, KEY.commit_sha, KEY.user_id, analyzer_version="2")
+    )
+    again, created_again = await store.get_or_create(new.key)
+
+    assert created
+    assert new.analysis_id != old.analysis_id
+    assert new.key.analyzer_version == "2"
+    assert (again.analysis_id, created_again) == (new.analysis_id, False)
+    # 예전 기록과 결과는 그대로 읽힙니다. 그 분석으로 본 면접과 리포트가 계속 열립니다.
+    assert (await store.get_record(old.analysis_id)) == (await store.get_or_create(KEY))[0]
+    assert await store.get(old.analysis_id) == result_for(old.analysis_id)
+
+
 async def test_done_record_is_reused_and_result_is_revalidated(store: AnalysisStore) -> None:
     record, _ = await store.get_or_create(KEY)
     assert await store.get(record.analysis_id) is None
