@@ -31,7 +31,12 @@ export type EndKind = "done" | "user" | "dropped";
 export interface SessionUi {
   log(who: LogWho, text: string): void;
   status(text: string): void;
-  reply(r: BrainReply): void;
+  /**
+   * 서버가 정한 다음 발화입니다. sentAt은 이 응답을 받은 요청을 보낸 시각(performance.now)입니다.
+   * 서버가 그 요청을 받은 순간으로 remaining_sec를 재므로, 화면은 남은 시간 시계를 이 시각에 맞춥니다 (#192).
+   * 이어받은 세션의 현재 발화처럼 보낸 요청이 없으면 undefined입니다.
+   */
+  reply(r: BrainReply, sentAt?: number): void;
   /** 사용자 말 끝 → 서버가 정한 발화(도구 결과)의 첫소리 (ms) */
   latency(ms: number): void;
   /** 사용자 말 끝 → 도구 결과 전에 나온 AI 첫소리(맞장구) (ms) */
@@ -61,7 +66,7 @@ export interface SessionUi {
    * 세션이 정해졌습니다 (새로 만들었거나 이어받음). 음성 연결 전에 불리므로,
    * 연결에 실패해도 화면은 이 세션으로 텍스트 면접을 이어 갈 수 있습니다.
    */
-  started?(sessionId: string, current: BrainReply): void;
+  started?(sessionId: string, current: BrainReply, sentAt?: number): void;
   /** 누가 소리를 내기 시작하거나 멈췄습니다 (측정기 기준). 화면의 듣는 중, 말하는 중 표시에 씁니다. */
   speaking?(who: "user" | "ai", on: boolean): void;
   /** 음성 연결이 열렸습니다. 화면이 소리 크기를 그릴 수 있게 측정용 노드를 넘깁니다. */
@@ -195,6 +200,7 @@ export async function startVoiceSession(
 
   try {
     ui.status("세션 만드는 중");
+    const createdAt = opts.existing ? undefined : performance.now();
     const created = opts.existing
       ? { session_id: opts.existing.sessionId, first: opts.existing.current }
       : await createSession(
@@ -203,8 +209,8 @@ export async function startVoiceSession(
         );
     ensureOpen();
     const sessionId = created.session_id;
-    ui.started?.(sessionId, created.first);
-    ui.reply(created.first);
+    ui.started?.(sessionId, created.first, createdAt);
+    ui.reply(created.first, createdAt);
     ui.log("system", `세션 ${sessionId.slice(0, 8)}`);
 
     // ── 끊긴 질문 다시 말하기 (#185) ──
@@ -505,12 +511,13 @@ export async function startVoiceSession(
         speech_ended_at: m.lastUserEnd,
       };
       inFlight = turn;
+      const sentAt = performance.now();
       try {
         const reply = await postTurn(sessionId, turn, { labDelayMs: opts.labDelayMs, signal: life.signal });
         inFlight = null;
         done = reply.done;
         turnFailures = 0;
-        ui.reply(reply);
+        ui.reply(reply, sentAt);
         currentQuestion = reply.utterance;
         questionCut = false;
         respond(reply.utterance, reply.done);
