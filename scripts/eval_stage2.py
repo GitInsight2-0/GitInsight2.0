@@ -30,6 +30,7 @@ import argparse
 import asyncio
 import logging
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -57,6 +58,7 @@ from gitinsight_worker.review import (
     ReviewVerdict,
     TopicReview,
 )
+from gitinsight_worker.stage2 import TOPIC_PURPOSE
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -99,7 +101,7 @@ class ReviewLog(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         message = record.getMessage()
-        if message.startswith(("topic_review", "topic_rejected")):
+        if message.startswith(("topic_review", "topic_rejected", "stage2_review_fallback")):
             self.messages.append(message)
 
 
@@ -111,19 +113,24 @@ def review_lines(recorder: ReviewRecorder | None, log: ReviewLog) -> list[str]:
     fixes = [i for i in items if i.verdict is ReviewVerdict.FIX]
     unverifiable = [i for i in items if i.verdict is ReviewVerdict.UNVERIFIABLE]
     drops = [r.drop_reason for r in recorder.reviews if r.drop]
-    unsupported = sum(
-        int(part.split("=")[1])
-        for m in log.messages
-        for part in m.split()
-        if part.startswith("unsupported=")
-    )
+
+    def logged(key: str) -> int:
+        return sum(
+            int(part.split("=")[1])
+            for m in log.messages
+            for part in m.split()
+            if part.startswith(f"{key}=")
+        )
+
+    fallback = logged("used")
     lines = [
         "",
         "## 검토 (#199)",
         "",
         f"- 검토 호출: {len(recorder.reviews)}회, 고칠 것 {len(fixes)}건, 확인할 수 없음 {len(unverifiable)}건, 주제 빼기 {len(drops)}건",
-        f"- 서버 근거 대조에서 걸린 요점: {unsupported}건",
-        f"- 다시 만들어도 남아 버린 후보: {sum(m.startswith('topic_rejected') for m in log.messages)}개",
+        f"- 서버 근거 대조에서 걸린 요점: 근거를 내지 않음 {logged('no_quote')}건, 낸 근거가 자료에 없음 {logged('bad_quote')}건",
+        f"- 다시 만들어도 남아 버린 후보: {sum(m.startswith('topic_rejected') for m in log.messages)}개"
+        + (f" (주제가 없어 그중 {fallback}개를 대신 씀)" if fallback else ""),
         "",
         "사람이 확인할 것: 고칠 것의 지적이 코드와 맞는가(멀쩡한 요점을 틀렸다고 하지 않았는가),",
         "확인할 수 없음이 정말 다른 파일의 코드가 필요한 내용인가.",
@@ -147,8 +154,15 @@ def labels(result: AnalysisResult) -> dict[str, int]:
     return counts
 
 
-def render(result: AnalysisResult, recorder: InMemoryCostRecorder, model: str) -> list[str]:
+def render(
+    result: AnalysisResult, recorder: InMemoryCostRecorder, model: str, elapsed_s: float
+) -> list[str]:
     records = recorder.records
+
+    def slowest(purpose: str) -> str:
+        found = [r.latency_ms for r in records if r.purpose == purpose]
+        return f"{max(found):.0f} ms" if found else "-"
+
     lines = [
         f"# 2단계 분석 평가 ({datetime.now(UTC):%Y-%m-%d})",
         "",
@@ -158,7 +172,9 @@ def render(result: AnalysisResult, recorder: InMemoryCostRecorder, model: str) -
         f"- 기여 라벨: {', '.join(f'{k} {v}개' for k, v in labels(result).items())}",
         f"- LLM 호출: {len(records)}회 (검증 실패 재요청 포함), 이 중 스키마 재시도 {sum(r.attempts - 1 for r in records)}회",
         f"- 비용: ${recorder.total_usd():.4f}",
-        f"- 호출당 최대 지연: {max((r.latency_ms for r in records), default=0):.0f} ms",
+        f"- 호출당 최대 지연: 출제 {slowest(TOPIC_PURPOSE)}, 검토 {slowest(REVIEW_PURPOSE)}",
+        # 분석 화면에서 사용자가 기다리는 시간입니다(#200 리뷰). 레포 내려받기와 1단계를 포함합니다.
+        f"- 분석 전체 시간: {elapsed_s:.0f}초 (내려받기, 1단계 포함)",
         "",
         "사람이 확인할 것: 기대 포인트가 코드에 실제로 있는가, 질문이 존댓말 한 문장이고 자연스러운가,",
         "힌트가 답을 알려 주지 않는가, 관련 심볼이 꼬리질문과 맞는가,",
@@ -276,6 +292,7 @@ async def run(args: argparse.Namespace) -> int:
         if args.requester_login or args.requester_email
         else None
     )
+    started = time.perf_counter()
     result = await run_analysis(
         git_cloner(url, commit),
         commit,
@@ -289,7 +306,7 @@ async def run(args: argparse.Namespace) -> int:
     # 다른 레포의 기록이 같은 날 데모 레포 기록을 덮어쓰지 않게 파일 이름에 레포 이름을 넣습니다.
     suffix = "" if repo == sample.repo_full_name else "-" + repo.replace("/", "-")
     out = args.out or ROOT / "docs" / "evals" / f"stage2-{datetime.now(UTC):%Y-%m-%d}{suffix}.md"
-    lines = render(result, recorder, label)
+    lines = render(result, recorder, label, time.perf_counter() - started)
     lines += review_lines(reviews, review_log)
     if repo == sample.repo_full_name and commit == sample.commit_sha:
         lines += compare(result, sample)

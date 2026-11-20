@@ -27,6 +27,9 @@ from gitinsight_contracts.base import LLMOutput
 REVIEW_PURPOSE = "analysis_review"
 # 검토는 출제보다 꼼꼼히 보도록 출제(low)보다 한 단계 높게 생각하게 합니다.
 REVIEW_REASONING_EFFORT = "medium"
+# 검토 호출 하나의 제한 시간(초)입니다. 출제(60초)보다 오래 생각하므로 따로 둡니다(#200 리뷰).
+# 평가에서 검토 지연이 최대 57초였고, 출제와 같은 60초에서는 복잡한 주제가 먼저 검토를 건너뛰었습니다.
+REVIEW_TIMEOUT_S = 90.0
 # 근거 문장은 공백을 하나로 줄인 뒤 이 길이 이상이어야 합니다. `return x` 같은 짧은 조각은 무엇이든 맞아서 근거가 되지 않습니다.
 MIN_QUOTE_CHARS = 10
 # 출제 LLM에 돌려줄 검토 사유의 수와 길이 상한입니다.
@@ -104,7 +107,13 @@ class ReviewSource:
     facts: str | None = None
 
     def corpus(self) -> str:
-        return _normalize("\n".join([self.code, self.external, self.facts or ""]))
+        """근거 대조 자료입니다. 서버 사실은 숫자가 든 줄(`- `로 시작)만 넣습니다.
+
+        안내 문장("서버가 레포 전체에서 이름으로 찾은 참조 수입니다…")은 어느 주제에나 있어서,
+        넣으면 아무 요점의 근거로 옮겨도 대조를 통과합니다(#200 리뷰).
+        """
+        facts = [line for line in (self.facts or "").splitlines() if line.startswith("- ")]
+        return _normalize("\n".join([self.code, self.external, *facts]))
 
 
 @dataclass(frozen=True)
@@ -117,6 +126,10 @@ class ReviewOutcome:
     reviewer_problems: list[str]
     unverifiable: int
     drop: bool
+    # server_problems의 내역입니다. 근거를 내지 않은 요점과, 낸 근거가 자료에 없던 요점입니다(#200 리뷰).
+    # 뒤쪽이 많으면 검토 LLM이 근거를 잘못 옮겨 맞는 요점을 고치게 하는 것일 수 있습니다.
+    no_quote: int = 0
+    bad_quote: int = 0
 
     @property
     def passed(self) -> bool:
@@ -185,6 +198,8 @@ def judge_review(review: TopicReview, source: ReviewSource, point_count: int) ->
 
     - 모르는 field나 없는 번호의 항목은 버립니다.
     - unverifiable로 표시된 요점은 근거를 요구하지 않고 세기만 합니다.
+      그래서 검토 LLM이 unverifiable을 내면 근거 대조를 건너뛰는 길이 됩니다. 평가에서는 0건이었습니다.
+      이 수가 늘면 unverifiable 요점도 근거를 요구하거나, 검토가 다른 코드를 찾아보게 하는 쪽을 검토합니다(#200 리뷰).
     - 나머지 요점은 자료에 실제로 있는 근거 문장이 하나 이상 있어야 합니다.
     """
     corpus = source.corpus()
@@ -206,20 +221,28 @@ def judge_review(review: TopicReview, source: ReviewSource, point_count: int) ->
             reviewer.append(f"{field}: {item.reason.strip()[:MAX_REASON_CHARS]}")
 
     supported: set[int] = set()
+    quoted: set[int] = set()
     for evidence in review.evidence:
         quote = _normalize(evidence.quote)
+        if quote:
+            quoted.add(evidence.point)
         if len(quote) >= MIN_QUOTE_CHARS and quote in corpus:
             supported.add(evidence.point)
+    unsupported = [
+        i for i in range(1, point_count + 1) if i not in supported and i not in unverifiable_points
+    ]
     server = [
         f"expected_points[{i}]: 주제 코드나 서버가 알려 준 사실로 확인되지 않음. 코드에서 직접 확인되는 내용만 쓰세요"
-        for i in range(1, point_count + 1)
-        if i not in supported and i not in unverifiable_points
+        for i in unsupported
     ]
+    bad_quote = sum(i in quoted for i in unsupported)
     return ReviewOutcome(
         server_problems=server,
         reviewer_problems=reviewer[:MAX_FEEDBACK_ITEMS],
         unverifiable=unverifiable,
         drop=review.drop,
+        no_quote=len(unsupported) - bad_quote,
+        bad_quote=bad_quote,
     )
 
 

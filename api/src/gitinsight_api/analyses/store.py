@@ -27,7 +27,8 @@ from gitinsight_contracts.api import AnalysisState, AnalysisStatus
 Clock = Callable[[], datetime]
 
 # 이 시간 동안 상태 갱신이 없는 진행 중 기록은 워커가 죽은 것으로 봅니다.
-# 분석은 보통 1분 안에 끝나고 단계마다 진행률을 보고합니다(docs/evals/stage2-2026-11-12.md).
+# 분석은 보통 1분 안팎, 2단계 검토(#199)를 켜면 3~4분 걸립니다(docs/evals/stage2-2026-11-20-review.md).
+# 2단계는 LLM 호출이 하나 끝날 때마다 진행률을 보고해, 오래 걸려도 이 시간 안에 상태가 갱신됩니다.
 STALE_AFTER = timedelta(minutes=10)
 # failed 상태의 오류에는 예외 종류 이름만 남깁니다. 메시지에는 레포 내용이 섞일 수 있습니다.
 _ERROR_KIND = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,99}")

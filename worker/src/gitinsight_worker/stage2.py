@@ -47,6 +47,7 @@ from gitinsight_worker.languages import PYTHON, language_of
 from gitinsight_worker.misstatement import MisstatementPlan, MisstatementPlanner
 from gitinsight_worker.review import (
     REVIEW_PURPOSE,
+    REVIEW_TIMEOUT_S,
     ReviewOutcome,
     ReviewSource,
     TopicReview,
@@ -671,6 +672,65 @@ async def generate_topic(
     plan이 있으면 틀린 말도 붙입니다. 틀린 말만 검증에 실패하면 다시 요청하지 않고 틀린 말 없이 주제를 돌려줍니다.
     focus가 있으면 요점마다 고른 강조 범위를 붙입니다. 모르는 id는 범위 없이 둡니다.
     """
+    attempt = await _generate_topic(
+        llm,
+        candidate,
+        messages,
+        ctx,
+        timeout_s=timeout_s,
+        model=model,
+        breaker=breaker,
+        plan=plan,
+        focus=focus,
+        review=review,
+    )
+    return attempt.topic
+
+
+StepFn = Callable[[], Awaitable[None]]
+
+
+@dataclass(frozen=True)
+class _TopicAttempt:
+    topic: Topic | None
+    # 검토 때문에 버린 마지막 재료로 만든 주제입니다. 분석의 주제가 하나도 없을 때만 씁니다(#200 리뷰).
+    rejected: Topic | None = None
+
+
+def _finish(
+    material: TopicMaterial,
+    topic: Topic,
+    focus: tuple[FocusCandidate, ...],
+    plan: MisstatementPlan | None,
+) -> Topic:
+    """검증을 통과한 주제에 강조 범위와 틀린 말을 붙입니다."""
+    topic = attach_focus(material, topic, focus)
+    if plan is None:
+        return topic
+    try:
+        return attach_misstatement(material, topic, plan)
+    except TopicMaterialError as error:
+        logger.info(
+            "misstatement_invalid kind=%s problems=%d", plan.kind.value, len(error.problems)
+        )
+        return topic
+
+
+async def _generate_topic(
+    llm: LLMClient,
+    candidate: Candidate,
+    messages: list[Message],
+    ctx: TopicContext,
+    *,
+    timeout_s: float,
+    model: str | None,
+    breaker: _QuotaBreaker | None,
+    plan: MisstatementPlan | None,
+    focus: tuple[FocusCandidate, ...],
+    review: ReviewSource | None,
+    on_step: StepFn | None = None,
+) -> _TopicAttempt:
+    """generate_topic의 본체입니다. on_step은 LLM 호출이 하나 끝날 때마다 부릅니다(진행 상태 갱신)."""
     breaker = breaker or _QuotaBreaker()
     format_retries = 1
     review_rounds = MAX_REVIEW_ROUNDS
@@ -686,31 +746,30 @@ async def generate_topic(
             schema=TopicMaterial,
             purpose=TOPIC_PURPOSE,
         )
+        if on_step is not None:
+            await on_step()
         if result is None:
-            return None
+            return _TopicAttempt(None)
         answer: Message = {"role": "assistant", "content": result.value.model_dump_json()}
         try:
             topic = validate_material(result.value, candidate, ctx)
         except TopicMaterialError as error:
             logger.info("topic_invalid attempt=%d problems=%d", attempt, len(error.problems))
             if format_retries == 0:
-                return None
+                return _TopicAttempt(None)
             format_retries -= 1
             messages = [*messages, answer, {"role": "user", "content": _feedback(error.problems)}]
             continue
         if review is not None:
             outcome = await _review_material(
-                llm,
-                review,
-                result.value,
-                timeout_s=timeout_s,
-                model=model,
-                breaker=breaker,
+                llm, review, result.value, model=model, breaker=breaker
             )
+            if on_step is not None:
+                await on_step()
             if outcome is not None and not outcome.passed:
                 if outcome.drop or review_rounds == 0:
                     logger.info("topic_rejected attempt=%d drop=%s", attempt, outcome.drop)
-                    return None
+                    return _TopicAttempt(None, _finish(result.value, topic, focus, plan))
                 review_rounds -= 1
                 messages = [
                     *messages,
@@ -718,16 +777,7 @@ async def generate_topic(
                     {"role": "user", "content": review_feedback(outcome)},
                 ]
                 continue
-        topic = attach_focus(result.value, topic, focus)
-        if plan is None:
-            return topic
-        try:
-            return attach_misstatement(result.value, topic, plan)
-        except TopicMaterialError as error:
-            logger.info(
-                "misstatement_invalid kind=%s problems=%d", plan.kind.value, len(error.problems)
-            )
-            return topic
+        return _TopicAttempt(_finish(result.value, topic, focus, plan))
 
 
 async def _review_material(
@@ -735,7 +785,6 @@ async def _review_material(
     source: ReviewSource,
     material: TopicMaterial,
     *,
-    timeout_s: float,
     model: str | None,
     breaker: _QuotaBreaker,
 ) -> ReviewOutcome | None:
@@ -746,7 +795,7 @@ async def _review_material(
     result = await _complete_with_backoff(
         llm,
         build_review_messages(source, material),
-        timeout_s=timeout_s,
+        timeout_s=REVIEW_TIMEOUT_S,
         model=model,
         breaker=breaker,
         schema=TopicReview,
@@ -757,10 +806,11 @@ async def _review_material(
         return None
     outcome = judge_review(result.value, source, len(material.expected_points))
     logger.info(
-        "topic_review passed=%s fix=%d unsupported=%d unverifiable=%d drop=%s",
+        "topic_review passed=%s fix=%d no_quote=%d bad_quote=%d unverifiable=%d drop=%s",
         outcome.passed,
         len(outcome.reviewer_problems),
-        len(outcome.server_problems),
+        outcome.no_quote,
+        outcome.bad_quote,
         outcome.unverifiable,
         outcome.drop,
     )
@@ -830,6 +880,10 @@ async def generate_topics(
     """후보 순서대로 주제를 만듭니다. 실패한 후보는 다음 후보로 채워서 최대 `target`개를 돌려줍니다.
 
     review가 False면 검토 LLM을 부르지 않습니다(#199 이전과 같음). 평가에서 검토 전후를 비교할 때 씁니다.
+    후보를 다 써도 주제가 하나도 없으면, 검토 때문에 버린 주제를 대신 씁니다(#200 리뷰).
+    후보가 적은 레포에서 검토가 모두 버려 분석 자체가 실패하는 것보다 낫다고 봅니다.
+    진행률은 LLM 호출이 하나 끝날 때마다 보고합니다. 값이 그대로여도 보고해서, 오래 걸리는 분석이
+    오래된 기록(STALE_AFTER)으로 닫히지 않게 합니다(#200 리뷰).
     """
     # 기여 근거를 넘기지 않으면 모두 "확인 불가"로 둡니다.
     contribution = contribution_of or _no_contribution
@@ -841,13 +895,20 @@ async def generate_topics(
     used_slugs: set[str] = set()
     breaker = _QuotaBreaker()
     topics: list[Topic] = []
+    rejected: list[Topic] = []
     next_index = 0
+    made = 0
 
-    async def one(item: _Prepared) -> Topic | None:
+    async def beat() -> None:
+        if progress is not None:
+            await progress(min(made / target, 1.0))
+
+    async def one(item: _Prepared) -> _TopicAttempt:
+        nonlocal made
         label, commits = contribution(item.candidate.symbol.symbol_id)
         ctx = TopicContext(topic_slug(item.candidate.symbol.name, used_slugs), label, commits)
         async with semaphore:
-            return await generate_topic(
+            attempt = await _generate_topic(
                 llm,
                 item.candidate,
                 item.messages,
@@ -858,7 +919,12 @@ async def generate_topics(
                 plan=item.plan,
                 focus=item.focus,
                 review=item.review if review else None,
+                on_step=beat,
             )
+        if attempt.topic is not None:
+            made += 1
+            await beat()
+        return attempt
 
     # 부족한 만큼만 다음 후보를 한 번에 요청합니다. 결과 순서는 후보 순서를 따릅니다.
     while len(topics) < target and next_index < len(prepared):
@@ -870,9 +936,12 @@ async def generate_topics(
                 tasks = [group.create_task(one(item)) for item in wave]
         except* Stage2AbortError as errors:
             raise errors.exceptions[0] from None
-        topics += [t for t in (task.result() for task in tasks) if t is not None]
-        if progress is not None:
-            await progress(min(len(topics) / target, 1.0))
+        results = [task.result() for task in tasks]
+        topics += [r.topic for r in results if r.topic is not None]
+        rejected += [r.rejected for r in results if r.rejected is not None]
+    if not topics and rejected:
+        topics = rejected[:target]
+        logger.info("stage2_review_fallback used=%d", len(topics))
     logger.info(
         "stage2_topics made=%d tried=%d misstatements=%d",
         len(topics),

@@ -495,7 +495,12 @@ async def test_stops_at_target_and_reports_progress(tmp_path: Path) -> None:
 
     assert len(topics) == 2
     assert len(llm.calls_for(TOPIC_PURPOSE)) == 2
-    assert seen == [1.0]
+    # LLM 호출(출제 2, 검토 2)이 끝날 때마다, 그리고 주제가 하나 끝날 때마다 보고합니다 (#200 리뷰).
+    # 값이 그대로여도 보고해서 오래 걸리는 분석이 오래된 기록으로 닫히지 않게 합니다.
+    assert len(seen) == 4 + 2
+    assert seen == sorted(seen)
+    assert 0.5 in seen
+    assert seen[-1] == 1.0
     assert len({t.topic_id for t in topics}) == 2
 
 

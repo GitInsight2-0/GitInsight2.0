@@ -94,6 +94,25 @@ def test_server_facts_count_as_evidence() -> None:
     assert outcome.passed
 
 
+def test_fixed_notice_of_server_facts_is_not_evidence() -> None:
+    # 안내 문장은 어느 주제에나 있어서 아무 요점의 근거로 옮겨도 맞게 됩니다 (#200 리뷰).
+    outcome = judge_review(
+        review({1: "서버가 레포 전체에서 이름으로 찾은 참조 수입니다."}), SOURCE, 1
+    )
+
+    assert not outcome.passed
+
+
+def test_missing_and_wrong_quotes_are_counted_apart() -> None:
+    outcome = judge_review(
+        review({1: "return clone(token)", 2: "return clone(token, depth=1)"}), SOURCE, 3
+    )
+
+    # 요점 2는 근거를 냈지만 자료에 없고, 요점 3은 근거를 내지 않았습니다.
+    assert (outcome.no_quote, outcome.bad_quote) == (1, 1)
+    assert len(outcome.server_problems) == 2
+
+
 def test_unverifiable_points_are_counted_not_sent_back() -> None:
     items = [
         ReviewItem(
@@ -226,6 +245,30 @@ async def test_dropped_topic_is_not_regenerated(tmp_path: Path) -> None:
 
     assert [t.symbol for t in topics] == [select_candidates(stage1.symbols)[1].symbol]
     assert len(llm.calls_for(TOPIC_PURPOSE)) == 2
+
+
+async def test_rejected_topics_are_used_only_when_nothing_else_is_left(tmp_path: Path) -> None:
+    write_repo(tmp_path)
+    stage1 = analyze_tree(tmp_path, SHA)
+    candidates = select_candidates(stage1.symbols)
+    # 후보 3개를 모두 검토가 버립니다. 하나는 빼기, 둘은 다시 만들어도 고칠 곳이 남습니다.
+    llm = scripted(drop_topic, *[fix_first_point] * (2 * (MAX_REVIEW_ROUNDS + 1)))
+
+    topics = await generate_topics(tmp_path, stage1, llm, target=1)
+
+    # 분석이 통째로 실패하는 대신, 검토 때문에 버린 주제 중 후보 순서로 앞선 것을 씁니다 (#200 리뷰).
+    assert [t.symbol for t in topics] == [candidates[0].symbol]
+
+
+async def test_rejected_topics_are_not_used_when_others_pass(tmp_path: Path) -> None:
+    write_repo(tmp_path)
+    stage1 = analyze_tree(tmp_path, SHA)
+    llm = scripted(drop_topic)
+
+    topics = await generate_topics(tmp_path, stage1, llm, target=3)
+
+    # 첫 후보는 버리고, 남은 후보 2개만 씁니다. 버린 주제로 개수를 채우지 않습니다.
+    assert [t.symbol for t in topics] == [c.symbol for c in select_candidates(stage1.symbols)[1:]]
 
 
 async def test_failed_review_keeps_the_topic(tmp_path: Path) -> None:
