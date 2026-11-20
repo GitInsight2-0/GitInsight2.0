@@ -214,12 +214,19 @@ export default function InterviewScreen({
   const isNothingToReview = (e: unknown) => reviewOnly && e instanceof ApiError && e.status === 409;
 
   const push = (item: HistoryItem) => setHistory((h) => [...h, item]);
-  /** 남은 시간이 0이 되는 시각(performance.now 기준). 응답이 올 때마다 서버 값으로 다시 맞춥니다 (#190) */
+  /**
+   * 남은 시간이 0이 되는 시각(performance.now 기준, #190).
+   * 서버는 요청을 받은 순간으로 remaining_sec를 재므로, 응답을 받은 시각이 아니라 요청을 보낸 시각(sentAt)에 더합니다 (#192).
+   * 그러면 판단 LLM이 걸린 시간만큼 시계가 늘어나지 않고, 오차는 네트워크 편도 시간과 서버의 초 내림(1초 미만)뿐입니다.
+   * 끝 시각은 앞당기기만 합니다. 같은 turn_id로 다시 보내 서버가 저장해 둔 옛 응답을 돌려주면 그 값은 시계를 늘리기 때문입니다.
+   */
   const [deadline, setDeadline] = useState<number | null>(null);
-  const showReply = (r: BrainReply) => {
+  const showReply = (r: BrainReply, sentAt?: number) => {
     replyRef.current = r;
     setReply(r);
-    setDeadline(performance.now() + r.remaining_sec * 1000);
+    if (sentAt === undefined) return;
+    const next = sentAt + r.remaining_sec * 1000;
+    setDeadline((prev) => (prev === null ? next : Math.min(prev, next)));
   };
   /** 서버가 done 발화를 보내지 않았는데 면접을 끝낼 때 (끝내기, 이미 끝난 세션 409) */
   const closeLocally = () => {
@@ -377,10 +384,11 @@ export default function InterviewScreen({
     setBusy(true);
     setError(null);
     try {
+      const sentAt = performance.now();
       const created = await createSession({ analysis_id: analysisId, mode: "text", review_only: reviewOnly });
       sessionRef.current = created.session_id;
       setSessionId(created.session_id);
-      showReply(created.first);
+      showReply(created.first, sentAt);
       setHistory([said(created.first)]);
     } catch (e) {
       if (isNothingToReview(e)) setNothingToReview(true);
@@ -404,6 +412,8 @@ export default function InterviewScreen({
     const pending = pendingTurn.current;
     const turnId = pending && pending.transcript === transcript ? pending.id : crypto.randomUUID();
     pendingTurn.current = { id: turnId, transcript };
+    // 같은 turn_id로 다시 보내는 시도도 처음 보낸 시각을 씁니다. 서버가 처리한 시각은 늘 그 뒤라 시계가 늘어나지 않습니다.
+    const sentAt = performance.now();
     try {
       const next = await postTurn(sessionId, {
         turn_id: turnId,
@@ -415,7 +425,7 @@ export default function InterviewScreen({
       pendingTurn.current = null;
       push({ who: "me", text: transcript });
       push(said(next));
-      showReply(next);
+      showReply(next, sentAt);
       setDraft("");
     } catch (e) {
       // 서버(api/routes/sessions.py)는 /turns에서 409를 "이미 끝난 세션"에만 씁니다.
@@ -447,13 +457,14 @@ export default function InterviewScreen({
     setBusy(true);
     setError(null);
     pendingTurn.current = { id: turn.turn_id, transcript: turn.transcript };
+    const sentAt = performance.now();
     try {
       const next = await postTurn(id, turn);
       pendingTurn.current = null;
       // 기다리는 사이 "끝내기"로 면접을 끝냈으면 종료 화면을 덮지 않습니다.
       if (replyRef.current?.done) return;
       push(said(next));
-      showReply(next);
+      showReply(next, sentAt);
     } catch (e) {
       if (replyRef.current?.done) {
         pendingTurn.current = null;
@@ -509,19 +520,19 @@ export default function InterviewScreen({
       status: (s) => {
         if (s === "연결됨") setVoiceState("live");
       },
-      started: (id, current) => {
+      started: (id, current, sentAt) => {
         if (!sessionRef.current) {
           sessionRef.current = id;
           setSessionId(id);
           setHistory([said(current)]);
-          showReply(current);
+          showReply(current, sentAt);
         }
       },
-      reply: (r) => {
+      reply: (r, sentAt) => {
         // 이어받은 세션의 현재 발화는 이미 기록에 있으므로 다시 넣지 않습니다.
         if (r === replyRef.current) return;
         push(said(r));
-        showReply(r);
+        showReply(r, sentAt);
         // "답변을 살펴보고 있어요"는 AI가 실제로 말하기 시작할 때 끕니다 (speaking).
         // 방금 보낸 답변은 다음 답변을 말하기 시작할 때까지 남겨 둡니다.
         // Gemini가 받아쓰기를 말이 끝난 뒤에 한꺼번에 주면, 지우는 순간 사용자가 한 번도 못 보기 때문입니다.
@@ -1416,10 +1427,19 @@ function RemainingClock({ deadline }: { deadline: number }) {
     <span
       className={`${styles.time} ${sec < LOW_REMAINING_SEC ? styles.timeLow : ""}`}
       role="timer"
-      aria-label={`남은 시간 ${remainingLabel(sec)}`}
+      aria-label={sec > 0 ? `남은 시간 ${remainingLabel(sec)}` : "시간이 다 됐어요. 다음 답변 뒤 마무리돼요"}
     >
       <span aria-hidden="true">
-        남은 시간 <b>{`${mm}:${ss}`}</b>
+        {sec > 0 ? (
+          <>
+            남은 시간 <b>{`${mm}:${ss}`}</b>
+          </>
+        ) : (
+          // 서버는 다음 턴에서 면접을 마무리합니다. 00:00에서 멈춘 채로 두면 아무 일도 안 일어나는 것처럼 보입니다 (#192).
+          <>
+            <b>00:00</b> 다음 답변 뒤 마무리돼요
+          </>
+        )}
       </span>
     </span>
   );
