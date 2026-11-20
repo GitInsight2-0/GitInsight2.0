@@ -67,6 +67,11 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 1분 미만 남았을 때 (#190) */
+.timeLow b {
+  color: var(--gi-accent-text);
+}
+
 .end {
   padding: 7px 14px;
   border: 1px solid rgba(255, 138, 122, 0.35);
