@@ -837,6 +837,22 @@
   text-align: center;
 }
 
+/* 보정 안내 (#187). 카메라를 보라는 말과 남은 초를 크게 보여 줍니다 */
+.gazeCalib .gazeLook {
+  font-size: 18px !important;
+  font-weight: 700;
+  color: var(--gi-accent-text) !important;
+}
+
+.gazeCalib .gazeCount {
+  font-family: var(--gi-font-mono);
+  font-size: 40px !important;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--gi-ink) !important;
+  font-variant-numeric: tabular-nums;
+}
+
 .gazePreview {
   width: min(240px, 100%);
   aspect-ratio: 4 / 3;

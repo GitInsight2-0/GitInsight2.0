@@ -52,7 +52,11 @@ function said(r: BrainReply): HistoryItem {
 type Mode = "text" | "voice";
 type VoiceState = "idle" | "connecting" | "live";
 /** 시선 분석 준비 단계. on이면 카메라가 켜져 있고 세션이 생기면 잽니다 */
-type GazeStage = "off" | "preparing" | "calibrating" | "on";
+/**
+ * 시선 분석 준비 단계. ready는 보정이 끝나 면접자가 시작 버튼을 누르길 기다리는 중(#187),
+ * on이면 카메라가 켜져 있고 세션이 생기면 잽니다
+ */
+type GazeStage = "off" | "preparing" | "calibrating" | "ready" | "on";
 /** 아래 막대와 말풍선이 보여 줄 상태 */
 type Stage = "connecting" | "listening" | "muted" | "review" | "thinking" | "speaking" | "text" | "done";
 
@@ -196,6 +200,8 @@ export default function InterviewScreen({
   /** 시선 분석 (#177). 면접자가 켰을 때만 카메라를 씁니다 */
   const [gazeWanted, setGazeWanted] = useState(false);
   const [gazeStage, setGazeStage] = useState<GazeStage>("off");
+  /** 보정 뒤 "면접 시작"을 누르면 시작할 방식. 처음 누른 시작 버튼을 따릅니다 (#187) */
+  const [gazeMode, setGazeMode] = useState<Mode>("voice");
   const [gazeError, setGazeError] = useState<string | null>(null);
   const gaze = useRef<GazeTracker | null>(null);
   /** 끝낼 때 한 번 만든 요약. 리포트 요청을 다시 보내도 같은 값을 보냅니다 */
@@ -330,13 +336,20 @@ export default function InterviewScreen({
       setGazeError("얼굴이 잘 보이지 않아요. 밝은 곳에서 얼굴이 화면 가운데 오게 한 뒤 다시 눌러 주세요.");
       return false;
     }
-    setGazeStage("on");
+    // 바로 면접으로 넘어가지 않고 면접자가 "면접 시작"을 누를 때까지 기다립니다 (#187).
+    setGazeStage("ready");
     return true;
   }
 
   async function begin(kind: Mode) {
     if (busy || gazeStage === "preparing" || gazeStage === "calibrating") return;
-    if (!(await prepareGaze())) return;
+    // 시선 분석을 켰는데 아직 보정하지 않았으면 보정만 하고 기다립니다. 시작은 보정 뒤 버튼으로 합니다.
+    if (gazeWanted && !gaze.current) {
+      setGazeMode(kind);
+      await prepareGaze();
+      return;
+    }
+    if (gaze.current) setGazeStage("on");
     if (kind === "voice") await startVoice();
     else await startText();
     // 시작에 실패해 시작 화면에 남았으면(로그인 만료, 다시 볼 질문 없음, 음성 연결 실패) 카메라를 끕니다.
@@ -747,8 +760,16 @@ export default function InterviewScreen({
                   stage={gazeStage}
                   stream={gaze.current?.stream ?? null}
                   error={gazeError}
+                  startLabel={gazeMode === "voice" ? "음성으로 면접 시작" : "텍스트로 면접 시작"}
+                  onStart={() => void begin(gazeMode)}
+                  onRecalibrate={() => {
+                    closeGaze();
+                    void begin(gazeMode);
+                  }}
+                  starting={busy}
                 />
-                <div className={styles.introActions}>
+                {/* 보정이 끝나면 시선 분석 칸의 "면접 시작"으로 시작합니다. 버튼이 두 곳에 있으면 헷갈립니다 */}
+                <div className={styles.introActions} style={gazeStage === "ready" ? { display: "none" } : undefined}>
                   <button
                     type="button"
                     className={styles.primary}
@@ -1105,14 +1126,25 @@ function GazeOption({
   stage,
   stream,
   error,
+  startLabel,
+  onStart,
+  onRecalibrate,
+  starting,
 }: {
   wanted: boolean;
   onChange: (v: boolean) => void;
   stage: GazeStage;
   stream: MediaStream | null;
   error: string | null;
+  /** 보정 뒤 시작 버튼 글자 */
+  startLabel: string;
+  onStart: () => void;
+  onRecalibrate: () => void;
+  /** 면접을 시작하는 중이면 버튼을 막습니다 */
+  starting: boolean;
 }) {
   const busy = stage === "preparing" || stage === "calibrating";
+  const left = useCountdown(stage === "calibrating", CALIBRATION_MS);
   return (
     <div className={styles.gazeOption}>
       <label className={styles.gazeToggle}>
@@ -1130,12 +1162,39 @@ function GazeOption({
       </label>
       {busy && (
         <div className={styles.gazeCalib} role="status" aria-live="polite">
+          {stage === "preparing" ? (
+            <>
+              <p className={styles.gazeLook}>카메라를 준비하고 있어요</p>
+              <p>준비가 끝나면 화면 위의 카메라 렌즈를 {CALIBRATION_MS / 1000}초 동안 바라봐 주세요.</p>
+            </>
+          ) : (
+            <>
+              <p className={styles.gazeLook}>
+                <span aria-hidden="true">↑ </span>카메라 렌즈를 바라봐 주세요
+              </p>
+              {/* 1초마다 바뀌는 숫자라 낭독기가 매번 읽지 않게 감춥니다 */}
+              <p className={styles.gazeCount} aria-hidden="true">
+                {left}
+              </p>
+              <p>고개는 평소 면접 볼 때처럼 두고, 눈만 렌즈를 봐 주세요. 이때 본 방향이 "카메라를 본다"의 기준이 돼요.</p>
+            </>
+          )}
           {stream && <CameraPreview stream={stream} />}
-          <p>
-            {stage === "preparing"
-              ? "카메라와 시선 분석 도구를 준비하고 있어요…"
-              : `카메라 렌즈를 ${CALIBRATION_MS / 1000}초 동안 바라봐 주세요.`}
-          </p>
+        </div>
+      )}
+      {stage === "ready" && (
+        <div className={styles.gazeCalib} role="status" aria-live="polite">
+          <p className={styles.gazeLook}>✓ 기준을 잡았어요</p>
+          {stream && <CameraPreview stream={stream} />}
+          <p>준비되면 면접을 시작하세요. 시작하면 면접관이 바로 질문해요.</p>
+          <div className={styles.introActions}>
+            <button type="button" className={styles.primary} onClick={onStart} disabled={starting}>
+              {startLabel}
+            </button>
+            <button type="button" className={styles.secondary} onClick={onRecalibrate} disabled={starting}>
+              다시 맞추기
+            </button>
+          </div>
         </div>
       )}
       {error && (
@@ -1182,6 +1241,20 @@ function GazeChip({ tracker, onStop }: { tracker: GazeTracker; onStop: () => voi
       </button>
     </span>
   );
+}
+
+/** on인 동안 ms부터 1초씩 줄어드는 남은 초. 꺼지면 처음 값으로 돌아갑니다 */
+function useCountdown(on: boolean, ms: number): number {
+  const total = Math.ceil(ms / 1000);
+  const [left, setLeft] = useState(total);
+  useEffect(() => {
+    setLeft(total);
+    if (!on) return;
+    const t0 = Date.now();
+    const timer = setInterval(() => setLeft(Math.max(1, total - Math.floor((Date.now() - t0) / 1000))), 200);
+    return () => clearInterval(timer);
+  }, [on, total]);
+  return left;
 }
 
 function CameraPreview({ stream }: { stream: MediaStream }) {
