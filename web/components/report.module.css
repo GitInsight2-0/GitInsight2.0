@@ -159,8 +159,7 @@
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.05) inset,
     0 30px 80px -40px rgba(0, 0, 0, 0.8);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  /* 뒤 배경이 이미 흐린 빛이라 backdrop-filter는 쓰지 않습니다. 긴 판에 걸면 스크롤이 무거워집니다 (#198 리뷰) */
 }
 
 .head {
@@ -399,6 +398,11 @@
 .compCard h3 {
   font-size: 20px;
   letter-spacing: -0.02em;
+}
+
+/* 제목이 DOM에서 앞이라, 아이콘과 수준 줄을 보이는 순서로만 위로 올립니다 */
+.compCard > .cardHead {
+  order: -1;
 }
 
 .compIcon {

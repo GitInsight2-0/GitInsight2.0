@@ -164,7 +164,7 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
             수준마다 근거가 된 내 답변을 함께 보여 드려요.
           </p>
         </div>
-        {/* 리포트에 적힌 값을 세기만 합니다 (#197) */}
+        {/* 리포트에 적힌 값을 세기만 합니다 (#197). 핵심 함수 수는 같은 레포로 본 면접을 합친 값이라 "지금까지"를 붙입니다 (#198 리뷰) */}
         <dl className={styles.stats}>
           {scored.length > 0 && (
             <div className={styles.stat}>
@@ -177,7 +177,7 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
           )}
           {codeMap && codeMap.key_function_count > 0 && (
             <div className={styles.stat}>
-              <dt>설명한 핵심 함수</dt>
+              <dt>지금까지 설명한 핵심 함수</dt>
               <dd>
                 {codeMap.explained_count + codeMap.after_hint_count}
                 <span> / {codeMap.key_function_count}</span>
@@ -244,7 +244,7 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
             title="코드 지도"
             hint={
               codeMap.key_function_count > 0
-                ? `핵심 함수 ${codeMap.key_function_count}개 중 ${codeMap.explained_count + codeMap.after_hint_count}개 설명`
+                ? `지금까지 핵심 함수 ${codeMap.key_function_count}개 중 ${codeMap.explained_count + codeMap.after_hint_count}개 설명`
                 : `질문받은 함수 ${codeMap.entries.length}개`
             }
           >
@@ -322,6 +322,8 @@ function CompetencyCard({
 }) {
   return (
     <li className={`${styles.card} ${styles.compCard}`} data-competency={score.name}>
+      {/* 화면 읽기 프로그램이 역량 이름을 수준보다 먼저 읽게 제목을 앞에 두고, 보이는 순서는 CSS로 바꿉니다 (#198 리뷰) */}
+      <h3>{COMPETENCY_LABEL[score.name]}</h3>
       <div className={styles.cardHead}>
         <span className={styles.compIcon} aria-hidden="true">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -330,7 +332,6 @@ function CompetencyCard({
         </span>
         <LevelMeter level={score.level} />
       </div>
-      <h3>{COMPETENCY_LABEL[score.name]}</h3>
       {compared && <Change now={score.level} before={previousLevel} />}
       {/* 근거가 없으면 빈 칸이 펼쳐지지 않게 접기를 두지 않습니다 (#155 리뷰) */}
       {score.evidence.length > 0 && (
@@ -463,7 +464,7 @@ function CodeMapSection({ codeMap, topics }: { codeMap: CodeMap; topics: TopicRe
       {total > 0 && (
         <div className={styles.card}>
           <p className={styles.mapHeadline}>
-            핵심 함수 {total}개 중 <strong>{explained}개</strong>를 설명했어요.
+            지금까지 핵심 함수 {total}개 중 <strong>{explained}개</strong>를 설명했어요.
           </p>
           <div className={styles.mapBar} aria-hidden="true">
             {bar
