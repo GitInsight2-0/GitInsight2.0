@@ -40,6 +40,8 @@ LLM_ANALYSIS_MODEL=gemini/gemini-3.8-flash  # BizRouter나 OpenAI가 막혔을 �
 ```
 
 - 분석 모델을 Gemini로 넘겨도 이미 끝난 분석은 그대로 다시 씁니다. 새로 요청한 분석만 Gemini로 만듭니다.
+- 반대로 Gemini로 넘긴 동안 만든 분석은 gpt로 되돌린 뒤에도 계속 다시 씁니다. 재사용 키(레포, 커밋, 요청자, 분석기 버전)에 모델이 없기 때문입니다. gpt로 다시 만들려면 레포에 새 커밋을 올리거나 `ANALYZER_VERSION`을 올립니다.
+- 분석 모델을 Gemini로 넘긴 동안에는 레포 고르기 화면의 안내("코드 일부가 OpenAI(BizRouter 경유)로 보내져", #205)가 사실과 다릅니다. 웹은 환경 변수를 따라 바뀌지 않습니다. 시연 중 잠깐이면 그대로 두고, 오래 넘겨 둘 거면 `web/components/RepoPicker.tsx`의 안내 문구도 고칩니다. 웹 문구는 Vercel을 다시 배포해야 바뀝니다(환경 변수처럼 바로 바뀌지 않음).
 
 - 되돌릴 때는 변수를 비웁니다. 비우면 기본 모델을 씁니다.
 - 바꾸기 전에 로컬에서 확인합니다: `$env:LLM_JUDGE_MODEL="gemini/gemini-3.8-flash"; uv run python scripts/demo_check.py --real-llm`
