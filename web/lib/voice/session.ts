@@ -114,6 +114,11 @@ const RETRY_UTTERANCE = "잠시 연결이 불안정했어요. 방금 답변을 �
 const EMPTY_UTTERANCE = "잘 못 들었어요. 한 번만 더 말씀해 주시겠어요?";
 /** 면접자가 보내기 전에 답변을 지웠을 때 (#148). 서버로 보내지 않았으므로 같은 질문에 다시 답하게 합니다 */
 const DISCARDED_UTTERANCE = "네, 다시 말씀해 주세요.";
+/**
+ * 질문을 말하다 끊긴 뒤 빈 소리나 지운 답변이 오면, 이 말 뒤에 서버가 정한 지금 질문을 그대로 다시 말합니다 (#185).
+ * 면접자는 질문을 끝까지 듣지 못했으므로 "다시 말씀해 주세요"만 하면 무엇에 답할지 모릅니다.
+ */
+const REASK_PREFIX = "질문을 다시 드릴게요.";
 /** 턴이 이만큼 연달아 실패하면 같은 부탁을 반복하지 않고 음성을 끝냅니다 (화면은 텍스트로 이어 갑니다) */
 const MAX_TURN_FAILURES = 2;
 /** 턴이 연달아 실패해 음성을 끝내기 전에 할 말. 말없이 끊기면 사용자가 무슨 일인지 모릅니다 */
@@ -202,6 +207,12 @@ export async function startVoiceSession(
     ui.reply(created.first);
     ui.log("system", `세션 ${sessionId.slice(0, 8)}`);
 
+    // ── 끊긴 질문 다시 말하기 (#185) ──
+    /** 서버가 정한 지금 질문(마지막 BrainReply.utterance). 다시 말할 때 이 문장을 그대로 씁니다 */
+    let currentQuestion = created.first.utterance;
+    /** 지금 질문을 말하는 중에 끊겼는가 (끼어들기). 질문을 끝까지 다시 말하면 지웁니다 */
+    let questionCut = false;
+
     const metric = (name: MetricName, extra: Partial<MetricEvent> = {}) =>
       postMetric({ name, session_id: sessionId, at_ms: Date.now(), provider: PROVIDER, scenario: opts.scenario(), ...extra });
 
@@ -282,7 +293,10 @@ export async function startVoiceSession(
         if (endQuietTimer) clearTimeout(endQuietTimer);
         endQuietTimer = setTimeout(() => shutdown(endAs.reason, endAs.kind), END_QUIET_MS);
       },
-      bargeIn: () => ui.bargeIn(),
+      bargeIn: () => {
+        questionCut = true;
+        ui.bargeIn();
+      },
       bargeStop: (bargeAt, stopMs) => {
         ui.bargeStop(stopMs);
         metric("barge_in", stopMs === null ? { at_ms: bargeAt } : { at_ms: bargeAt, value_ms: stopMs });
@@ -312,6 +326,7 @@ export async function startVoiceSession(
 
     function onAiTranscript(text: string, interrupted: boolean) {
       ui.log("ai", interrupted ? `${text} (끊김)` : text);
+      if (interrupted) questionCut = true;
       // 사용자가 말한 뒤 도구 호출 없이 AI가 말을 끝까지 했다면, 서버 대신 모델이 직접 답한 것입니다.
       // 끊긴 발화는 사용자가 끼어든 경우라 세지 않습니다.
       if (interrupted || !userSpokeSinceTool) return;
@@ -409,6 +424,13 @@ export async function startVoiceSession(
         });
       };
 
+      /** 서버로 보내지 않고 지금 질문을 처음부터 다시 말합니다. 면접은 진행되지 않습니다 (#185) */
+      const reask = () => {
+        questionCut = false;
+        ui.log("system", "질문을 말하다 끊겨 지금 질문을 다시 말합니다");
+        respond(`${REASK_PREFIX} ${currentQuestion}`, false);
+      };
+
       if (name !== DELEGATION_TOOL) {
         ui.log("error", `모르는 도구 호출: ${name}`);
         respond(RETRY_UTTERANCE, false);
@@ -441,7 +463,9 @@ export async function startVoiceSession(
       if (asr && fromModel) ui.transcriptSimilarity(similarity(asr, fromModel));
       if (!asr && fromModel) ui.log("system", "받아쓰기가 없어 음성 AI의 도구 인자를 보냅니다");
       if (!transcript) {
-        respond(EMPTY_UTTERANCE, false);
+        // 질문을 말하다 끊겼으면 다시 말해 달라고 하지 않고 질문을 처음부터 다시 말합니다 (#185).
+        if (questionCut) reask();
+        else respond(EMPTY_UTTERANCE, false);
         return;
       }
 
@@ -462,7 +486,8 @@ export async function startVoiceSession(
         if (!edited) {
           // 서버로 보내지 않았으므로 면접은 그대로이고, 같은 질문에 다시 답합니다.
           ui.log("system", "면접자가 보내기 전에 답변을 지웠습니다");
-          respond(DISCARDED_UTTERANCE, false, undefined, false);
+          if (questionCut) reask();
+          else respond(DISCARDED_UTTERANCE, false, undefined, false);
           return;
         }
         transcript = edited;
@@ -486,6 +511,8 @@ export async function startVoiceSession(
         done = reply.done;
         turnFailures = 0;
         ui.reply(reply);
+        currentQuestion = reply.utterance;
+        questionCut = false;
         respond(reply.utterance, reply.done);
       } catch (e) {
         // 음성을 끝내서 끊긴 요청이면 inFlight를 남겨 둡니다. shutdown이 화면에 넘깁니다.
