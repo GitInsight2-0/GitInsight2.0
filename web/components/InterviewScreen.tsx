@@ -675,6 +675,8 @@ export default function InterviewScreen({
                 {!reviewOnly && (
                   <p className={styles.note}>면접관이 확인을 위해 일부러 틀린 말을 할 수 있습니다.</p>
                 )}
+                {/* 답변이 외부 AI로 간다는 것을 면접을 시작하기 전에 알립니다 (#175) */}
+                <p className={styles.note}>답변(음성 포함)은 판단과 리포트를 위해 Google Gemini로 보내져 처리됩니다.</p>
               </>
             )}
             <p role="status" aria-live="polite" className={styles.error}>
