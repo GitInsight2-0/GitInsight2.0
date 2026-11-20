@@ -22,7 +22,15 @@ from gitinsight_worker.stage2 import (
     validate_material,
 )
 
-from worker_test_support import REPO_FILES, absent_draft, inverted_draft, material, write_repo
+from worker_test_support import (
+    REPO_FILES,
+    absent_draft,
+    answer,
+    inverted_draft,
+    material,
+    with_reviews,
+    write_repo,
+)
 
 SHA = "d" * 40
 CTX = TopicContext("handle", ContributionLabel.SHARED, ["e" * 40])
@@ -480,7 +488,7 @@ def answer_with_misstatement(_purpose: str, _schema: object, messages: list[Mess
 async def test_topics_get_misstatements_and_names_stay_in_untrusted_block(tmp_path: Path) -> None:
     write_repo(tmp_path, CALLED_FILES)
     stage1 = analyze_tree(tmp_path, SHA)
-    llm = FakeLLM(responder=answer_with_misstatement)
+    llm = FakeLLM(responder=with_reviews(answer_with_misstatement))
 
     topics = await generate_topics(tmp_path, stage1, llm, target=3)
 
@@ -499,7 +507,7 @@ async def test_invalid_misstatement_keeps_topic_without_extra_call(tmp_path: Pat
     write_repo(tmp_path, CALLED_FILES)
     stage1 = analyze_tree(tmp_path, SHA)
     # 모든 주제가 absent_call인데 함수 이름 없는 틀린 말을 돌려줍니다.
-    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    llm = FakeLLM(responder=answer(material()))
 
     topics = await generate_topics(tmp_path, stage1, llm, target=3)
 

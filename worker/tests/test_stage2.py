@@ -27,7 +27,7 @@ from gitinsight_worker.stage2 import (
     validate_material,
 )
 
-from worker_test_support import REPO_FILES, material, write_repo
+from worker_test_support import REPO_FILES, answer, material, with_reviews, write_repo
 
 SHA = "d" * 40
 CTX = TopicContext("handle", ContributionLabel.SHARED, ["e" * 40])
@@ -219,7 +219,7 @@ async def test_reference_facts_are_server_text_without_symbol_names(tmp_path: Pa
     caller = "\n".join(["from app.service import Service", "", "Service().run()", ""])
     write_repo(tmp_path, {**REPO_FILES, "app/main.py": caller})
     stage1 = analyze_tree(tmp_path, SHA)
-    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    llm = FakeLLM(responder=answer(material()))
 
     await generate_topics(tmp_path, stage1, llm, target=3)
 
@@ -244,7 +244,7 @@ async def test_external_definitions_go_only_into_untrusted_block(tmp_path: Path)
     )
     write_repo(tmp_path, {**REPO_FILES, "app/main.py": caller})
     stage1 = analyze_tree(tmp_path, SHA)
-    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    llm = FakeLLM(responder=answer(material()))
 
     await generate_topics(tmp_path, stage1, llm, target=4)
 
@@ -306,7 +306,7 @@ def test_truncation_marker_is_a_comment_in_the_file_language(tmp_path: Path) -> 
 async def test_retry_with_feedback_then_success(tmp_path: Path) -> None:
     write_repo(tmp_path)
     stage1 = analyze_tree(tmp_path, SHA)
-    llm = FakeLLM()
+    llm = FakeLLM(responder=with_reviews())
     llm.push(
         TOPIC_PURPOSE,
         FakeStep(material(base_question="10번째 줄은 왜 있나요?")),
@@ -333,7 +333,7 @@ def no_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_provider_outage_is_retried_on_same_candidate(tmp_path: Path) -> None:
     write_repo(tmp_path)
     stage1 = analyze_tree(tmp_path, SHA)
-    llm = FakeLLM()
+    llm = FakeLLM(responder=with_reviews())
     outage = FakeStep(error=LLMUnavailableError("RateLimitError"))
     llm.push(TOPIC_PURPOSE, outage, outage, FakeStep(material()))
 
@@ -363,7 +363,7 @@ async def test_provider_outage_gives_up_after_retries(tmp_path: Path) -> None:
 async def test_unknown_provider_error_skips_candidate_without_retry(tmp_path: Path) -> None:
     write_repo(tmp_path)
     stage1 = analyze_tree(tmp_path, SHA)
-    llm = FakeLLM()
+    llm = FakeLLM(responder=with_reviews())
     llm.push(
         TOPIC_PURPOSE,
         FakeStep(error=LLMUnavailableError("BadRequestError")),
@@ -423,7 +423,7 @@ async def test_exhausted_daily_quota_stops_analysis_early(tmp_path: Path) -> Non
 async def test_failed_candidates_are_replaced_by_next_ones(tmp_path: Path) -> None:
     write_repo(tmp_path)
     stage1 = analyze_tree(tmp_path, SHA)
-    llm = FakeLLM()
+    llm = FakeLLM(responder=with_reviews())
     bad = FakeStep(material(points=1))
     llm.push(
         TOPIC_PURPOSE,
@@ -462,7 +462,7 @@ async def test_hollow_candidate_is_skipped_before_llm(tmp_path: Path) -> None:
         {"app/seed.py": "\n".join(hollow) + "\n", "app/calc.py": "\n".join(working) + "\n"},
     )
     stage1 = analyze_tree(tmp_path, SHA)
-    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    llm = FakeLLM(responder=answer(material()))
 
     topics = await generate_topics(tmp_path, stage1, llm, target=2)
 
@@ -473,7 +473,7 @@ async def test_hollow_candidate_is_skipped_before_llm(tmp_path: Path) -> None:
 async def test_target_difficulty_cycles_by_candidate_order(tmp_path: Path) -> None:
     write_repo(tmp_path)
     stage1 = analyze_tree(tmp_path, SHA)
-    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    llm = FakeLLM(responder=answer(material()))
 
     await generate_topics(tmp_path, stage1, llm, target=3)
 
@@ -485,7 +485,7 @@ async def test_target_difficulty_cycles_by_candidate_order(tmp_path: Path) -> No
 async def test_stops_at_target_and_reports_progress(tmp_path: Path) -> None:
     write_repo(tmp_path)
     stage1 = analyze_tree(tmp_path, SHA)
-    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    llm = FakeLLM(responder=answer(material()))
     seen: list[float] = []
 
     async def progress(fraction: float) -> None:
@@ -495,14 +495,19 @@ async def test_stops_at_target_and_reports_progress(tmp_path: Path) -> None:
 
     assert len(topics) == 2
     assert len(llm.calls_for(TOPIC_PURPOSE)) == 2
-    assert seen == [1.0]
+    # LLM 호출(출제 2, 검토 2)이 끝날 때마다, 그리고 주제가 하나 끝날 때마다 보고합니다 (#200 리뷰).
+    # 값이 그대로여도 보고해서 오래 걸리는 분석이 오래된 기록으로 닫히지 않게 합니다.
+    assert len(seen) == 4 + 2
+    assert seen == sorted(seen)
+    assert 0.5 in seen
+    assert seen[-1] == 1.0
     assert len({t.topic_id for t in topics}) == 2
 
 
 async def test_contribution_comes_from_server(tmp_path: Path) -> None:
     write_repo(tmp_path)
     stage1 = analyze_tree(tmp_path, SHA)
-    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    llm = FakeLLM(responder=answer(material()))
 
     def contribution_of(symbol_id: str) -> tuple[ContributionLabel, list[str]]:
         return ContributionLabel.VERIFIED, ["f" * 40]

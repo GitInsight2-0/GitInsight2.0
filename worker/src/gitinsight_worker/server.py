@@ -10,18 +10,18 @@ gitinsight_api.main:app_factory로 띄우면 분석 요청 API만 503이고 나�
 from fastapi import FastAPI
 
 from gitinsight_api.analyses.store import AnalysisStore
-from gitinsight_api.brain.factory import build_analysis_llm
 from gitinsight_api.main import create_app
 from gitinsight_api.settings import Settings
 from gitinsight_worker.jobs import InProcessLauncher
+from gitinsight_worker.review import build_stage2_llm
 
 
 def create_server(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
 
     def launcher_for(store: AnalysisStore) -> InProcessLauncher:
-        # 모델은 클라이언트가 설정(LLM_ANALYSIS_MODEL)으로 정합니다.
-        return InProcessLauncher(store, build_analysis_llm(settings))
+        # 모델은 클라이언트가 설정(LLM_ANALYSIS_MODEL)으로 정합니다. 검토 호출(#199)만 더 높은 추론량으로 보냅니다.
+        return InProcessLauncher(store, build_stage2_llm(settings))
 
     return create_app(settings, launcher_factory=launcher_for)
 

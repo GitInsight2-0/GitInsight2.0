@@ -12,6 +12,8 @@
   틀린 말 때문에 주제를 잃거나 호출이 늘지 않게 하기 위해서입니다.
 - 요점마다 강조할 범위(#156)도 같은 요청에서 받습니다. 범위 후보와 줄 번호는 서버가 뽑고(focus.py),
   LLM은 후보 id만 고릅니다. 모르는 id나 null이면 그 요점은 범위 없이 두고, 다시 요청하지 않습니다.
+- 형식 검증을 통과한 재료는 검토 LLM이 코드와 대조하고, 서버가 요점의 근거 문장을 확인합니다(#199, review.py).
+  고칠 곳이 있으면 사유를 붙여 최대 MAX_REVIEW_ROUNDS번 다시 만들게 하고, 그래도 남으면 그 후보를 버립니다.
 """
 
 import asyncio
@@ -43,6 +45,16 @@ from gitinsight_worker.definitions import external_definitions_text, top_level_i
 from gitinsight_worker.focus import FocusCandidate, focus_candidates
 from gitinsight_worker.languages import PYTHON, language_of
 from gitinsight_worker.misstatement import MisstatementPlan, MisstatementPlanner
+from gitinsight_worker.review import (
+    REVIEW_PURPOSE,
+    REVIEW_TIMEOUT_S,
+    ReviewOutcome,
+    ReviewSource,
+    TopicReview,
+    build_review_messages,
+    judge_review,
+    review_feedback,
+)
 from gitinsight_worker.stage1 import Stage1Result
 
 logger = logging.getLogger(__name__)
@@ -60,8 +72,10 @@ MAX_RELATED = 3
 MAX_SPOKEN_CHARS = 120
 # 후보 순서대로 요청하는 목표 난이도입니다. 주제마다 따로 만들기 때문에 서버가 섞어 줍니다.
 DIFFICULTY_CYCLE = (1, 2, 3)
-# 주제 하나의 LLM 호출 제한 시간(초)입니다. 스키마 재시도를 포함합니다.
+# 주제 하나의 LLM 호출 제한 시간(초)입니다. 스키마 재시도를 포함합니다. 검토 호출도 같은 시간을 씁니다.
 TOPIC_TIMEOUT_S = 60.0
+# 검토에서 고칠 곳이 나왔을 때 다시 만들게 하는 최대 횟수입니다 (#199). 형식 검증의 재요청(1번)과 따로 셉니다.
+MAX_REVIEW_ROUNDS = 2
 # 제공사 사용량 제한(분당 요청 수)에 덜 걸리도록 동시에 2개까지만 요청합니다.
 MAX_CONCURRENCY = 2
 # 제공사 장애나 사용량 제한으로 실패하면 이 간격(초)으로 기다렸다 다시 시도합니다.
@@ -290,6 +304,12 @@ def reference_facts(candidate: Candidate, references: Mapping[str, int]) -> str 
     return "\n".join(lines)
 
 
+def _target_json(candidate: Candidate) -> str:
+    symbol = candidate.symbol
+    target = {"symbol_id": symbol.symbol_id, "name": symbol.name, "kind": symbol.kind.value}
+    return json.dumps(target, ensure_ascii=False)
+
+
 def build_topic_messages(
     candidate: Candidate,
     code: str,
@@ -300,8 +320,6 @@ def build_topic_messages(
     plan: MisstatementPlan | None = None,
     focus: list[FocusCandidate] | None = None,
 ) -> list[Message]:
-    symbol = candidate.symbol
-    target = {"symbol_id": symbol.symbol_id, "name": symbol.name, "kind": symbol.kind.value}
     related = [
         {"symbol_id": s.symbol_id, "name": s.name, "kind": s.kind.value}
         for s in candidate.related_choices
@@ -309,7 +327,7 @@ def build_topic_messages(
     parts = [
         f"요청 난이도: {difficulty}",
         "주제로 삼을 코드의 정보입니다.",
-        untrusted_block("target_symbol", json.dumps(target, ensure_ascii=False)),
+        untrusted_block("target_symbol", _target_json(candidate)),
         "주제로 삼을 코드입니다.",
         untrusted_block("target_code", code),
         "관련 심볼 목록입니다. related_symbol_ids와 symbol_id는 이 안에서만 고르세요.",
@@ -591,14 +609,16 @@ def _feedback(problems: list[str]) -> str:
 # ---- 생성 ----
 
 
-async def _complete_with_backoff(
+async def _complete_with_backoff[T: LLMOutput](
     llm: LLMClient,
     messages: list[Message],
     *,
     timeout_s: float,
     model: str | None,
     breaker: _QuotaBreaker,
-) -> LLMResult[TopicMaterial] | None:
+    schema: type[T],
+    purpose: str,
+) -> LLMResult[T] | None:
     """제공사 장애·사용량 제한은 기다렸다 다시 시도합니다. 시간 초과와 거부는 다시 시도하지 않습니다.
 
     키나 모델 설정 오류는 다른 후보로도 해결되지 않으므로 LLMConfigError로 분석을 멈춥니다.
@@ -607,12 +627,12 @@ async def _complete_with_backoff(
     for delay_s in (*UNAVAILABLE_BACKOFF_S, None):
         try:
             result = await llm.complete_structured(
-                TopicMaterial, messages, purpose=TOPIC_PURPOSE, timeout_s=timeout_s, model=model
+                schema, messages, purpose=purpose, timeout_s=timeout_s, model=model
             )
         except LLMUnavailableError as error:
             # LLMClient는 제공사 예외의 종류 이름만 메시지로 넘깁니다.
             kind = str(error)
-            logger.info("topic_llm_failed error=%s retry=%s", kind, delay_s)
+            logger.info("llm_failed purpose=%s error=%s retry=%s", purpose, kind, delay_s)
             if kind in CONFIG_ERRORS:
                 raise LLMConfigError(kind) from None
             if kind not in RETRYABLE_ERRORS:
@@ -624,7 +644,7 @@ async def _complete_with_backoff(
             await asyncio.sleep(delay_s)
             continue
         except LLMError as error:
-            logger.info("topic_llm_failed error=%s", type(error).__name__)
+            logger.info("llm_failed purpose=%s error=%s", purpose, type(error).__name__)
             return None
         breaker.succeeded()
         return result
@@ -642,40 +662,162 @@ async def generate_topic(
     breaker: _QuotaBreaker | None = None,
     plan: MisstatementPlan | None = None,
     focus: tuple[FocusCandidate, ...] = (),
+    review: ReviewSource | None = None,
 ) -> Topic | None:
     """주제 하나를 만듭니다. 검증 실패는 한 번 다시 요청하고, 그래도 실패하거나 LLM 오류면 None입니다.
 
+    review가 있으면 형식 검증을 통과한 재료를 검토하고(#199), 고칠 곳이 있으면 사유를 붙여 최대
+    MAX_REVIEW_ROUNDS번 다시 만들게 합니다. 그래도 고칠 곳이 남거나 검토가 주제를 빼라고 하면 None입니다.
+    검토 LLM이 실패하면 검토 없이 주제를 씁니다. 검토 때문에 분석 전체를 잃지 않게 하기 위해서입니다.
     plan이 있으면 틀린 말도 붙입니다. 틀린 말만 검증에 실패하면 다시 요청하지 않고 틀린 말 없이 주제를 돌려줍니다.
     focus가 있으면 요점마다 고른 강조 범위를 붙입니다. 모르는 id는 범위 없이 둡니다.
     """
-    breaker = breaker or _QuotaBreaker()
-    for attempt in (1, 2):
-        result = await _complete_with_backoff(
-            llm, messages, timeout_s=timeout_s, model=model, breaker=breaker
+    attempt = await _generate_topic(
+        llm,
+        candidate,
+        messages,
+        ctx,
+        timeout_s=timeout_s,
+        model=model,
+        breaker=breaker,
+        plan=plan,
+        focus=focus,
+        review=review,
+    )
+    return attempt.topic
+
+
+StepFn = Callable[[], Awaitable[None]]
+
+
+@dataclass(frozen=True)
+class _TopicAttempt:
+    topic: Topic | None
+    # 검토 때문에 버린 마지막 재료로 만든 주제입니다. 분석의 주제가 하나도 없을 때만 씁니다(#200 리뷰).
+    rejected: Topic | None = None
+    # 검토가 주제 전체를 빼라고 한(사소하거나 고칠 수 없을 만큼 틀린) 주제인지입니다. 대체로 쓸 때 뒤로 미룹니다.
+    dropped: bool = False
+
+
+def _finish(
+    material: TopicMaterial,
+    topic: Topic,
+    focus: tuple[FocusCandidate, ...],
+    plan: MisstatementPlan | None,
+) -> Topic:
+    """검증을 통과한 주제에 강조 범위와 틀린 말을 붙입니다."""
+    topic = attach_focus(material, topic, focus)
+    if plan is None:
+        return topic
+    try:
+        return attach_misstatement(material, topic, plan)
+    except TopicMaterialError as error:
+        logger.info(
+            "misstatement_invalid kind=%s problems=%d", plan.kind.value, len(error.problems)
         )
+        return topic
+
+
+async def _generate_topic(
+    llm: LLMClient,
+    candidate: Candidate,
+    messages: list[Message],
+    ctx: TopicContext,
+    *,
+    timeout_s: float,
+    model: str | None,
+    breaker: _QuotaBreaker | None,
+    plan: MisstatementPlan | None,
+    focus: tuple[FocusCandidate, ...],
+    review: ReviewSource | None,
+    on_step: StepFn | None = None,
+) -> _TopicAttempt:
+    """generate_topic의 본체입니다. on_step은 LLM 호출이 하나 끝날 때마다 부릅니다(진행 상태 갱신)."""
+    breaker = breaker or _QuotaBreaker()
+    format_retries = 1
+    review_rounds = MAX_REVIEW_ROUNDS
+    attempt = 0
+    while True:
+        attempt += 1
+        result = await _complete_with_backoff(
+            llm,
+            messages,
+            timeout_s=timeout_s,
+            model=model,
+            breaker=breaker,
+            schema=TopicMaterial,
+            purpose=TOPIC_PURPOSE,
+        )
+        if on_step is not None:
+            await on_step()
         if result is None:
-            return None
+            return _TopicAttempt(None)
+        answer: Message = {"role": "assistant", "content": result.value.model_dump_json()}
         try:
             topic = validate_material(result.value, candidate, ctx)
         except TopicMaterialError as error:
             logger.info("topic_invalid attempt=%d problems=%d", attempt, len(error.problems))
-            messages = [
-                *messages,
-                {"role": "assistant", "content": result.value.model_dump_json()},
-                {"role": "user", "content": _feedback(error.problems)},
-            ]
+            if format_retries == 0:
+                return _TopicAttempt(None)
+            format_retries -= 1
+            messages = [*messages, answer, {"role": "user", "content": _feedback(error.problems)}]
             continue
-        topic = attach_focus(result.value, topic, focus)
-        if plan is None:
-            return topic
-        try:
-            return attach_misstatement(result.value, topic, plan)
-        except TopicMaterialError as error:
-            logger.info(
-                "misstatement_invalid kind=%s problems=%d", plan.kind.value, len(error.problems)
+        if review is not None:
+            outcome = await _review_material(
+                llm, review, result.value, model=model, breaker=breaker
             )
-            return topic
-    return None
+            if on_step is not None:
+                await on_step()
+            if outcome is not None and not outcome.passed:
+                if outcome.drop or review_rounds == 0:
+                    logger.info("topic_rejected attempt=%d drop=%s", attempt, outcome.drop)
+                    rejected = _finish(result.value, topic, focus, plan)
+                    return _TopicAttempt(None, rejected, dropped=outcome.drop)
+                review_rounds -= 1
+                messages = [
+                    *messages,
+                    answer,
+                    {"role": "user", "content": review_feedback(outcome)},
+                ]
+                continue
+        return _TopicAttempt(_finish(result.value, topic, focus, plan))
+
+
+async def _review_material(
+    llm: LLMClient,
+    source: ReviewSource,
+    material: TopicMaterial,
+    *,
+    model: str | None,
+    breaker: _QuotaBreaker,
+) -> ReviewOutcome | None:
+    """검토 LLM을 부르고 서버 규칙으로 정리합니다. 검토 LLM이 실패하면 None입니다.
+
+    로그에는 개수만 남깁니다. 검토 사유에는 코드 내용이 섞일 수 있습니다.
+    """
+    result = await _complete_with_backoff(
+        llm,
+        build_review_messages(source, material),
+        timeout_s=REVIEW_TIMEOUT_S,
+        model=model,
+        breaker=breaker,
+        schema=TopicReview,
+        purpose=REVIEW_PURPOSE,
+    )
+    if result is None:
+        logger.info("topic_review_failed")
+        return None
+    outcome = judge_review(result.value, source, len(material.expected_points))
+    logger.info(
+        "topic_review passed=%s fix=%d no_quote=%d bad_quote=%d unverifiable=%d drop=%s",
+        outcome.passed,
+        len(outcome.reviewer_problems),
+        outcome.no_quote,
+        outcome.bad_quote,
+        outcome.unverifiable,
+        outcome.drop,
+    )
+    return outcome
 
 
 @dataclass(frozen=True)
@@ -684,6 +826,7 @@ class _Prepared:
     messages: list[Message]
     plan: MisstatementPlan | None = None
     focus: tuple[FocusCandidate, ...] = ()
+    review: ReviewSource | None = None
 
 
 def _prepare(
@@ -715,7 +858,11 @@ def _prepare(
         messages = build_topic_messages(
             candidate, code, readme, difficulty, references, external, plan, focus
         )
-        prepared.append(_Prepared(candidate, messages, plan, tuple(focus)))
+        # 검토는 출제가 받은 것과 같은 자료로 합니다. README는 목적 참고용이라 근거로 쓰지 않습니다.
+        review = ReviewSource(
+            _target_json(candidate), code, external, reference_facts(candidate, references or {})
+        )
+        prepared.append(_Prepared(candidate, messages, plan, tuple(focus), review))
     if hollow:
         logger.info("stage2_hollow_candidates skipped=%d", hollow)
     return prepared
@@ -731,8 +878,18 @@ async def generate_topics(
     timeout_s: float = TOPIC_TIMEOUT_S,
     model: str | None = None,
     progress: ProgressFn | None = None,
+    review: bool = True,
 ) -> list[Topic]:
-    """후보 순서대로 주제를 만듭니다. 실패한 후보는 다음 후보로 채워서 최대 `target`개를 돌려줍니다."""
+    """후보 순서대로 주제를 만듭니다. 실패한 후보는 다음 후보로 채워서 최대 `target`개를 돌려줍니다.
+
+    review가 False면 검토 LLM을 부르지 않습니다(#199 이전과 같음). 평가에서 검토 전후를 비교할 때 씁니다.
+    후보를 다 써도 주제가 하나도 없으면, 검토 때문에 버린 주제를 대신 씁니다(#200 리뷰).
+    후보가 적은 레포에서 검토가 모두 버려 분석 자체가 실패하는 것보다 낫다고 봅니다.
+    고칠 곳이 남아 버린 주제를 먼저, 검토가 빼라고 한 주제를 나중에 씁니다. 각각 안에서는 후보 순서입니다.
+    진행률은 LLM 호출이 하나 끝날 때마다 보고합니다. 값이 그대로여도 보고해서, 오래 걸리는 분석이
+    오래된 기록(STALE_AFTER)으로 닫히지 않게 합니다(#200 리뷰).
+    보고는 한 번에 하나씩, 이전 값보다 작지 않게 합니다. 동시에 끝난 호출의 보고가 뒤바뀌어 화면 진행률이 뒤로 가지 않게 하기 위해서입니다.
+    """
     # 기여 근거를 넘기지 않으면 모두 "확인 불가"로 둡니다.
     contribution = contribution_of or _no_contribution
     candidates = select_candidates(stage1.symbols, lambda s: contribution(s.symbol_id)[0])
@@ -743,13 +900,26 @@ async def generate_topics(
     used_slugs: set[str] = set()
     breaker = _QuotaBreaker()
     topics: list[Topic] = []
+    rejected: list[_TopicAttempt] = []
     next_index = 0
+    made = 0
+    reported = 0.0
+    progress_lock = asyncio.Lock()
 
-    async def one(item: _Prepared) -> Topic | None:
+    async def beat() -> None:
+        nonlocal reported
+        if progress is None:
+            return
+        async with progress_lock:
+            reported = max(reported, min(made / target, 1.0))
+            await progress(reported)
+
+    async def one(item: _Prepared) -> _TopicAttempt:
+        nonlocal made
         label, commits = contribution(item.candidate.symbol.symbol_id)
         ctx = TopicContext(topic_slug(item.candidate.symbol.name, used_slugs), label, commits)
         async with semaphore:
-            return await generate_topic(
+            attempt = await _generate_topic(
                 llm,
                 item.candidate,
                 item.messages,
@@ -759,7 +929,13 @@ async def generate_topics(
                 breaker=breaker,
                 plan=item.plan,
                 focus=item.focus,
+                review=item.review if review else None,
+                on_step=beat,
             )
+        if attempt.topic is not None:
+            made += 1
+            await beat()
+        return attempt
 
     # 부족한 만큼만 다음 후보를 한 번에 요청합니다. 결과 순서는 후보 순서를 따릅니다.
     while len(topics) < target and next_index < len(prepared):
@@ -771,9 +947,14 @@ async def generate_topics(
                 tasks = [group.create_task(one(item)) for item in wave]
         except* Stage2AbortError as errors:
             raise errors.exceptions[0] from None
-        topics += [t for t in (task.result() for task in tasks) if t is not None]
-        if progress is not None:
-            await progress(min(len(topics) / target, 1.0))
+        results = [task.result() for task in tasks]
+        topics += [r.topic for r in results if r.topic is not None]
+        rejected += [r for r in results if r.rejected is not None]
+    if not topics and rejected:
+        # sorted는 안정 정렬이라 같은 종류 안에서는 후보 순서가 유지됩니다.
+        ordered = sorted(rejected, key=lambda r: r.dropped)
+        topics = [r.rejected for r in ordered if r.rejected is not None][:target]
+        logger.info("stage2_review_fallback used=%d", len(topics))
     logger.info(
         "stage2_topics made=%d tried=%d misstatements=%d",
         len(topics),
@@ -794,6 +975,7 @@ async def run_stage2(
     timeout_s: float = TOPIC_TIMEOUT_S,
     model: str | None = None,
     progress: ProgressFn | None = None,
+    review: bool = True,
 ) -> AnalysisResult:
     """1단계 결과와 내려받은 레포(root)로 AnalysisResult를 만듭니다. 주제가 하나도 없으면 Stage2Error입니다."""
     topics = await generate_topics(
@@ -804,6 +986,7 @@ async def run_stage2(
         timeout_s=timeout_s,
         model=model,
         progress=progress,
+        review=review,
     )
     if not topics:
         raise Stage2Error("면접 주제를 하나도 만들지 못했습니다")

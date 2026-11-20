@@ -1,11 +1,63 @@
 """워커 테스트 공용 도구. pytest 설정의 pythonpath로 테스트 모듈에서 import합니다."""
 
+import json
 import os
+import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
+from pydantic import BaseModel
+
+from gitinsight_api.llm import Message
+from gitinsight_api.llm.fake import FakeStep
 from gitinsight_contracts.api import AnalysisState
+from gitinsight_worker.review import MIN_QUOTE_CHARS, REVIEW_PURPOSE, PointEvidence, TopicReview
 from gitinsight_worker.stage2 import FollowupDraft, MisstatementDraft, PointDraft, TopicMaterial
+
+Responder = Callable[[str, type[BaseModel], list[Message]], FakeStep]
+_BLOCK = re.compile(r'<untrusted_data kind="(\w+)">\n(.*?)\n</untrusted_data>', re.DOTALL)
+
+
+def blocks(messages: list[Message]) -> dict[str, str]:
+    """사용자 메시지의 untrusted 블록을 종류별로 꺼냅니다."""
+    text = "\n".join(m["content"] for m in messages if m["role"] == "user")
+    return dict(_BLOCK.findall(text))
+
+
+def passing_review(messages: list[Message]) -> TopicReview:
+    """모든 요점에 주제 코드의 실제 줄을 근거로 대는 검토입니다. 서버 대조를 통과합니다."""
+    found = blocks(messages)
+    quote = next(
+        line.strip()
+        for line in found["target_code"].splitlines()
+        if len(line.strip()) >= MIN_QUOTE_CHARS
+    )
+    points = len(json.loads(found["material"])["expected_points"])
+    return TopicReview(
+        items=[],
+        evidence=[PointEvidence(point=i, quote=quote) for i in range(1, points + 1)],
+        drop=False,
+        drop_reason="",
+    )
+
+
+def with_reviews(responder: Responder | None = None) -> Responder:
+    """검토 호출에는 통과하는 검토를, 나머지는 responder의 응답을 돌려줍니다."""
+
+    def respond(purpose: str, schema: type[BaseModel], messages: list[Message]) -> FakeStep:
+        if purpose == REVIEW_PURPOSE:
+            return FakeStep(passing_review(messages))
+        if responder is None:
+            raise AssertionError(f"FakeLLM: '{purpose}' 대본이 비어 있습니다")
+        return responder(purpose, schema, messages)
+
+    return respond
+
+
+def answer(topic: TopicMaterial) -> Responder:
+    """주제 호출에는 topic을, 검토 호출에는 통과하는 검토를 돌려줍니다."""
+    return with_reviews(lambda *_: FakeStep(topic))
 
 
 class Recorder:
