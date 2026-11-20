@@ -110,8 +110,41 @@ def test_missing_and_wrong_quotes_are_counted_apart() -> None:
     )
 
     # 요점 2는 근거를 냈지만 자료에 없고, 요점 3은 근거를 내지 않았습니다.
-    assert (outcome.no_quote, outcome.bad_quote) == (1, 1)
+    assert (outcome.no_quote, outcome.short_quote, outcome.bad_quote) == (1, 0, 1)
     assert len(outcome.server_problems) == 2
+
+
+def test_short_quotes_are_counted_apart_from_wrong_quotes() -> None:
+    # 짧은 조각은 자료에 있어도 근거가 아닙니다. 글자가 틀린 근거와 나눠 셉니다 (#206).
+    outcome = judge_review(review({1: "token", 2: "return clone(token, depth=1)"}), SOURCE, 3)
+
+    assert (outcome.no_quote, outcome.short_quote, outcome.bad_quote) == (1, 1, 1)
+
+
+def test_quote_joining_separate_lines_passes_when_every_line_is_in_the_code() -> None:
+    # 검토 LLM은 떨어진 줄을 한 인용으로 이어 붙이곤 합니다 (#206). 줄마다 코드에 그대로 있으면 근거로 봅니다.
+    outcome = judge_review(review({1: "def handle(request):\n    return clone(token)"}), SOURCE, 1)
+
+    assert outcome.passed
+
+
+def test_joined_quote_with_a_line_not_in_the_code_is_sent_back() -> None:
+    # 한 줄이라도 코드에 없으면(지어낸 이유) 통째로 근거가 아닙니다.
+    outcome = judge_review(
+        review({1: "token = request.headers.get('auth')\n# 조회 성능 때문에 캐시한다"}), SOURCE, 1
+    )
+
+    assert not outcome.passed
+    assert outcome.bad_quote == 1
+
+
+def test_joined_quote_of_only_short_lines_is_not_evidence() -> None:
+    # 짧은 줄만 이어 붙이면 어디에나 맞으므로, 줄 중 하나는 충분히 길어야 합니다.
+    outcome = judge_review(review({1: "token\nclone"}), SOURCE, 1)
+
+    assert not outcome.passed
+    # 자료에 없는 근거가 아니라 짧은 근거로 셉니다. 운영 로그의 bad_quote에 섞이지 않게 합니다 (#209 리뷰).
+    assert (outcome.short_quote, outcome.bad_quote) == (1, 0)
 
 
 def test_unverifiable_points_are_counted_not_sent_back() -> None:
