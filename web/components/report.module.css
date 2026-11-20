@@ -852,3 +852,56 @@
     gap: 32px;
   }
 }
+
+/* ── 시선 (#177) ── */
+
+.gazeBar {
+  display: flex;
+  height: 14px;
+  overflow: hidden;
+  border-radius: var(--gi-radius-pill);
+  background: var(--gi-line);
+}
+
+.gazeLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  color: var(--gi-muted);
+}
+
+.gazeLegend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gazeLegend b {
+  color: var(--gi-ink);
+}
+
+.gazeSwatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.gazeCamera {
+  background: var(--gi-accent);
+}
+
+.gazeScreen {
+  background: #54a0b2;
+}
+
+.gazeAway {
+  background: #8a8f98;
+}
+
+.gazeNone {
+  background: var(--gi-line-strong);
+}
