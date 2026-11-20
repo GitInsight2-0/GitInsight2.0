@@ -107,6 +107,7 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 이때 `POST /api/sessions`는 분석을 요청한 본인만 쓸 수 있고, 다른 사람의 분석과 없는 분석은 같은 404입니다. 샘플 분석도 `scripts/seed_demo_analysis.py`로 넣은 계정만 씁니다.
 분석 결과를 읽다가 DB에 연결하지 못하면 503을 돌려줍니다.
 분석 요청은 `POST /api/analyses`(본문 `repo_id`), 진행 상태는 `GET /api/analyses/{id}`입니다(`routes/analyses.py`). 상태는 요청한 본인만 보고, 다른 사람의 분석은 404입니다.
+완료된 분석은 (레포, 커밋, 요청자, 분석기 버전)이 같으면 다시 씁니다(`cached=True`). 분석기 버전은 `gitinsight_worker/version.py`의 `ANALYZER_VERSION`이고(#171), **분석 결과를 바꾸는 워커 변경(1·2단계 규칙, 프롬프트, 결과에 채우는 계약 필드)을 머지할 때 하나 올립니다.** 그래야 배포 뒤 같은 커밋도 새로 분석합니다.
 서버는 로그인 쿠키의 GitHub 사용자 토큰으로 레포 이름과 기본 브랜치의 최신 커밋을 확인하고(`github_repos.py`), 같은 토큰으로 레포를 내려받습니다. 토큰은 분석 작업의 메모리에만 있고, git에는 환경 변수로만 넘깁니다.
 분석 실행기는 워커 패키지에 있어서 `gitinsight_worker.server:app_factory`로 띄울 때만 붙습니다. `DATABASE_URL`이 없거나 실험 모드이거나 `gitinsight_api.main:app_factory`로 띄우면 분석 요청 API는 503입니다.
 같은 조건에서 면접 세션과 턴 기록도 메모리 대신 `interview_sessions`, `interview_turns` 테이블에 둡니다(`brain/postgres.py`의 `PostgresSessionRepository`). 서버를 다시 시작해도 면접이 이어집니다.

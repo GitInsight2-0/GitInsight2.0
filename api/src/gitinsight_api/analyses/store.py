@@ -1,7 +1,8 @@
 """분석 기록 저장소 인터페이스와 메모리 구현.
 
 - 기록 하나는 분석 요청 하나입니다. 상태(AnalysisState)와, 끝나면 결과(AnalysisResult JSON)를 가집니다.
-- 같은 키(레포, 커밋, 요청자)로 동시에 요청해도 기록은 하나만 만듭니다.
+- 같은 키(레포, 커밋, 요청자, 분석기 버전)로 동시에 요청해도 기록은 하나만 만듭니다.
+  분석기 버전(#171)은 분석 결과를 바꾸는 워커 변경마다 올립니다. 버전이 다르면 같은 커밋도 다시 분석합니다.
   메모리 구현은 asyncio.Lock으로 이를 보장합니다.
   Postgres 구현(postgres.py)은 failed가 아닌 기록에 거는 키 부분 UNIQUE 인덱스와
   INSERT … ON CONFLICT DO NOTHING으로 같은 보장을 합니다.
@@ -34,6 +35,9 @@ UNKNOWN_ERROR = "Error"
 # 오래되어 교체된 기록의 오류 이름입니다.
 STALE_ERROR = "StaleAnalysis"
 
+# 분석기 버전이 생기기 전(#171)의 기록과, 버전을 알려 주지 않는 실행기의 버전입니다.
+UNVERSIONED = "0"
+
 IN_PROGRESS = frozenset({AnalysisStatus.QUEUED, AnalysisStatus.STAGE1, AnalysisStatus.STAGE2})
 
 
@@ -43,11 +47,15 @@ def utc_now() -> datetime:
 
 @dataclass(frozen=True)
 class AnalysisKey:
-    """캐시 키입니다. 기여 라벨이 요청자마다 달라서 요청자까지 넣습니다(#12 코멘트)."""
+    """캐시 키입니다. 기여 라벨이 요청자마다 달라서 요청자까지 넣습니다(#12 코멘트).
+
+    분석기 버전(#171)이 다르면 같은 레포·커밋·요청자라도 다른 키입니다. 워커가 바뀐 뒤 예전 결과를 다시 쓰지 않습니다.
+    """
 
     repo_full_name: str
     commit_sha: str
     user_id: str
+    analyzer_version: str = UNVERSIONED
 
 
 @dataclass(frozen=True)

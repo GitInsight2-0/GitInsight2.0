@@ -74,6 +74,8 @@ class FakeGitHub:
 
 
 class FakeLauncher:
+    analyzer_version = "1"
+
     def __init__(self, error: Exception | None = None) -> None:
         self.launched: list[tuple[AnalysisRecord, LaunchContext]] = []
         self.error = error

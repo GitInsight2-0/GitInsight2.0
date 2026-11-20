@@ -20,6 +20,7 @@ from gitinsight_api.analyses.store import (
     IN_PROGRESS,
     STALE_AFTER,
     STALE_ERROR,
+    UNVERSIONED,
     AnalysisKey,
     AnalysisRecord,
     AnalysisRecordNotFoundError,
@@ -41,6 +42,7 @@ _RECORD_COLUMNS = (
     analyses.c.repo_full_name,
     analyses.c.commit_sha,
     analyses.c.user_id,
+    analyses.c.analyzer_version,
     analyses.c.status,
     analyses.c.progress,
     analyses.c.error,
@@ -55,6 +57,7 @@ def _record(row: RowMapping) -> AnalysisRecord:
             repo_full_name=row["repo_full_name"],
             commit_sha=row["commit_sha"],
             user_id=row["user_id"],
+            analyzer_version=row["analyzer_version"],
         ),
         state=AnalysisState(
             status=AnalysisStatus(row["status"]),
@@ -71,6 +74,7 @@ def _key_matches(key: AnalysisKey) -> ColumnElement[bool]:
         analyses.c.repo_full_name == key.repo_full_name,
         analyses.c.commit_sha == key.commit_sha,
         analyses.c.user_id == key.user_id,
+        analyses.c.analyzer_version == key.analyzer_version,
     )
 
 
@@ -114,6 +118,7 @@ class PostgresAnalysisStore:
                             repo_full_name=key.repo_full_name,
                             commit_sha=key.commit_sha,
                             user_id=key.user_id,
+                            analyzer_version=key.analyzer_version,
                             status=AnalysisStatus.QUEUED.value,
                             progress=0.0,
                             updated_at=now,
@@ -123,6 +128,7 @@ class PostgresAnalysisStore:
                                 analyses.c.repo_full_name,
                                 analyses.c.commit_sha,
                                 analyses.c.user_id,
+                                analyses.c.analyzer_version,
                             ],
                             index_where=analyses.c.status != _FAILED,
                         )
@@ -228,14 +234,18 @@ class PostgresAnalysisStore:
             )
             return closed.rowcount
 
-    async def save_snapshot(self, result: AnalysisResult, user_id: str) -> AnalysisRecord:
+    async def save_snapshot(
+        self, result: AnalysisResult, user_id: str, analyzer_version: str = UNVERSIONED
+    ) -> AnalysisRecord:
         """미리 만든 분석 결과를 그 analysis_id 그대로 완료 기록으로 넣습니다. 데모 스냅샷용입니다.
+
+        analyzer_version은 지금 서버의 분석기 버전으로 넣어야 같은 레포를 다시 요청할 때 스냅샷을 재사용합니다 (#171).
 
         여러 번 실행해도 같은 기록 하나만 남습니다.
         같은 키의 다른 진행 중·완료 기록은 failed(SNAPSHOT_REPLACED_ERROR)로 닫아,
         이 키를 다시 요청하면 스냅샷을 재사용하게 합니다.
         """
-        key = AnalysisKey(result.repo_full_name, result.commit_sha, user_id)
+        key = AnalysisKey(result.repo_full_name, result.commit_sha, user_id, analyzer_version)
         async with self._engine.begin() as conn:
             now = self._now()
             await conn.execute(
@@ -251,6 +261,7 @@ class PostgresAnalysisStore:
                 "repo_full_name": key.repo_full_name,
                 "commit_sha": key.commit_sha,
                 "user_id": key.user_id,
+                "analyzer_version": key.analyzer_version,
                 "status": AnalysisStatus.DONE.value,
                 "progress": 1.0,
                 "error": None,

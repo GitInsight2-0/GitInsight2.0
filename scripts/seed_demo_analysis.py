@@ -26,12 +26,16 @@ from gitinsight_api.event_loop import server_loop_factory
 from gitinsight_api.settings import Settings
 from gitinsight_contracts.analysis import AnalysisResult
 from gitinsight_contracts.fixtures import load_analysis
+from gitinsight_worker.version import ANALYZER_VERSION
 
 
 async def seed(database_url: str, result: AnalysisResult, user_id: str) -> None:
     engine = create_engine(database_url)
     try:
-        record = await PostgresAnalysisStore(engine).save_snapshot(result, user_id)
+        # 지금 서버의 분석기 버전으로 넣어야 같은 레포를 다시 요청할 때 이 스냅샷을 재사용합니다 (#171).
+        record = await PostgresAnalysisStore(engine).save_snapshot(
+            result, user_id, ANALYZER_VERSION
+        )
     finally:
         await engine.dispose()
     print(f"넣음: analysis_id={record.analysis_id}")
