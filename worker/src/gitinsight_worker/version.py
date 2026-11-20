@@ -15,4 +15,5 @@
 """
 
 # 2: Java 지원 (#182)
-ANALYZER_VERSION = "2"
+# 3: Java 패키지 시작 판정과 final 지역 변수 판정 (#194)
+ANALYZER_VERSION = "3"

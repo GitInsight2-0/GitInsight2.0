@@ -89,9 +89,30 @@ def shared_dirs(paths: Iterable[str]) -> tuple[str, ...]:
 # Java 패키지 이름의 앞부분(도메인과 프로젝트 이름) 단계 수입니다: com/example/demo, org/springframework/samples
 _JAVA_PACKAGE_PREFIX = 3
 # Java 패키지 이름이 흔히 시작하는 최상위 도메인입니다. `java/` 폴더가 없을 때 패키지 시작을 찾는 데 씁니다.
-_JAVA_TOP_DOMAINS = frozenset(
-    {"com", "org", "net", "io", "kr", "dev", "me", "edu", "co", "jp", "de", "uk", "app"}
-)
+_JAVA_TOP_DOMAINS = frozenset({"com", "org", "net", "io", "kr", "edu", "jp", "de", "uk"})
+# 도메인이면서 폴더 이름으로도 흔한 것입니다(`app/src/com/...`의 app). 확실한 도메인이 없을 때만 봅니다 (#194).
+_JAVA_AMBIGUOUS_DOMAINS = frozenset({"dev", "me", "co", "app"})
+
+
+def _java_package_start(dirs: list[str]) -> int:
+    """Java 파일 경로의 폴더 중 패키지가 시작하는 위치입니다. 모르면 -1입니다.
+
+    `java/` 폴더가 있으면 그 다음부터입니다(Maven·Gradle 구조).
+    없으면 마지막 `src/` 바로 다음 폴더가 도메인일 때 거기부터입니다(IntelliJ 기본 구조).
+    `src/`도 없으면 확실한 도메인 폴더를 먼저, 그다음 흔한 폴더 이름과 겹치는 도메인 폴더를 찾습니다 (#194).
+    """
+    lowered = [d.lower() for d in dirs]
+    if "java" in lowered:
+        return lowered.index("java") + 1
+    if "src" in lowered:
+        start = len(lowered) - lowered[::-1].index("src")
+        domains = _JAVA_TOP_DOMAINS | _JAVA_AMBIGUOUS_DOMAINS
+        return start if start < len(lowered) and lowered[start] in domains else -1
+    for domains in (_JAVA_TOP_DOMAINS, _JAVA_AMBIGUOUS_DOMAINS):
+        start = next((i for i, d in enumerate(lowered) if d in domains), -1)
+        if start >= 0:
+            return start
+    return -1
 
 
 def _without_java_package_prefix(parts: list[str]) -> list[str]:
@@ -103,14 +124,9 @@ def _without_java_package_prefix(parts: list[str]) -> list[str]:
     """
     if not parts or not parts[-1].lower().endswith(".java"):
         return parts
-    dirs = parts[:-1]
-    if "java" in dirs:
-        start = dirs.index("java") + 1
-    else:
-        # `java/` 폴더가 없는 IntelliJ 기본 구조(`src/com/example/shop/`)는 최상위 도메인 폴더부터가 패키지입니다 (#186 리뷰).
-        start = next((i for i, d in enumerate(dirs) if d.lower() in _JAVA_TOP_DOMAINS), -1)
-        if start < 0:
-            return parts
+    start = _java_package_start(parts[:-1])
+    if start < 0:
+        return parts
     package_end = min(start + _JAVA_PACKAGE_PREFIX, len(parts) - 1)
     return parts[:start] + parts[package_end:]
 
@@ -229,15 +245,18 @@ _JAVA_METHOD_HEADER = re.compile(
 # 필드 선언입니다. 계산이 있는 지역 변수(`int total = price * qty;`)와 `return x;`는 동작이라 빼지 않습니다 (#186 리뷰).
 # - 접근 제어자 등이 붙은 선언: `private final UserRepository repo;`, `private int count = 0;`
 # - 붙지 않은 선언은 값이 없거나 리터럴·null·빈 생성자일 때만: `String name;`, `int count = 0;`, `List<X> xs = new ArrayList<>();`
+# - `final`만 붙은 선언은 지역 변수일 수 있어 붙지 않은 선언과 같이 봅니다: `final int total = a * b;`는 동작입니다 (#194).
 _JAVA_STATEMENT = r"(?:return|throw|yield|break|continue|assert)\b"
 _JAVA_TYPE_AND_NAME = r"[\w.<>\[\]?, ]+?\s+\w+"
 _JAVA_SIMPLE_VALUE = (
     r"(?:-?\d[\w.]*|\"[^\"]*\"|'[^']*'|true|false|null|new\s+[\w.<>\[\], ]*\(\s*\)|\{\s*\})"
 )
+_JAVA_FIELD_MODIFIER = r"(?:private|protected|public|static|transient|volatile)\s+"
 _JAVA_FIELD = re.compile(
     rf"^(?!{_JAVA_STATEMENT})(?:"
-    rf"(?:(?:private|protected|public|static|final|transient|volatile)\s+)+{_JAVA_TYPE_AND_NAME}(?:\s*=\s*[^;]*)?"
-    rf"|{_JAVA_TYPE_AND_NAME}(?:\s*=\s*{_JAVA_SIMPLE_VALUE})?"
+    rf"(?:final\s+)*{_JAVA_FIELD_MODIFIER}(?:(?:final\s+)|{_JAVA_FIELD_MODIFIER})*"
+    rf"{_JAVA_TYPE_AND_NAME}(?:\s*=\s*[^;]*)?"
+    rf"|(?:final\s+)?{_JAVA_TYPE_AND_NAME}(?:\s*=\s*{_JAVA_SIMPLE_VALUE})?"
     r");$"
 )
 # getter와 setter의 본문입니다: `return name;`, `return this.name;`, `this.name = name;`

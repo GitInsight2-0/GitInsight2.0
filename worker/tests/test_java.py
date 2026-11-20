@@ -398,6 +398,41 @@ def test_package_prefix_without_java_folder() -> None:
     assert is_inactive_path("src/com/acme/shop/legacy/Old.java", shared_dirs(paths))
 
 
+# ---- #194 ----
+
+
+def test_common_folder_name_is_not_package_start() -> None:
+    # app은 도메인이기도 하지만 여기서는 모듈 폴더입니다. src/ 다음의 com부터가 패키지입니다.
+    assert is_inactive_path("app/src/com/example/shop/legacy/Foo.java")
+    assert not is_inactive_path("app/src/com/example/shop/OrderService.java")
+    # src/ 다음이 도메인이 아니면 패키지를 모르므로 경로를 그대로 봅니다.
+    assert is_inactive_path("src/example/OrderService.java")
+    # src/가 없으면 확실한 도메인(com)을 흔한 이름(app)보다 먼저 패키지 시작으로 봅니다.
+    assert not is_inactive_path("app/com/example/shop/OrderService.java")
+    assert is_inactive_path("app/com/example/shop/legacy/Foo.java")
+    # 확실한 도메인이 없을 때만 dev, app 같은 이름부터를 패키지로 봅니다.
+    assert not is_inactive_path("dev/example/shop/OrderService.java")
+
+
+def test_final_local_with_computation_counts_as_logic() -> None:
+    fields = [
+        "private final UserRepository repo;",
+        "static final int MAX = compute();",
+        "final static Logger LOG = LoggerFactory.getLogger(X.class);",
+        'private static final String NAME = prefix + "x";',
+        "final int retries = 3;",
+        "final String name;",
+    ]
+    logic = [
+        "final int total = price * qty;",
+        "final List<Order> orders = repo.findAll();",
+        "final var user = users.get(id);",
+    ]
+
+    assert java_logic_line_count("\n".join(fields)) == 0
+    assert java_logic_line_count("\n".join(logic)) == len(logic)
+
+
 def test_static_star_import_matches_the_class(tmp_path: Path) -> None:
     base = "src/main/java/com/example/demo"
     caller = _java_class(
