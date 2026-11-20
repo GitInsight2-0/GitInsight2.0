@@ -268,3 +268,26 @@ async def test_points_get_focus_without_extra_calls(tmp_path) -> None:
     ]
     [call] = llm.calls_for(TOPIC_PURPOSE)
     assert "focus_candidates" in "\n".join(m["content"] for m in call.messages)
+
+
+async def test_focus_failure_keeps_topic_and_analysis(tmp_path, monkeypatch, caplog) -> None:
+    stage1, _ = _long_repo(tmp_path)
+
+    def broken(*_args: object) -> list[object]:
+        raise RuntimeError("tree-sitter가 예상 못 한 노드를 만남")
+
+    monkeypatch.setattr(stage2, "focus_candidates", broken)
+    llm = FakeLLM(responder=lambda *_: FakeStep(material(focus_ids=["b1", "b2", "b3"])))
+
+    with caplog.at_level("WARNING"):
+        [topic] = await generate_topics(tmp_path, stage1, llm, target=1)
+
+    # 후보가 없으니 고른 id는 모두 버려지고, 주제는 범위 없이 만들어집니다.
+    assert all(p.focus is None for p in topic.expected_points)
+    assert "focus_failed error=RuntimeError" in caplog.text
+    # 예외 메시지는 로그에 남기지 않습니다.
+    assert "tree-sitter" not in caplog.text
+    [call] = llm.calls_for(TOPIC_PURPOSE)
+    assert "focus_candidates" not in "\n".join(
+        m["content"] for m in call.messages if m["role"] == "user"
+    )
