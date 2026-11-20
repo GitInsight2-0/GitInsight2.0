@@ -6,7 +6,7 @@ from typing import Annotated, Self
 from pydantic import Field, model_validator
 
 from gitinsight_contracts.base import Contract, count_sentences
-from gitinsight_contracts.common import CommitSha, LineSpan, SymbolRef
+from gitinsight_contracts.common import CommitSha, LineSpan, SymbolId, SymbolRef
 
 Id = Annotated[str, Field(min_length=1, max_length=100)]
 # 면접관이 그대로 읽는 문장입니다. 한 문장으로 제한해야 발화문 2문장 제한을 지킬 수 있습니다.
@@ -57,7 +57,8 @@ class PreparedFollowup(Contract):
     """LLM 없이도 쓸 수 있게 미리 만든 꼬리질문입니다."""
 
     question: OneSentence
-    symbol_id: Id | None = None
+    # 이 꼬리질문이 가리키는 관련 심볼입니다. 심볼 id와 같은 길이까지 받습니다 (#183).
+    symbol_id: SymbolId | None = None
 
     @model_validator(mode="after")
     def _check(self) -> Self:
