@@ -148,12 +148,20 @@ export async function endSession(
   body: SessionEnd = {},
 ): Promise<SessionEnded> {
   // 시선 요약(#177)과 답변별 시선(#180)은 면접자가 시선 분석을 켰을 때만 담습니다. 서버는 처음 만든 리포트에만 씁니다.
+  let sent = body;
   for (let attempt = 1; ; attempt++) {
     const s = linkedSignal(outer, END_TIMEOUT_MS);
     try {
-      return await postJson<SessionEnded>(`/api/sessions/${sessionId}/end`, body, s.signal);
+      return await postJson<SessionEnded>(`/api/sessions/${sessionId}/end`, sent, s.signal);
     } catch (e) {
       if (outer?.aborted) throw e;
+      // 답변별 시선(#180)을 모르는 서버는 422로 거부합니다. 웹이 서버보다 먼저 배포된 동안입니다.
+      // 리포트를 잃지 않게 답변별 시선만 빼고 바로 다시 보냅니다. 전체 요약은 #179부터 받습니다.
+      if (e instanceof ApiError && e.status === 422 && sent.gaze_answers?.length) {
+        sent = sent.gaze ? { gaze: sent.gaze } : {};
+        attempt--;
+        continue;
+      }
       const retryable = !(e instanceof ApiError) || (e.status >= 500 && !isReportUnavailable(e));
       if (attempt >= END_ATTEMPTS || !retryable) throw e;
     } finally {
