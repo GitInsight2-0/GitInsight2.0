@@ -48,12 +48,19 @@ REVIEW_SYSTEM_PROMPT = f"""당신은 한국어 기술 모의면접의 질문 재
 3. 가치: 동작의 이유, 설계 선택, 실패·예외 처리를 묻는가. 이름이나 문법처럼 사소한 것만 묻지 않는가.
 4. 답 노출: base_question, probe_question, hint, question_intent가 요점의 답을 그대로 말하지 않는가.
 
+재료의 구조:
+- expected_points는 base_question 하나의 답이 아니라, 이 코드에 대해 좋은 답변이 다룰 내용입니다. 지원자가 빠뜨린 요점은 면접관이 그 요점의 probe_question으로 따로 묻습니다.
+  그래서 요점이 base_question과 직접 이어지지 않는다는 이유만으로 fix하지 않습니다. 요점 자체가 사실인지, 물을 가치가 있는지를 봅니다.
+- prepared_followups도 base_question과 다른 부분을 물을 수 있습니다.
+
 출력 규칙:
 - items에는 문제가 있는 항목만 넣습니다. field는 title, summary, base_question, question_intent, hint, expected_points[번호], prepared_followups[번호] 중 하나이고 번호는 1부터입니다.
 - verdict는 fix(고쳐야 함) 또는 unverifiable(확인할 수 없음)입니다. 통과한 항목은 넣지 않습니다.
 - unverifiable은 다른 함수의 본문처럼 받은 자료에 없는 코드를 봐야 맞는지 알 수 있을 때만 씁니다. 받은 자료로 근거를 찾을 수 없는 이유나 의도는 fix입니다.
 - reason은 무엇이 왜 문제인지 한두 문장으로 씁니다. 코드를 길게 옮기지 않습니다.
 - evidence에는 요점마다 그 요점을 뒷받침하는 문장을 target_code, external_definitions, 서버가 알려 준 사실 중 한 곳에서 한 줄 이상 글자 그대로 옮깁니다. 공백은 달라도 되지만 글자를 바꾸거나 줄이지 않습니다.
+- 근거 문장은 요점과 같은 말을 해야 합니다. 요점마다 근거 문장을 고른 뒤, 그 문장이 요점이 말하는 동작과 같은지 다시 읽어 확인합니다.
+  관련된 줄이지만 요점과 반대이거나 요점이 덧붙인 이유·의도까지는 보여 주지 않으면, 그 요점은 evidence에 넣지 않고 items에 fix로 넣습니다.
 - 뒷받침하는 문장이 없는 요점은 evidence에 넣지 않고 items에 fix로 넣습니다.
 - 주제 전체가 사소하거나 고칠 수 없을 만큼 틀렸으면 drop을 true로 하고 drop_reason에 이유를 씁니다. 아니면 drop은 false, drop_reason은 빈 문자열입니다.
 
