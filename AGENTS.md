@@ -120,9 +120,11 @@ pnpm --filter @gitinsight/web typecheck                            # 웹 타입 
 결과는 `Report.misstatement`에만 적고 역량 점수와 코드 지도에는 쓰지 않습니다. LLM 없이 진행하는 면접과 다시 보기 면접에서는 하지 않고, `BRAIN_MISSTATEMENT=false`로 끌 수 있습니다.
 면접자 시선 요약(#177)은 `POST /api/sessions/{id}/end` 본문(`SessionEnd.gaze`, 계약 `GazeSummary`)으로 받습니다. 본문 없이 보내도 됩니다.
 서버는 범위만 검사해 `Report.gaze`에 그대로 담고, 역량 점수, 코드 지도, 성장 비교에는 쓰지 않습니다. 리포트를 처음 만들 때의 값만 남습니다.
+같은 본문의 `SessionEnd.gaze_answers`(계약 `GazeAnswer`, #180)는 답변별 화면 밖 비율입니다. 질문이 화면에 나온 뒤부터 그 답변을 보낼 때까지 잰 값이고, 10초 미만으로 잰 답변은 빠집니다.
+서버는 `gaze`가 있을 때만 리포트 답변 기록에 있는 턴 가운데 비율이 가장 큰 답변을 골라 `Report.gaze_peak`에 담습니다(`report/service.py`의 `gaze_peak`). 답변별 값 자체는 저장하지 않고, 턴 요청(`TurnRequest`)과 턴 기록에는 시선이 들어가지 않습니다.
 웹에서는 면접 시작 화면에서 면접자가 켰을 때만 시선을 잽니다(기본 꺼짐).
 `web/lib/gaze/`가 MediaPipe FaceLandmarker로 웹캠 영상을 브라우저 안에서만 처리하고, 3초 동안 카메라를 보게 해 기준을 잡은 뒤 장면마다 카메라 / 화면 / 화면 밖 / 얼굴 없음으로 나눕니다.
-영상과 랜드마크는 서버로 보내거나 저장하지 않고, 면접을 끝낼 때 요약 숫자만 보냅니다.
+영상과 랜드마크는 서버로 보내거나 저장하지 않고, 면접을 끝낼 때 요약 숫자(전체 요약과 답변별 화면 밖 비율)만 보냅니다. 면접 도중 시선 분석을 끄면 그때까지 잰 값을 브라우저에서 버리고 아무것도 보내지 않습니다.
 시선 분석 프로그램(wasm)과 모델은 우리 웹이 내려 줍니다. wasm은 `dev`·`build` 전에 패키지에서 `web/public/mediapipe/wasm`으로 복사하고(`web/scripts/copy-mediapipe-wasm.mjs`, 커밋하지 않음), 모델과 라이선스는 `web/public/mediapipe`에 있습니다.
 다만 MediaPipe가 60초마다 사용 통계(작업 종류, 실행 모드, OS 종류, 라이브러리 버전, 초기화·처리 시간 같은 숫자)를 `odml.pa.googleapis.com`으로 보냅니다. 영상, 랜드마크, 시선 결과는 들어 있지 않고, 끄는 공개 옵션은 없습니다. 보내기에 실패해도 측정은 멈추지 않습니다.
 면접 화면 주소에 `?gaze_debug=1`을 붙이면 상단 칩에 지금 장면의 판정이 보입니다. 실제 웹캠으로 기준값(`web/lib/gaze/classify.ts`)을 맞출 때 씁니다.

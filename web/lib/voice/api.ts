@@ -1,7 +1,6 @@
 /** FastAPI 면접 API 호출. 경로와 형식은 contracts의 계약을 따릅니다. */
 import type {
   BrainReply,
-  GazeSummary,
   MetricEvent,
   SessionCreate,
   SessionCreated,
@@ -146,10 +145,9 @@ const END_RETRY_DELAY_MS = 2000;
 export async function endSession(
   sessionId: string,
   outer?: AbortSignal,
-  gaze: GazeSummary | null = null,
+  body: SessionEnd = {},
 ): Promise<SessionEnded> {
-  // 시선 요약(#177)은 면접자가 시선 분석을 켰을 때만 보냅니다. 서버는 처음 만든 리포트에만 담습니다.
-  const body: SessionEnd = gaze ? { gaze } : {};
+  // 시선 요약(#177)과 답변별 시선(#180)은 면접자가 시선 분석을 켰을 때만 담습니다. 서버는 처음 만든 리포트에만 씁니다.
   for (let attempt = 1; ; attempt++) {
     const s = linkedSignal(outer, END_TIMEOUT_MS);
     try {

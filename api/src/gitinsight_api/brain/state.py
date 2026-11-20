@@ -9,7 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from gitinsight_contracts.common import LineSpan, SymbolRef
-from gitinsight_contracts.interview import Action, BrainReply, GazeSummary, InterviewMode
+from gitinsight_contracts.interview import Action, BrainReply, InterviewMode
 from gitinsight_contracts.llm import Judgment, MisstatementJudgment
 from gitinsight_contracts.report import FallbackReason
 
@@ -95,8 +95,6 @@ class TurnRecord(BaseModel):
     # 클라이언트가 보낸 시각(epoch ms)입니다. 지연 측정에만 씁니다.
     client_speech_started_at: int | None = None
     client_speech_ended_at: int | None = None
-    # 이 답변 동안의 시선 요약입니다 (#180). 리포트에서 가장 많이 벗어난 답변을 짚는 데만 씁니다.
-    gaze: GazeSummary | None = None
     # 서버가 턴을 받은 뒤 응답할 때까지 걸린 시간입니다.
     server_ms: float | None = None
     judge_ms: float | None = None

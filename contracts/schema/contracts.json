@@ -604,6 +604,27 @@
       "title": "Followup",
       "type": "object"
     },
+    "GazeAnswer": {
+      "additionalProperties": false,
+      "description": "답변 하나 동안 화면 밖을 본 비율입니다 (#180).\n\n질문이 화면에 나온 뒤부터 그 답변을 보낼 때까지 잰 값입니다.\n브라우저가 면접 내내 들고 있다가 끝낼 때 한 번에 보내므로, 도중에 시선 분석을 끄면 서버로 오지 않습니다.",
+      "properties": {
+        "away_ratio": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "turn_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "away_ratio"
+      ],
+      "title": "GazeAnswer",
+      "type": "object"
+    },
     "GazePeak": {
       "additionalProperties": false,
       "description": "시선이 화면 밖으로 가장 많이 벗어난 답변입니다 (#180). 참고 정보이고 점수에는 쓰지 않습니다.",
@@ -1404,6 +1425,13 @@
             }
           ],
           "default": null
+        },
+        "gaze_answers": {
+          "items": {
+            "$ref": "#/$defs/GazeAnswer"
+          },
+          "maxItems": 200,
+          "type": "array"
         }
       },
       "title": "SessionEnd",
@@ -1681,17 +1709,6 @@
       "additionalProperties": false,
       "description": "POST /api/sessions/{id}/turns 요청입니다.\n\nturn_id는 클라이언트가 만든 UUID이고, 같은 값이 다시 오면 처음 결과를 그대로 돌려줍니다.\n시각은 클라이언트 epoch 밀리초이며 지연 측정에만 씁니다.",
       "properties": {
-        "gaze": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/GazeSummary"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "source": {
           "$ref": "#/$defs/TurnSource"
         },

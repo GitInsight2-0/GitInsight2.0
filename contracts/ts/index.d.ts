@@ -387,6 +387,19 @@ export interface Followup {
   symbol_id: string | null;
 }
 /**
+ * 답변 하나 동안 화면 밖을 본 비율입니다 (#180).
+ *
+ * 질문이 화면에 나온 뒤부터 그 답변을 보낼 때까지 잰 값입니다.
+ * 브라우저가 면접 내내 들고 있다가 끝낼 때 한 번에 보내므로, 도중에 시선 분석을 끄면 서버로 오지 않습니다.
+ *
+ * This interface was referenced by `GitInsightContracts`'s JSON-Schema
+ * via the `definition` "GazeAnswer".
+ */
+export interface GazeAnswer {
+  away_ratio: number;
+  turn_id: string;
+}
+/**
  * 시선이 화면 밖으로 가장 많이 벗어난 답변입니다 (#180). 참고 정보이고 점수에는 쓰지 않습니다.
  *
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema
@@ -605,6 +618,10 @@ export interface SessionCreated {
  */
 export interface SessionEnd {
   gaze?: GazeSummary | null;
+  /**
+   * @maxItems 200
+   */
+  gaze_answers?: GazeAnswer[];
 }
 /**
  * This interface was referenced by `GitInsightContracts`'s JSON-Schema
@@ -623,7 +640,6 @@ export interface SessionEnded {
  * via the `definition` "TurnRequest".
  */
 export interface TurnRequest {
-  gaze?: GazeSummary | null;
   source: TurnSource;
   speech_ended_at?: number | null;
   speech_started_at?: number | null;

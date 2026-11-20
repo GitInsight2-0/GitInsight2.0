@@ -295,7 +295,6 @@ class InterviewBrain:
                 received_at=now,
                 client_speech_started_at=request.speech_started_at,
                 client_speech_ended_at=request.speech_ended_at,
-                gaze=request.gaze,
                 server_ms=server_ms,
                 judge_ms=judge_ms,
             )

@@ -1,6 +1,6 @@
 "use client";
 
-import type { Action, BrainReply, GazeSummary, LineSpan, SymbolRef, TurnRequest } from "@gitinsight/contracts";
+import type { Action, BrainReply, LineSpan, SessionEnd, SymbolRef, TurnRequest } from "@gitinsight/contracts";
 import { useEffect, useRef, useState } from "react";
 import CodeViewer from "@/components/CodeViewer";
 import { interviewHref } from "@/lib/analyses";
@@ -184,7 +184,7 @@ export default function InterviewScreen({
   const thinkingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** 실패한 턴. 같은 내용을 다시 보낼 때만 같은 turn_id를 씁니다 (고친 답변이 중복으로 버려지지 않게). */
-  const pendingTurn = useRef<{ id: string; transcript: string; gaze: GazeSummary | null } | null>(null);
+  const pendingTurn = useRef<{ id: string; transcript: string } | null>(null);
   /** state인 busy는 연달아 누른 Enter에서 아직 false로 보일 수 있어, 보내는 중인지는 ref로 막습니다. */
   const sending = useRef(false);
   // 음성 진행기 콜백은 화면 state의 옛 값을 볼 수 있어, 최신 세션과 발화는 ref로도 들고 있습니다.
@@ -204,8 +204,8 @@ export default function InterviewScreen({
   const [gazeMode, setGazeMode] = useState<Mode>("voice");
   const [gazeError, setGazeError] = useState<string | null>(null);
   const gaze = useRef<GazeTracker | null>(null);
-  /** 끝낼 때 한 번 만든 요약. 리포트 요청을 다시 보내도 같은 값을 보냅니다 */
-  const gazeSummary = useRef<GazeSummary | null>(null);
+  /** 끝낼 때 한 번 만든 시선 요약과 답변별 시선. 리포트 요청을 다시 보내도 같은 값을 보냅니다 */
+  const gazeEnd = useRef<SessionEnd>({});
 
   /** 대화 말풍선 목록. 새 말풍선이 생기면 맨 아래로 내립니다 */
   const threadRef = useRef<HTMLDivElement | null>(null);
@@ -277,12 +277,14 @@ export default function InterviewScreen({
     setReport({ kind: "making" });
     // 면접이 끝나면 카메라를 끄고 시선 요약을 한 번만 만듭니다.
     if (gaze.current) {
-      gazeSummary.current = gaze.current.finish();
+      const summary = gaze.current.finish();
+      // 전체 요약이 없으면(너무 짧게 잼) 답변별 시선도 보내지 않습니다. 서버도 전체 요약이 있을 때만 씁니다.
+      gazeEnd.current = summary ? { gaze: summary, gaze_answers: gaze.current.answerRatios() } : {};
       gaze.current = null;
       setGazeStage("off");
     }
     try {
-      const ended = await endSession(id, ac.signal, gazeSummary.current);
+      const ended = await endSession(id, ac.signal, gazeEnd.current);
       setReport({ kind: "ready", reportId: ended.report_id });
     } catch (e) {
       if (ac.signal.aborted) return;
@@ -412,11 +414,10 @@ export default function InterviewScreen({
     // 실패 뒤 같은 답변을 그대로 다시 보내면 같은 turn_id를 써서 서버가 한 번만 반영하게 합니다.
     // 답변을 고쳤으면 새 턴이므로 새 turn_id를 씁니다.
     const pending = pendingTurn.current;
-    const retry = pending && pending.transcript === transcript ? pending : null;
-    const turnId = retry ? retry.id : crypto.randomUUID();
-    // 같은 turn_id로 다시 보낼 때는 처음 보낸 시선 요약을 그대로 씁니다. 서버는 처음 요청만 반영합니다.
-    const turnGaze = retry ? retry.gaze : (gaze.current?.answerSummary() ?? null);
-    pendingTurn.current = { id: turnId, transcript, gaze: turnGaze };
+    const turnId = pending && pending.transcript === transcript ? pending.id : crypto.randomUUID();
+    pendingTurn.current = { id: turnId, transcript };
+    // 이 답변의 시선을 적어 둡니다 (#180). 같은 turn_id로 다시 보내면 처음 값을 유지합니다.
+    gaze.current?.markAnswer(turnId);
     // 같은 turn_id로 다시 보내는 시도도 처음 보낸 시각을 씁니다. 서버가 처리한 시각은 늘 그 뒤라 시계가 늘어나지 않습니다.
     const sentAt = performance.now();
     try {
@@ -426,7 +427,6 @@ export default function InterviewScreen({
         source: "text",
         speech_started_at: null,
         speech_ended_at: null,
-        gaze: turnGaze,
       });
       pendingTurn.current = null;
       push({ who: "me", text: transcript });
@@ -462,7 +462,7 @@ export default function InterviewScreen({
     sending.current = true;
     setBusy(true);
     setError(null);
-    pendingTurn.current = { id: turn.turn_id, transcript: turn.transcript, gaze: turn.gaze ?? null };
+    pendingTurn.current = { id: turn.turn_id, transcript: turn.transcript };
     const sentAt = performance.now();
     try {
       const next = await postTurn(id, turn);
@@ -645,7 +645,7 @@ export default function InterviewScreen({
         filler: false,
         signal: ac.signal,
         existing,
-        gaze: () => gaze.current?.answerSummary() ?? null,
+        onAnswer: (turnId) => gaze.current?.markAnswer(turnId),
       });
     } catch (e) {
       // 진행기가 이미 ended로 텍스트 모드 전환을 처리했습니다. 세션을 못 만든 경우만 여기서 알립니다.

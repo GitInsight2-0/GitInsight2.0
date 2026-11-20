@@ -82,6 +82,20 @@ class TurnSource(StrEnum):
     TEXT = "text"
 
 
+class TurnRequest(Contract):
+    """POST /api/sessions/{id}/turns 요청입니다.
+
+    turn_id는 클라이언트가 만든 UUID이고, 같은 값이 다시 오면 처음 결과를 그대로 돌려줍니다.
+    시각은 클라이언트 epoch 밀리초이며 지연 측정에만 씁니다.
+    """
+
+    turn_id: UUID
+    transcript: Annotated[str, Field(max_length=4000)]
+    speech_started_at: Annotated[int, Field(ge=0)] | None = None
+    speech_ended_at: Annotated[int, Field(ge=0)] | None = None
+    source: TurnSource
+
+
 Ratio = Annotated[float, Field(ge=0, le=1)]
 # 네 비율의 합이 1에서 이만큼까지 벗어나도 받습니다. 브라우저의 소수점 반올림 때문입니다.
 GAZE_RATIO_TOLERANCE = 0.01
@@ -117,27 +131,27 @@ class GazeSummary(Contract):
         return self
 
 
-class TurnRequest(Contract):
-    """POST /api/sessions/{id}/turns 요청입니다.
+class GazeAnswer(Contract):
+    """답변 하나 동안 화면 밖을 본 비율입니다 (#180).
 
-    turn_id는 클라이언트가 만든 UUID이고, 같은 값이 다시 오면 처음 결과를 그대로 돌려줍니다.
-    시각은 클라이언트 epoch 밀리초이며 지연 측정에만 씁니다.
+    질문이 화면에 나온 뒤부터 그 답변을 보낼 때까지 잰 값입니다.
+    브라우저가 면접 내내 들고 있다가 끝낼 때 한 번에 보내므로, 도중에 시선 분석을 끄면 서버로 오지 않습니다.
     """
 
     turn_id: UUID
-    transcript: Annotated[str, Field(max_length=4000)]
-    speech_started_at: Annotated[int, Field(ge=0)] | None = None
-    speech_ended_at: Annotated[int, Field(ge=0)] | None = None
-    source: TurnSource
-    # 이 답변 동안의 시선 요약입니다 (#180). 질문이 화면에 나온 뒤부터 답변을 보낼 때까지 잰 값이고,
-    # 시선 분석을 켠 면접에서 그 구간을 충분히 잰 답변에만 있습니다. 리포트의 참고 정보에만 씁니다.
-    gaze: GazeSummary | None = None
+    away_ratio: Ratio
+
+
+# 끝낼 때 받는 답변별 시선 요약의 최대 개수입니다. 면접 한 번의 답변 수보다 넉넉합니다.
+GAZE_ANSWERS_MAX = 200
 
 
 class SessionEnd(Contract):
     """POST /api/sessions/{id}/end 요청 본문입니다. 본문 없이 보내도 됩니다."""
 
     gaze: GazeSummary | None = None
+    # 답변별 화면 밖 비율입니다 (#180). gaze가 있을 때만 리포트에서 가장 많이 벗어난 답변을 짚는 데 씁니다.
+    gaze_answers: list[GazeAnswer] = Field(default_factory=list, max_length=GAZE_ANSWERS_MAX)
 
 
 class SessionEnded(Contract):

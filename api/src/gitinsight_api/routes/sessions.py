@@ -109,13 +109,13 @@ async def end_session(
 ) -> SessionEnded:
     """세션을 끝내고 리포트를 만듭니다. 여러 번 불러도 같은 report_id를 돌려줍니다.
 
-    본문의 시선 요약(#177)은 리포트를 처음 만들 때만 담깁니다.
+    본문의 시선 요약(#177)과 답변별 시선(#180)은 리포트를 처음 만들 때만 담깁니다.
     """
     await ensure_owner(brain, session_id, user, forbidden=SESSION_FORBIDDEN)
     began = time.perf_counter()
-    gaze = body.gaze if body is not None else None
+    end = body if body is not None else SessionEnd()
     try:
-        report = await reports.end_session(session_id, gaze=gaze)
+        report = await reports.end_session(session_id, gaze=end.gaze, gaze_answers=end.gaze_answers)
     except SessionNotFoundError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "세션을 찾을 수 없습니다") from None
     except AnalysisNotFoundError:
