@@ -1,5 +1,6 @@
 """2단계 질문 재료 검토 (#199)."""
 
+import asyncio
 from collections.abc import Callable
 from pathlib import Path
 
@@ -256,8 +257,30 @@ async def test_rejected_topics_are_used_only_when_nothing_else_is_left(tmp_path:
 
     topics = await generate_topics(tmp_path, stage1, llm, target=1)
 
-    # 분석이 통째로 실패하는 대신, 검토 때문에 버린 주제 중 후보 순서로 앞선 것을 씁니다 (#200 리뷰).
-    assert [t.symbol for t in topics] == [candidates[0].symbol]
+    # 분석이 통째로 실패하는 대신, 검토 때문에 버린 주제를 씁니다 (#200 리뷰).
+    # 빼라고 한 첫 후보보다, 고칠 곳이 남아 버린 둘째 후보를 먼저 씁니다.
+    assert [t.symbol for t in topics] == [candidates[1].symbol]
+
+
+async def test_progress_never_goes_back_when_calls_finish_together(tmp_path: Path) -> None:
+    write_repo(tmp_path)
+    stage1 = analyze_tree(tmp_path, SHA)
+    llm = scripted()
+    seen: list[float] = []
+    slowed = False
+
+    async def progress(fraction: float) -> None:
+        nonlocal slowed
+        # 첫 보고(0.0)를 저장하는 동안 다른 주제가 끝나 0.5를 보고하는 상황입니다.
+        if not slowed:
+            slowed = True
+            await asyncio.sleep(0.05)
+        seen.append(fraction)
+
+    await generate_topics(tmp_path, stage1, llm, target=2, progress=progress)
+
+    assert seen == sorted(seen)
+    assert seen[-1] == 1.0
 
 
 async def test_rejected_topics_are_not_used_when_others_pass(tmp_path: Path) -> None:

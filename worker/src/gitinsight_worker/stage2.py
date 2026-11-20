@@ -695,6 +695,8 @@ class _TopicAttempt:
     topic: Topic | None
     # 검토 때문에 버린 마지막 재료로 만든 주제입니다. 분석의 주제가 하나도 없을 때만 씁니다(#200 리뷰).
     rejected: Topic | None = None
+    # 검토가 주제 전체를 빼라고 한(사소하거나 고칠 수 없을 만큼 틀린) 주제인지입니다. 대체로 쓸 때 뒤로 미룹니다.
+    dropped: bool = False
 
 
 def _finish(
@@ -769,7 +771,8 @@ async def _generate_topic(
             if outcome is not None and not outcome.passed:
                 if outcome.drop or review_rounds == 0:
                     logger.info("topic_rejected attempt=%d drop=%s", attempt, outcome.drop)
-                    return _TopicAttempt(None, _finish(result.value, topic, focus, plan))
+                    rejected = _finish(result.value, topic, focus, plan)
+                    return _TopicAttempt(None, rejected, dropped=outcome.drop)
                 review_rounds -= 1
                 messages = [
                     *messages,
@@ -882,8 +885,10 @@ async def generate_topics(
     review가 False면 검토 LLM을 부르지 않습니다(#199 이전과 같음). 평가에서 검토 전후를 비교할 때 씁니다.
     후보를 다 써도 주제가 하나도 없으면, 검토 때문에 버린 주제를 대신 씁니다(#200 리뷰).
     후보가 적은 레포에서 검토가 모두 버려 분석 자체가 실패하는 것보다 낫다고 봅니다.
+    고칠 곳이 남아 버린 주제를 먼저, 검토가 빼라고 한 주제를 나중에 씁니다. 각각 안에서는 후보 순서입니다.
     진행률은 LLM 호출이 하나 끝날 때마다 보고합니다. 값이 그대로여도 보고해서, 오래 걸리는 분석이
     오래된 기록(STALE_AFTER)으로 닫히지 않게 합니다(#200 리뷰).
+    보고는 한 번에 하나씩, 이전 값보다 작지 않게 합니다. 동시에 끝난 호출의 보고가 뒤바뀌어 화면 진행률이 뒤로 가지 않게 하기 위해서입니다.
     """
     # 기여 근거를 넘기지 않으면 모두 "확인 불가"로 둡니다.
     contribution = contribution_of or _no_contribution
@@ -895,13 +900,19 @@ async def generate_topics(
     used_slugs: set[str] = set()
     breaker = _QuotaBreaker()
     topics: list[Topic] = []
-    rejected: list[Topic] = []
+    rejected: list[_TopicAttempt] = []
     next_index = 0
     made = 0
+    reported = 0.0
+    progress_lock = asyncio.Lock()
 
     async def beat() -> None:
-        if progress is not None:
-            await progress(min(made / target, 1.0))
+        nonlocal reported
+        if progress is None:
+            return
+        async with progress_lock:
+            reported = max(reported, min(made / target, 1.0))
+            await progress(reported)
 
     async def one(item: _Prepared) -> _TopicAttempt:
         nonlocal made
@@ -938,9 +949,11 @@ async def generate_topics(
             raise errors.exceptions[0] from None
         results = [task.result() for task in tasks]
         topics += [r.topic for r in results if r.topic is not None]
-        rejected += [r.rejected for r in results if r.rejected is not None]
+        rejected += [r for r in results if r.rejected is not None]
     if not topics and rejected:
-        topics = rejected[:target]
+        # sorted는 안정 정렬이라 같은 종류 안에서는 후보 순서가 유지됩니다.
+        ordered = sorted(rejected, key=lambda r: r.dropped)
+        topics = [r.rejected for r in ordered if r.rejected is not None][:target]
         logger.info("stage2_review_fallback used=%d", len(topics))
     logger.info(
         "stage2_topics made=%d tried=%d misstatements=%d",
