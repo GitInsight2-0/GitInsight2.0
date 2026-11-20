@@ -127,7 +127,7 @@ class ReviewOutcome:
     reviewer_problems: list[str]
     unverifiable: int
     drop: bool
-    # server_problems의 내역입니다. 근거를 내지 않은 요점, 낸 근거가 모두 MIN_QUOTE_CHARS보다 짧았던 요점,
+    # server_problems의 내역입니다. 근거를 내지 않은 요점, 낸 근거가 모두 줄마다 MIN_QUOTE_CHARS보다 짧았던 요점,
     # 낸 근거가 자료에 없던 요점입니다(#200 리뷰, #206).
     # 마지막이 많으면 검토 LLM이 근거를 잘못 옮겨 맞는 요점을 고치게 하는 것일 수 있습니다.
     no_quote: int = 0
@@ -143,6 +143,15 @@ def _normalize(text: str) -> str:
     return " ".join(text.split())
 
 
+def _quote_lines(quote: str) -> list[str]:
+    return [line for line in (_normalize(raw) for raw in quote.splitlines()) if line]
+
+
+def _quote_is_short(quote: str) -> bool:
+    """줄마다 MIN_QUOTE_CHARS보다 짧은 인용입니다. 한 줄이면 전체 길이로, 여러 줄이면 가장 긴 줄로 봅니다(#209 리뷰)."""
+    return all(len(line) < MIN_QUOTE_CHARS for line in _quote_lines(quote))
+
+
 def quote_in_source(quote: str, corpus: str) -> bool:
     """근거 문장이 대조 자료(정규화한 corpus)에 글자 그대로 있는지입니다.
 
@@ -150,11 +159,16 @@ def quote_in_source(quote: str, corpus: str) -> bool:
     검토 LLM은 떨어진 줄을 한 인용으로 이어 붙이곤 합니다. #206 진단에서 떨어진 근거 14건이 모두 이 경우였고, 줄마다는 코드에 그대로 있었습니다.
     줄마다 글자 그대로여야 하므로, 코드에 없는 이유를 덧붙인 문장은 여전히 걸러집니다.
     `}`처럼 짧은 줄은 어디에나 맞아서, 줄 중 하나는 MIN_QUOTE_CHARS 이상이어야 합니다.
+
+    한계: 줄 순서와 줄 전체 일치는 보지 않습니다. 각 줄이 자료 어딘가에 부분 문자열로 있으면 됩니다.
+    그래서 줄 순서를 뒤집거나 `not`, `None` 같은 짧은 조각을 이어 붙여 뜻을 바꾼 인용도 통과합니다(#209 리뷰).
+    한 줄 인용에도 같은 위험이 있어 지금은 프롬프트("근거 문장이 요점과 같은 말을 하는지 다시 확인")로 다룹니다.
+    로그에서 이런 사례가 보이면, 짧은 줄은 자료의 한 줄 전체와 같아야 한다는 조건을 붙입니다.
     """
     whole = _normalize(quote)
     if len(whole) >= MIN_QUOTE_CHARS and whole in corpus:
         return True
-    lines = [line for line in (_normalize(raw) for raw in quote.splitlines()) if line]
+    lines = _quote_lines(quote)
     return (
         len(lines) > 1
         and all(line in corpus for line in lines)
@@ -245,9 +259,8 @@ def judge_review(review: TopicReview, source: ReviewSource, point_count: int) ->
     supported: set[int] = set()
     quotes: dict[int, list[str]] = {}
     for evidence in review.evidence:
-        quote = _normalize(evidence.quote)
-        if quote:
-            quotes.setdefault(evidence.point, []).append(quote)
+        if _normalize(evidence.quote):
+            quotes.setdefault(evidence.point, []).append(evidence.quote)
         if quote_in_source(evidence.quote, corpus):
             supported.add(evidence.point)
     unsupported = [
@@ -258,7 +271,7 @@ def judge_review(review: TopicReview, source: ReviewSource, point_count: int) ->
         for i in unsupported
     ]
     quoted = [i for i in unsupported if i in quotes]
-    short_quote = sum(all(len(q) < MIN_QUOTE_CHARS for q in quotes[i]) for i in quoted)
+    short_quote = sum(all(_quote_is_short(q) for q in quotes[i]) for i in quoted)
     return ReviewOutcome(
         server_problems=server,
         reviewer_problems=reviewer[:MAX_FEEDBACK_ITEMS],

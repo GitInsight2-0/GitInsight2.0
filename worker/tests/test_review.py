@@ -143,6 +143,8 @@ def test_joined_quote_of_only_short_lines_is_not_evidence() -> None:
     outcome = judge_review(review({1: "token\nclone"}), SOURCE, 1)
 
     assert not outcome.passed
+    # 자료에 없는 근거가 아니라 짧은 근거로 셉니다. 운영 로그의 bad_quote에 섞이지 않게 합니다 (#209 리뷰).
+    assert (outcome.short_quote, outcome.bad_quote) == (1, 0)
 
 
 def test_unverifiable_points_are_counted_not_sent_back() -> None:
