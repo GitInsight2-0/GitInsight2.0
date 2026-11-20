@@ -3,7 +3,7 @@
 import json
 import textwrap
 
-from gitinsight_api.llm.fake import FakeLLM, FakeStep
+from gitinsight_api.llm.fake import FakeLLM
 from gitinsight_contracts.analysis import ContributionLabel
 from gitinsight_contracts.common import LineSpan
 from gitinsight_worker import stage2
@@ -21,7 +21,7 @@ from gitinsight_worker.stage2 import (
     visible_focus,
 )
 
-from worker_test_support import material, write_repo
+from worker_test_support import answer, material, write_repo
 
 SHA = "a" * 40
 CTX = TopicContext("handle", ContributionLabel.SHARED, [])
@@ -256,7 +256,7 @@ def test_chosen_ids_map_to_points_and_unknown_ids_are_dropped(tmp_path) -> None:
 
 async def test_points_get_focus_without_extra_calls(tmp_path) -> None:
     stage1, _ = _long_repo(tmp_path)
-    llm = FakeLLM(responder=lambda *_: FakeStep(material(focus_ids=["b1", "b9", "b3"])))
+    llm = FakeLLM(responder=answer(material(focus_ids=["b1", "b9", "b3"])))
 
     [topic] = await generate_topics(tmp_path, stage1, llm, target=1)
 
@@ -277,7 +277,7 @@ async def test_focus_failure_keeps_topic_and_analysis(tmp_path, monkeypatch, cap
         raise RuntimeError("tree-sitter가 예상 못 한 노드를 만남")
 
     monkeypatch.setattr(stage2, "focus_candidates", broken)
-    llm = FakeLLM(responder=lambda *_: FakeStep(material(focus_ids=["b1", "b2", "b3"])))
+    llm = FakeLLM(responder=answer(material(focus_ids=["b1", "b2", "b3"])))
 
     with caplog.at_level("WARNING"):
         [topic] = await generate_topics(tmp_path, stage1, llm, target=1)

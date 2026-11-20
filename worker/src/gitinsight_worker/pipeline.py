@@ -58,12 +58,14 @@ async def run_analysis(
     requester: Requester | None = None,
     model: str | None = None,
     work_dir: Path | None = None,
+    review: bool = True,
 ) -> AnalysisResult:
     """레포를 분석해 AnalysisResult를 돌려줍니다. 성공, 실패, 취소 모두 내려받은 레포를 지웁니다.
 
     실패하면 `failed` 상태(예외 종류만)를 보고한 뒤 예외를 그대로 올립니다.
     취소는 failed로 보고하지 않습니다.
     `requester`가 없으면 기여 라벨은 모두 "확인 불가"이고, 최근 커밋은 그대로 붙입니다.
+    `review`가 False면 2단계 검토(#199)를 하지 않습니다. 평가에서 검토 전후를 비교할 때만 씁니다.
     """
     checkout = Path(tempfile.mkdtemp(prefix="gitinsight-", dir=work_dir))
     # 실패를 보고할 때 마지막 진행률을 남겨, 화면이 어느 단계에서 실패했는지 보여 줄 수 있게 합니다.
@@ -98,6 +100,7 @@ async def run_analysis(
             contribution_of=contribution_lookup(stage1),
             model=model,
             progress=progress,
+            review=review,
         )
     except Exception as error:
         logger.info("analysis_failed error=%s", type(error).__name__)

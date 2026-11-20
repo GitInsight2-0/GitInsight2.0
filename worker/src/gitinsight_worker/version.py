@@ -16,4 +16,5 @@
 
 # 2: Java 지원 (#182)
 # 3: Java 패키지 시작 판정과 final 지역 변수 판정 (#194)
-ANALYZER_VERSION = "3"
+# 4: 질문 재료 검토 LLM과 근거 대조 (#199)
+ANALYZER_VERSION = "4"

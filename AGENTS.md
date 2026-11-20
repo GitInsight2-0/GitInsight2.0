@@ -25,7 +25,7 @@ README.md의 "전체 구조"를 따릅니다.
 | `contracts/src/gitinsight_contracts/` | 모듈 간 계약(Pydantic 모델) | B (변경 시 2명 승인) |
 | `contracts/schema/contracts.json`, `contracts/ts/index.d.ts` | 계약에서 자동 생성한 JSON Schema와 TS 타입. 직접 고치지 않습니다 | 자동 생성 |
 | `api/src/gitinsight_api/` | FastAPI 서버. `brain/`(면접 두뇌), `llm/`(LLMClient), `routes/` | B, D |
-| `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출(Python, TypeScript, JavaScript, Java), git blame 기여 라벨과 최근 커밋, 이름 기준 레포 안 참조 수(Python만)), 2단계(규칙으로 주제 후보 선택, 참조 수를 서버 사실로, 주제 코드가 쓰는 다른 파일 정의 요약(`definitions`, Python만)을 신뢰하지 않는 입력으로 넣어 LLM으로 주제 재료 생성과 서버 검증, 면접관이 일부러 하는 틀린 말의 방식과 부른다고 말할 함수를 규칙으로 고르기(`misstatement`)), 전체 흐름 `pipeline.run_analysis`, 분석 기록 저장소와 연결해 실행하는 `jobs`(같은 프로세스 Launcher), 분석까지 여는 서버 진입점 `server` | A |
+| `worker/src/gitinsight_worker/` | 분석 워커. 1단계(레포 내려받기, 언어 통계, tree-sitter 심볼 추출(Python, TypeScript, JavaScript, Java), git blame 기여 라벨과 최근 커밋, 이름 기준 레포 안 참조 수(Python만)), 2단계(규칙으로 주제 후보 선택, 참조 수를 서버 사실로, 주제 코드가 쓰는 다른 파일 정의 요약(`definitions`, Python만)을 신뢰하지 않는 입력으로 넣어 LLM으로 주제 재료 생성과 서버 검증, 검토 LLM과 요점 근거 문장 대조로 재료 내용 확인(`review`), 면접관이 일부러 하는 틀린 말의 방식과 부른다고 말할 함수를 규칙으로 고르기(`misstatement`)), 전체 흐름 `pipeline.run_analysis`, 분석 기록 저장소와 연결해 실행하는 `jobs`(같은 프로세스 Launcher), 분석까지 여는 서버 진입점 `server` | A |
 | `web/` | Next.js 웹. 첫 화면(`/`, GitHub 로그인과 면접 시작), 실제 모드 면접 화면(`/interview/[analysisId]`, 음성·텍스트, 도중 전환, 음성 끊김 시 텍스트 자동 전환, 선택형 웹캠 시선 분석, 끝내기와 리포트 요청), 리포트 화면(`/reports/[reportId]`, 역량별 수준과 근거 인용문, 코드 지도, 주제별 내용, 시선(참고), 답변 기록, 이전 면접과 비교), 음성 토큰 라우트(`/voice-token`, 실험 모드가 아니면 로그인 필요), 실험 화면(`/lab/voice`, `/lab/interview`)이 있습니다 | C |
 | `fixtures/analysis/` | 데모 레포 분석 결과 샘플(`gitinsight_agent`, 손으로 만듦)과 실제 워커로 만든 데모 스냅샷(`gitinsight_agent_live`) | B |
 | `fixtures/conversations/` | 면접 두뇌 골든 대화 | B |
@@ -85,6 +85,7 @@ uv run python scripts/eval_stage2.py                               # 샘플(데�
                                    # --repo <owner/name> --commit <SHA>: 다른 레포 평가 (동의받은 레포만, 기본 기록 이름에 레포 이름이 붙음)
                                    # --requester-email <커밋 이메일> --save-json <경로>: 그 사람 기준 기여 라벨로 분석하고 스냅샷용 JSON 저장
                                    # --out <경로>: 평가 기록 경로 (기본 docs/evals/stage2-<날짜>.md, 같은 날 기록은 덮어씀)
+                                   # --no-review: 검토(#199) 없이 비교, --review-model / --review-effort: 검토만 다른 모델·추론량
 uv run python scripts/demo_check.py [--block-llm | --real-llm] [--from-db --user-id <id>]   # 데모 완주 점검 (docs/runbook-demo.md). --from-db는 DB의 데모 스냅샷을 그 주인으로 사용
 uv run python scripts/seed_demo_analysis.py --user-id <id> [--fixture gitinsight_agent_live | --file <json>] [--analysis-id <id>]   # 분석 결과를 DATABASE_URL의 DB에 완료 기록으로 넣기 (데모 스냅샷)
 pnpm --filter @gitinsight/web dev                                  # 웹 (기본 3000번, /api/*는 API_ORIGIN으로 넘김)

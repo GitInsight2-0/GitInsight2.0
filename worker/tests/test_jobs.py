@@ -37,7 +37,7 @@ from gitinsight_worker.jobs import (
 )
 from gitinsight_worker.version import ANALYZER_VERSION
 
-from worker_test_support import make_origin, material
+from worker_test_support import answer, make_origin, material
 
 REPO = "owner/repo"
 
@@ -56,7 +56,7 @@ def local_cloner(origin: Path) -> CloneFor:
 
 
 def ok_llm() -> FakeLLM:
-    return FakeLLM(responder=lambda *_: FakeStep(material()))
+    return FakeLLM(responder=answer(material()))
 
 
 def launcher_for(
@@ -170,7 +170,7 @@ async def test_result_for_closed_record_is_dropped(
     saved = await execute(
         store,
         record,
-        ClosingLLM(responder=lambda *_: FakeStep(material())),
+        ClosingLLM(responder=answer(material())),
         clone=git_cloner(str(origin[0]), origin[1], allowed_protocols="file"),
         work_dir=work,
     )
@@ -233,7 +233,7 @@ async def test_concurrent_analyses_are_limited(origin: tuple[Path, str], tmp_pat
     work.mkdir()
     launcher = InProcessLauncher(
         store,
-        CountingLLM(responder=lambda *_: FakeStep(material())),
+        CountingLLM(responder=answer(material())),
         clone_for=local_cloner(origin[0]),
         work_dir=work,
         max_concurrent=1,

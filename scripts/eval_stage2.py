@@ -10,6 +10,10 @@
   uv run python scripts/eval_stage2.py --repo <owner/name> --commit <SHA>
       # 데모 레포가 아닌 레포로 질문 품질을 봅니다 (동의받은 레포만). 샘플과의 비교 단락은 빠지고,
       # --out이 없으면 docs/evals/stage2-<날짜>-<owner>-<name>.md에 씁니다
+  uv run python scripts/eval_stage2.py --no-review
+      # 검토(#199) 없이 돌립니다. 검토 전후를 비교할 때 씁니다
+  uv run python scripts/eval_stage2.py --review-model gemini/<더 큰 모델> --review-effort high
+      # 검토만 다른 모델·추론량으로 돌립니다
 
 API 키는 환경 변수로 받습니다. .env에 넣었다면 `uv run --env-file .env python ...`으로 실행합니다.
 진행 중 로그에는 오류 종류와 개수만 나오고, 코드와 응답 본문은 나오지 않습니다.
@@ -29,7 +33,15 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from gitinsight_api.llm import InMemoryCostRecorder, LiteLLMClient
+from pydantic import BaseModel
+
+from gitinsight_api.llm import (
+    InMemoryCostRecorder,
+    LiteLLMClient,
+    LLMClient,
+    LLMResult,
+    Message,
+)
 from gitinsight_api.settings import Settings
 from gitinsight_contracts.analysis import AnalysisResult, Topic
 from gitinsight_contracts.api import AnalysisState
@@ -38,6 +50,13 @@ from gitinsight_contracts.fixtures import load_analysis
 from gitinsight_worker.contribution import Requester
 from gitinsight_worker.git import git_cloner
 from gitinsight_worker.pipeline import run_analysis
+from gitinsight_worker.review import (
+    REVIEW_PURPOSE,
+    REVIEW_REASONING_EFFORT,
+    PurposeRouter,
+    ReviewVerdict,
+    TopicReview,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -45,6 +64,80 @@ ROOT = Path(__file__).resolve().parents[1]
 class PrintReporter:
     async def report(self, state: AnalysisState) -> None:
         print(f"  {state.status.value} {state.progress:.2f}", file=sys.stderr)
+
+
+class ReviewRecorder:
+    """검토 LLM의 응답을 모아 기록에 씁니다(#199). 사람이 검토의 지적이 맞는지 코드와 대조합니다."""
+
+    def __init__(self, client: LLMClient) -> None:
+        self._client = client
+        self.reviews: list[TopicReview] = []
+
+    async def complete_structured[T: BaseModel](
+        self,
+        schema: type[T],
+        messages: list[Message],
+        *,
+        purpose: str,
+        timeout_s: float,
+        model: str | None = None,
+    ) -> LLMResult[T]:
+        result = await self._client.complete_structured(
+            schema, messages, purpose=purpose, timeout_s=timeout_s, model=model
+        )
+        if isinstance(result.value, TopicReview):
+            self.reviews.append(result.value)
+        return result
+
+
+class ReviewLog(logging.Handler):
+    """워커의 검토 로그(개수만 있음)를 모읍니다. 서버 근거 대조에서 걸린 요점 수를 여기서 얻습니다."""
+
+    def __init__(self) -> None:
+        super().__init__(logging.INFO)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        message = record.getMessage()
+        if message.startswith(("topic_review", "topic_rejected")):
+            self.messages.append(message)
+
+
+def review_lines(recorder: ReviewRecorder | None, log: ReviewLog) -> list[str]:
+    """검토 결과입니다. 검토를 끄고 돌렸으면 그렇다고만 씁니다."""
+    if recorder is None:
+        return ["", "## 검토 (#199)", "", "- 검토 없이 돌렸습니다 (--no-review)"]
+    items = [i for r in recorder.reviews for i in r.items]
+    fixes = [i for i in items if i.verdict is ReviewVerdict.FIX]
+    unverifiable = [i for i in items if i.verdict is ReviewVerdict.UNVERIFIABLE]
+    drops = [r.drop_reason for r in recorder.reviews if r.drop]
+    unsupported = sum(
+        int(part.split("=")[1])
+        for m in log.messages
+        for part in m.split()
+        if part.startswith("unsupported=")
+    )
+    lines = [
+        "",
+        "## 검토 (#199)",
+        "",
+        f"- 검토 호출: {len(recorder.reviews)}회, 고칠 것 {len(fixes)}건, 확인할 수 없음 {len(unverifiable)}건, 주제 빼기 {len(drops)}건",
+        f"- 서버 근거 대조에서 걸린 요점: {unsupported}건",
+        f"- 다시 만들어도 남아 버린 후보: {sum(m.startswith('topic_rejected') for m in log.messages)}개",
+        "",
+        "사람이 확인할 것: 고칠 것의 지적이 코드와 맞는가(멀쩡한 요점을 틀렸다고 하지 않았는가),",
+        "확인할 수 없음이 정말 다른 파일의 코드가 필요한 내용인가.",
+        "",
+        "### 고칠 것",
+        *(f"- `{i.field}`: {i.reason}" for i in fixes),
+        "",
+        "### 확인할 수 없음",
+        *(f"- `{i.field}`: {i.reason}" for i in unverifiable),
+        "",
+        "### 주제 빼기",
+        *(f"- {reason}" for reason in drops),
+    ]
+    return lines
 
 
 def labels(result: AnalysisResult) -> dict[str, int]:
@@ -154,8 +247,20 @@ async def run(args: argparse.Namespace) -> int:
         if args.reasoning_effort is None
         else args.reasoning_effort.strip() or None
     )
-    client = LiteLLMClient(model, cost_recorder=recorder, reasoning_effort=effort)
+    topic_client = LiteLLMClient(model, cost_recorder=recorder, reasoning_effort=effort)
     label = f"{model} (reasoning_effort={effort or '모델 기본값'})"
+    reviews: ReviewRecorder | None = None
+    client: LLMClient = topic_client
+    if not args.no_review:
+        review_model = args.review_model or model
+        review_effort = args.review_effort or REVIEW_REASONING_EFFORT
+        reviews = ReviewRecorder(
+            LiteLLMClient(review_model, cost_recorder=recorder, reasoning_effort=review_effort)
+        )
+        client = PurposeRouter(topic_client, {REVIEW_PURPOSE: reviews})
+        label += f", 검토 {review_model} (reasoning_effort={review_effort})"
+    review_log = ReviewLog()
+    logging.getLogger("gitinsight_worker").addHandler(review_log)
     sample = load_analysis()
     # 다른 레포를 주면 그 레포를 분석합니다. 손으로 만든 샘플과의 비교는 샘플 레포일 때만 씁니다.
     repo = args.repo or sample.repo_full_name
@@ -179,11 +284,13 @@ async def run(args: argparse.Namespace) -> int:
         analysis_id=args.analysis_id,
         repo_full_name=repo,
         requester=requester,
+        review=not args.no_review,
     )
     # 다른 레포의 기록이 같은 날 데모 레포 기록을 덮어쓰지 않게 파일 이름에 레포 이름을 넣습니다.
     suffix = "" if repo == sample.repo_full_name else "-" + repo.replace("/", "-")
     out = args.out or ROOT / "docs" / "evals" / f"stage2-{datetime.now(UTC):%Y-%m-%d}{suffix}.md"
     lines = render(result, recorder, label)
+    lines += review_lines(reviews, review_log)
     if repo == sample.repo_full_name and commit == sample.commit_sha:
         lines += compare(result, sample)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
@@ -235,6 +342,17 @@ def main() -> int:
     )
     parser.add_argument(
         "--commit", default=None, help="--repo의 고정 커밋 SHA (40자리). 다른 레포면 필수"
+    )
+    parser.add_argument(
+        "--no-review", action="store_true", help="2단계 검토(#199) 없이 돌립니다 (검토 전후 비교용)"
+    )
+    parser.add_argument(
+        "--review-model", default=None, help="검토에 쓸 모델 (기본: 출제와 같은 모델)"
+    )
+    parser.add_argument(
+        "--review-effort",
+        default=None,
+        help=f"검토의 reasoning_effort (기본: {REVIEW_REASONING_EFFORT})",
     )
     parser.add_argument(
         "--out",

@@ -16,7 +16,7 @@ from gitinsight_worker.pipeline import run_analysis
 from gitinsight_worker.stage1 import NoSupportedCodeError, analyze_tree
 from gitinsight_worker.stage2 import Stage2Error
 
-from worker_test_support import Recorder, make_origin, material
+from worker_test_support import Recorder, answer, make_origin, material
 
 
 @pytest.fixture
@@ -49,7 +49,7 @@ async def analyze(
 async def test_run_analysis_builds_result_and_removes_checkout(
     origin: tuple[Path, str], tmp_path: Path
 ) -> None:
-    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    llm = FakeLLM(responder=answer(material()))
     recorder = Recorder()
 
     result = await analyze(origin, tmp_path / "work", llm, recorder)
@@ -93,7 +93,7 @@ async def test_stage2_failure_reports_failed_and_removes_checkout(
 async def test_interview_brain_can_start_with_the_result(
     origin: tuple[Path, str], tmp_path: Path
 ) -> None:
-    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    llm = FakeLLM(responder=answer(material()))
     result = await analyze(origin, tmp_path / "work", llm, Recorder())
     brain = InterviewBrain(
         analyses=FixtureAnalysisSource(result),
@@ -113,7 +113,7 @@ async def test_interview_brain_can_start_with_the_result(
 async def test_contribution_from_stage1_is_attached_to_topics(
     origin: tuple[Path, str], tmp_path: Path
 ) -> None:
-    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    llm = FakeLLM(responder=answer(material()))
     mine = Requester.of(emails=["t@example.com"])
 
     result = await analyze(origin, tmp_path / "work", llm, Recorder(), requester=mine)
@@ -126,7 +126,7 @@ async def test_contribution_from_stage1_is_attached_to_topics(
 async def test_without_requester_label_is_unverified_but_commits_remain(
     origin: tuple[Path, str], tmp_path: Path
 ) -> None:
-    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    llm = FakeLLM(responder=answer(material()))
 
     result = await analyze(origin, tmp_path / "work", llm, Recorder())
 
@@ -163,7 +163,7 @@ async def test_repo_without_supported_code_fails_before_llm(
 ) -> None:
     path = tmp_path / "origin"
     origin = (path, make_origin(path, files))
-    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    llm = FakeLLM(responder=answer(material()))
     recorder = Recorder()
 
     with pytest.raises(NoSupportedCodeError):
@@ -201,7 +201,7 @@ SCRIPT_REPO = {
 async def test_typescript_and_javascript_repo_produces_topics(tmp_path: Path) -> None:
     path = tmp_path / "origin"
     origin = (path, make_origin(path, SCRIPT_REPO))
-    llm = FakeLLM(responder=lambda *_: FakeStep(material()))
+    llm = FakeLLM(responder=answer(material()))
 
     result = await analyze(origin, tmp_path / "work", llm, Recorder())
 
