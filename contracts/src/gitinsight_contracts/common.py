@@ -16,10 +16,15 @@ class SymbolKind(StrEnum):
     CLASS = "class"
 
 
+# 심볼 id(`파일 경로::이름 경로`)입니다. 분석 결과에서만 만들고, 이 길이를 넘으면 워커가 그 심볼을 건너뜁니다.
+# Java처럼 패키지 경로가 길면 100자를 넘기 쉬워 200자까지 둡니다 (#183).
+SymbolId = Annotated[str, Field(min_length=1, max_length=200)]
+
+
 class SymbolRef(Contract):
     """분석 결과에서 얻은 코드 위치입니다. LLM이 만들지 않습니다."""
 
-    symbol_id: Annotated[str, Field(min_length=1, max_length=200)]
+    symbol_id: SymbolId
     name: Annotated[str, Field(min_length=1, max_length=200)]
     kind: SymbolKind
     path: Annotated[str, Field(min_length=1, max_length=500)]

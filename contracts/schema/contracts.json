@@ -1075,7 +1075,7 @@
         "symbol_id": {
           "anyOf": [
             {
-              "maxLength": 100,
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             },
