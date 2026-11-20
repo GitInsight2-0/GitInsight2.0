@@ -3,8 +3,11 @@
  * 외부 CDN에서 받지 않고 우리 웹이 같은 출처에서 내려 주기 위해서입니다.
  * 설치된 @mediapipe/tasks-vision 패키지에서 복사하므로 버전이 늘 맞습니다. 복사한 파일은 커밋하지 않습니다(.gitignore).
  * dev와 build 전에 실행합니다 (package.json).
+ * 시선 분석은 FilesetResolver.forVisionTasks(경로)를 module 없이 부르므로,
+ * 브라우저가 SIMD 지원 여부에 따라 vision_wasm_internal 또는 vision_wasm_nosimd_internal 하나만 받습니다.
+ * 쓰지 않는 module 판은 복사하지 않습니다 (#181 리뷰, 배포 크기 41MB → 약 27MB).
  */
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,5 +23,6 @@ if (!existsSync(from)) {
 }
 rmSync(to, { recursive: true, force: true });
 mkdirSync(to, { recursive: true });
-cpSync(from, to, { recursive: true });
-console.log(`시선 분석 wasm 복사: ${to}`);
+const names = readdirSync(from).filter((name) => !name.includes("_module_"));
+for (const name of names) copyFileSync(join(from, name), join(to, name));
+console.log(`시선 분석 wasm ${names.length}개 복사: ${to}`);

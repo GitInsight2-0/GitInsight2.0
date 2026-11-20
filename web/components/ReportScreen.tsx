@@ -591,7 +591,8 @@ function GazeSection({ gaze }: { gaze: GazeSummary }) {
       <h2 id="gaze">시선</h2>
       <p className={styles.muted}>
         면접 중 웹캠으로 약 {duration} 동안 잰 시선이에요. 브라우저가 어림잡은 값이라 정확하지 않을 수 있어요. 특히
-        카메라는 화면 바로 위에 있어서 카메라와 화면 위쪽을 본 시간이 서로 섞여 잡힐 수 있어요. 역량 수준에는 반영하지 않아요.
+        카메라는 화면 바로 위에 있어서 카메라와 화면 위쪽을 본 시간이 서로 섞여 잡힐 수 있고, 키보드처럼 아래를 오래 보면
+        얼굴 안 잡힘으로 셀 수 있어요. 역량 수준에는 반영하지 않아요.
       </p>
       <div className={styles.card}>
         <div className={styles.gazeBar} aria-hidden="true">
