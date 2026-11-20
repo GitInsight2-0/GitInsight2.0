@@ -156,11 +156,35 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
   return (
     <>
       <section className={styles.head}>
-        <h1>면접 리포트</h1>
-        <p className={styles.muted}>
-          답변 {report.turns.length}개, 주제 {report.topics.length}개를 바탕으로 만들었어요. 수준은 답변 내용만으로 매기고, 수준마다
-          근거가 된 내 답변을 함께 보여 드려요.
-        </p>
+        <div className={styles.headText}>
+          {codeMap && <p className={styles.repoChip}>{codeMap.repo_full_name}</p>}
+          <h1>면접 리포트</h1>
+          <p className={styles.muted}>
+            답변 {report.turns.length}개, 주제 {report.topics.length}개를 바탕으로 만들었어요. 수준은 답변 내용만으로 매기고,
+            수준마다 근거가 된 내 답변을 함께 보여 드려요.
+          </p>
+        </div>
+        {/* 리포트에 적힌 값을 세기만 합니다 (#197). 핵심 함수 수는 같은 레포로 본 면접을 합친 값이라 "지금까지"를 붙입니다 (#198 리뷰) */}
+        <dl className={styles.stats}>
+          {scored.length > 0 && (
+            <div className={styles.stat}>
+              <dt>평가한 역량</dt>
+              <dd>
+                {scored.length}
+                <span> / {COMPETENCY_ORDER.length}</span>
+              </dd>
+            </div>
+          )}
+          {codeMap && codeMap.key_function_count > 0 && (
+            <div className={styles.stat}>
+              <dt>지금까지 설명한 핵심 함수</dt>
+              <dd>
+                {codeMap.explained_count + codeMap.after_hint_count}
+                <span> / {codeMap.key_function_count}</span>
+              </dd>
+            </div>
+          )}
+        </dl>
       </section>
 
       {report.kind === "turn_table" && (
@@ -220,7 +244,7 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
             title="코드 지도"
             hint={
               codeMap.key_function_count > 0
-                ? `핵심 함수 ${codeMap.key_function_count}개 중 ${codeMap.explained_count + codeMap.after_hint_count}개 설명`
+                ? `지금까지 핵심 함수 ${codeMap.key_function_count}개 중 ${codeMap.explained_count + codeMap.after_hint_count}개 설명`
                 : `질문받은 함수 ${codeMap.entries.length}개`
             }
           >
@@ -273,6 +297,16 @@ function ReportBody({ report, progress }: { report: Report; progress: ProgressEn
   );
 }
 
+/** 역량 카드 아이콘 (#197). 꾸밈이라 화면 읽기 프로그램에는 감춥니다 */
+const COMPETENCY_ICON: Record<CompetencyScore["name"], string> = {
+  code_understanding: "M8 6l-6 6 6 6M16 6l6 6-6 6",
+  design_judgment: "M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z",
+  problem_solving: "M12 2l9 5v10l-9 5-9-5V7zM12 8v5M12 16h.01",
+  scalability_operations: "M3 17l6-6 4 4 8-8M15 7h6v6",
+  communication: "M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z",
+  role_decision: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
+};
+
 function CompetencyCard({
   score,
   turnNumber,
@@ -287,9 +321,15 @@ function CompetencyCard({
   compared: boolean;
 }) {
   return (
-    <li className={styles.card}>
+    <li className={`${styles.card} ${styles.compCard}`} data-competency={score.name}>
+      {/* 화면 읽기 프로그램이 역량 이름을 수준보다 먼저 읽게 제목을 앞에 두고, 보이는 순서는 CSS로 바꿉니다 (#198 리뷰) */}
+      <h3>{COMPETENCY_LABEL[score.name]}</h3>
       <div className={styles.cardHead}>
-        <h3>{COMPETENCY_LABEL[score.name]}</h3>
+        <span className={styles.compIcon} aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d={COMPETENCY_ICON[score.name]} />
+          </svg>
+        </span>
         <LevelMeter level={score.level} />
       </div>
       {compared && <Change now={score.level} before={previousLevel} />}
@@ -424,7 +464,7 @@ function CodeMapSection({ codeMap, topics }: { codeMap: CodeMap; topics: TopicRe
       {total > 0 && (
         <div className={styles.card}>
           <p className={styles.mapHeadline}>
-            핵심 함수 {total}개 중 <strong>{explained}개</strong>를 설명했어요.
+            지금까지 핵심 함수 {total}개 중 <strong>{explained}개</strong>를 설명했어요.
           </p>
           <div className={styles.mapBar} aria-hidden="true">
             {bar

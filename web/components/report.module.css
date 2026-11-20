@@ -4,11 +4,26 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+
+  /*
+   * 리포트는 읽는 화면이라 글자를 반투명 판 위에 올립니다 (#197).
+   * 판(#1e212b 근처) 위에서 보조 글자 대비가 4.5:1을 넘도록 밝게 올리고, 선과 바탕은 판에 맞춰 반투명으로 둡니다.
+   */
+  --gi-muted: #b3b8c2;
+  --gi-surface: rgba(255, 255, 255, 0.06);
+  --gi-line: rgba(255, 255, 255, 0.09);
+  --gi-line-strong: rgba(255, 255, 255, 0.16);
+  --report-panel: rgba(30, 33, 43, 0.74);
+  --report-card: rgba(255, 255, 255, 0.04);
 }
 
-/* 리포트는 읽는 화면이라 빛 곡선 배경(globals.css의 body::before)을 끄고 단색 바탕을 씁니다 (#132) */
+/* 빛 곡선 대신 흐린 빛 네 개를 깝니다. 글자 뒤는 판이 가려서 읽기를 방해하지 않습니다 (#132, #197) */
 :global(body):has(.page)::before {
-  display: none;
+  background:
+    radial-gradient(40% 45% at 0% 0%, rgba(240, 100, 24, 0.26), transparent 70%),
+    radial-gradient(35% 40% at 100% 25%, rgba(58, 91, 208, 0.22), transparent 70%),
+    radial-gradient(40% 40% at 40% 75%, rgba(31, 138, 119, 0.18), transparent 70%),
+    radial-gradient(35% 40% at 90% 100%, rgba(107, 69, 201, 0.2), transparent 70%);
 }
 
 /* ── 접는 세부 내용 (#132) ── */
@@ -27,8 +42,12 @@
 
 .fold {
   border: 1px solid var(--gi-line);
-  border-radius: var(--gi-radius);
-  background: var(--gi-surface);
+  border-radius: 18px;
+  background: var(--report-card);
+}
+
+.fold:hover {
+  border-color: rgba(240, 100, 24, 0.45);
 }
 
 .fold > summary {
@@ -125,21 +144,88 @@
   text-decoration: none;
 }
 
+/* 내용 전체를 담는 반투명 판 (#197) */
 .main {
-  width: 100%;
-  max-width: 920px;
-  margin: 0 auto;
-  padding: 16px 24px 96px;
+  width: calc(100% - 48px);
+  max-width: 1120px;
+  margin: 8px auto 72px;
+  padding: 32px;
   display: flex;
   flex-direction: column;
   gap: 40px;
+  border: 1px solid var(--gi-line);
+  border-radius: 28px;
+  background: var(--report-panel);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 30px 80px -40px rgba(0, 0, 0, 0.8);
+  /* 뒤 배경이 이미 흐린 빛이라 backdrop-filter는 쓰지 않습니다. 긴 판에 걸면 스크롤이 무거워집니다 (#198 리뷰) */
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.headText {
+  flex: 1 1 420px;
+  min-width: 0;
 }
 
 .head h1 {
   margin: 0 0 12px;
-  font-size: clamp(28px, 3vw, 38px);
-  line-height: 1.25;
-  letter-spacing: -0.03em;
+  font-size: clamp(28px, 3vw, 40px);
+  line-height: 1.2;
+  letter-spacing: -0.035em;
+}
+
+.repoChip {
+  display: inline-block;
+  margin: 0 0 12px;
+  padding: 5px 12px;
+  border-radius: var(--gi-radius-pill);
+  background: var(--gi-surface);
+  font-family: var(--gi-font-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0;
+}
+
+.stat {
+  min-width: 132px;
+  padding: 14px 18px;
+  border: 1px solid var(--gi-line);
+  border-radius: 18px;
+  background: var(--report-card);
+}
+
+.stat dt {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gi-muted);
+}
+
+.stat dd {
+  margin: 4px 0 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat dd span {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--gi-muted);
 }
 
 .section {
@@ -187,8 +273,8 @@
   gap: 16px;
   padding: 24px;
   border: 1px solid var(--gi-line);
-  border-radius: var(--gi-radius);
-  background: var(--gi-surface);
+  border-radius: 18px;
+  background: var(--report-card);
 }
 
 .problem p {
@@ -212,9 +298,21 @@
 .secondary {
   min-height: 44px;
   padding: 0 20px;
-  background: var(--gi-bg);
+  background: var(--gi-surface);
   color: var(--gi-ink);
   font-size: 15px;
+}
+
+/* 다시 보기 면접은 리포트에서 하는 다음 행동이라 강조색으로 둡니다 (#197) */
+.mapAgain .secondary {
+  border-color: transparent;
+  background: var(--gi-accent);
+  color: #140804;
+  font-weight: 700;
+}
+
+.mapAgain .secondary:hover {
+  background: #ff7a33;
 }
 
 .ghost {
@@ -239,7 +337,7 @@
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
   gap: 16px;
 }
 
@@ -259,10 +357,63 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 20px;
+  padding: 22px;
   border: 1px solid var(--gi-line);
-  border-radius: var(--gi-radius);
-  background: var(--gi-bg);
+  border-radius: 20px;
+  background: var(--report-card);
+}
+
+/* 역량 카드는 역량마다 옅은 색과 아이콘 색으로 구분합니다 (#197). 글자는 그대로 글자 색입니다 */
+.compCard {
+  --comp: 240, 100, 24;
+  --comp-ink: #ff9a5c;
+  background: rgba(var(--comp), 0.13);
+}
+
+.compCard[data-competency="design_judgment"] {
+  --comp: 80, 110, 230;
+  --comp-ink: #9fb2ff;
+}
+
+.compCard[data-competency="problem_solving"] {
+  --comp: 40, 170, 140;
+  --comp-ink: #6fd3b5;
+}
+
+.compCard[data-competency="scalability_operations"] {
+  --comp: 70, 160, 210;
+  --comp-ink: #8fd0f0;
+}
+
+.compCard[data-competency="communication"] {
+  --comp: 230, 180, 60;
+  --comp-ink: #f3c969;
+}
+
+.compCard[data-competency="role_decision"] {
+  --comp: 140, 100, 230;
+  --comp-ink: #c3a8ff;
+}
+
+.compCard h3 {
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+
+/* 제목이 DOM에서 앞이라, 아이콘과 수준 줄을 보이는 순서로만 위로 올립니다 */
+.compCard > .cardHead {
+  order: -1;
+}
+
+.compIcon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--gi-line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--comp-ink);
 }
 
 .card h3 {
@@ -306,7 +457,7 @@
 }
 
 .barOff {
-  background: var(--gi-line);
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .levelText {
@@ -712,8 +863,8 @@
   gap: 8px;
   padding: 20px;
   border: 1px solid var(--gi-line);
-  border-radius: var(--gi-radius);
-  background: var(--gi-bg);
+  border-radius: 18px;
+  background: var(--report-card);
 }
 
 .growthHead {
@@ -848,8 +999,11 @@
   }
 
   .main {
-    padding: 8px 16px 72px;
+    width: calc(100% - 24px);
+    margin-bottom: 48px;
+    padding: 22px 16px;
     gap: 32px;
+    border-radius: 22px;
   }
 }
 
