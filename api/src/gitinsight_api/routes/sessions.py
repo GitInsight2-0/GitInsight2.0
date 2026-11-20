@@ -31,6 +31,7 @@ from gitinsight_contracts.interview import (
     BrainReply,
     SessionCreate,
     SessionCreated,
+    SessionEnd,
     SessionEnded,
     TurnRequest,
 )
@@ -100,22 +101,31 @@ async def post_turn(
 
 @router.post("/{session_id}/end")
 async def end_session(
-    session_id: UUID, brain: BrainDep, user: UserDep, reports: ReportServiceDep
+    session_id: UUID,
+    brain: BrainDep,
+    user: UserDep,
+    reports: ReportServiceDep,
+    body: SessionEnd | None = None,
 ) -> SessionEnded:
-    """세션을 끝내고 리포트를 만듭니다. 여러 번 불러도 같은 report_id를 돌려줍니다."""
+    """세션을 끝내고 리포트를 만듭니다. 여러 번 불러도 같은 report_id를 돌려줍니다.
+
+    본문의 시선 요약(#177)은 리포트를 처음 만들 때만 담깁니다.
+    """
     await ensure_owner(brain, session_id, user, forbidden=SESSION_FORBIDDEN)
     began = time.perf_counter()
+    gaze = body.gaze if body is not None else None
     try:
-        report = await reports.end_session(session_id)
+        report = await reports.end_session(session_id, gaze=gaze)
     except SessionNotFoundError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "세션을 찾을 수 없습니다") from None
     except AnalysisNotFoundError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ANALYSIS_NOT_FOUND) from None
     logger.info(
-        "session end session=%s report=%s kind=%s ms=%.0f",
+        "session end session=%s report=%s kind=%s gaze=%s ms=%.0f",
         session_id,
         report.report_id,
         report.kind.value,
+        report.gaze is not None,
         (time.perf_counter() - began) * 1000,
     )
     return SessionEnded(report_id=report.report_id)
